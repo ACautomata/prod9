@@ -1,0 +1,22 @@
+[project]
+name = "prod9"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">= 3.8"
+dynamic = ["version"]
+dependencies = [
+    "torch",
+    "einops",
+    "monai"
+]
+
+[project.scripts]
+# spam-cli = "spam:main_cli"
+
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/prod9/__init__.py"
+
