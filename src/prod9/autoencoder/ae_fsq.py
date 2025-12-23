@@ -41,7 +41,7 @@ class FiniteScalarQuantizer(nn.Module):
         return quantized_normalized.permute(self.quantization_permutation)
 
     def quantize(self, encodings: torch.Tensor) -> torch.Tensor:
-        _, encodings = self(encodings)
+        encodings = self(encodings)
         encodings = encodings.permute(self.flatten_permutation)
         assert encodings.shape[-1] == len(self._levels_tensor)
         zhat = self._scale_and_shift(encodings)
@@ -112,17 +112,13 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
     @override
     def decode(self, z: torch.Tensor):
         return super().decode(z)
-
-    @override
-    def encode_stage_2_inputs(self, x: torch.Tensor):
-        return super().encode_stage_2_inputs(x)
-   
-    @override 
-    def decode_stage_2_outputs(self, z: torch.Tensor):
-        # z is indices, naming 'z' for compatibility reason
-        z = self.quantizer.embed(z)
-        return super().decode_stage_2_outputs(z) 
     
     def quantize_stage_2_inputs(self, x: torch.Tensor):
         z = self.encode_stage_2_inputs(x)
         return self.quantizer.quantize(z)
+    
+    def embed(self, indices):
+        return self.quantizer.embed(indices)
+
+    def quantize(self, embed):
+        return self.quantizer.quantize(embed) 
