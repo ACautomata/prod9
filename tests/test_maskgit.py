@@ -46,9 +46,9 @@ class TestMaskGiTSampler:
     def test_schedule_factory_log(self):
         """Test log scheduler function."""
         sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='log')
-        # At step 0, should be close to log(2) ≈ 0.693
+        # At step 0, log2(2) = 1.0
         result = sampler.f(0)
-        expected = math.log(2)
+        expected = 1.0
         assert abs(result - expected) < 1e-6
 
     def test_schedule_factory_linear(self):
@@ -93,10 +93,13 @@ class TestMaskGiTSampler:
 
     def test_schedule_truncation_error(self, sampler_log):
         """Test that schedule raises ValueError on truncation."""
+        # Create a sampler with very few steps that will cause truncation
+        sampler = MaskGiTSampler(steps=20, mask_value=-1.0, scheduler_type='log')
         small_seq_len = 8
-        # Use step that will cause truncation with log scheduler
+        # With log2 schedule and 20 steps, early steps would try to generate very few tokens
+        # Use step 15 where the remaining tokens is very small
         with pytest.raises(ValueError, match="Schedule truncation"):
-            sampler_log.schedule(0, small_seq_len)
+            sampler.schedule(15, small_seq_len)
 
     def test_step_mock_transformer_and_vae(self, sampler_log):
         """Test single step with mocked transformer and VAE."""
@@ -625,3 +628,99 @@ class TestNoGradDecorator:
 
         # Should work without requiring grad
         assert not indices.requires_grad
+
+
+class TestTokenGenerationConsistency:
+    """Test that token generation is consistent across all steps and schedules."""
+
+    def test_all_tokens_generated_log_schedule(self):
+        """Test that all tokens are generated with log scheduler."""
+        self._verify_all_tokens_generated('log')
+
+    def test_all_tokens_generated_linear_schedule(self):
+        """Test that all tokens are generated with linear scheduler."""
+        self._verify_all_tokens_generated('linear')
+
+    def test_all_tokens_generated_sqrt_schedule(self):
+        """Test that all tokens are generated with sqrt scheduler."""
+        self._verify_all_tokens_generated('sqrt')
+
+    def _verify_all_tokens_generated(self, scheduler_type):
+        """
+        Verify that for all steps, the sum of generated tokens equals initial seq_len.
+
+        This test tracks how many tokens are generated at each step and ensures
+        that by the end of sampling, all tokens have been generated exactly once.
+        """
+        steps = 10
+        batch_size = 1  # Use batch_size=1 to avoid batch inconsistency issues
+        seq_len = 100
+        embed_dim = 8
+        vocab_size = 32
+
+        sampler = MaskGiTSampler(
+            steps=steps,
+            mask_value=-1.0,
+            scheduler_type=scheduler_type
+        )
+
+        # Setup mocks
+        mock_transformer = Mock()
+        mock_vae = Mock()
+        mock_transformer.device = torch.device('cpu')
+        mock_vae.device = torch.device('cpu')
+
+        # Create deterministic logits with unique maximum per position
+        # This ensures predictable token selection
+        logits = torch.zeros(batch_size, seq_len, vocab_size)
+        for i in range(seq_len):
+            logits[:, i, i % vocab_size] = 10.0  # Make each position prefer different token
+        mock_transformer.return_value = logits
+
+        def mock_embed(tid):
+            B, K = tid.shape
+            return torch.randn(B, K, embed_dim)
+
+        mock_vae.embed = mock_embed
+
+        # Initialize state
+        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+
+        # Track tokens generated at each step
+        initial_seq_len = last_indices.shape[0] * last_indices.shape[1]
+        tokens_generated_per_step = []
+
+        # Run through all steps
+        for step in range(steps):
+            prev_indices_count = last_indices.numel()
+
+            if prev_indices_count == 0:
+                # No more indices to generate
+                tokens_generated_per_step.append(0)
+                break
+
+            x, last_indices = sampler.step(
+                step, mock_transformer, mock_vae, x, None, last_indices
+            )
+
+            current_indices_count = last_indices.numel()
+            tokens_generated = prev_indices_count - current_indices_count
+            tokens_generated_per_step.append(tokens_generated)
+
+        # Verify total tokens generated equals initial sequence length
+        total_generated = sum(tokens_generated_per_step)
+        assert total_generated == initial_seq_len, \
+            f"{scheduler_type} schedule: Total tokens generated ({total_generated}) " \
+            f"!= initial seq_len ({initial_seq_len}). " \
+            f"Tokens per step: {tokens_generated_per_step}"
+
+        # Verify all steps generated non-negative tokens
+        assert all(count >= 0 for count in tokens_generated_per_step), \
+            f"{scheduler_type} schedule: Found negative token count in {tokens_generated_per_step}"
+
+        # Verify that last_indices is empty at the end (all tokens generated)
+        if step == steps - 1:  # Only check if we completed all steps
+            assert last_indices.numel() == 0, \
+                f"{scheduler_type} schedule: Not all tokens were generated. " \
+                f"Remaining indices: {last_indices.numel()}"

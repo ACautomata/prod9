@@ -79,7 +79,7 @@ class MaskGiTSampler:
     def schedule_fatctory(self, schedule_type):
         match schedule_type:
             case "log":
-                return lambda x: math.log(2 - x)
+                return lambda x: math.log2(2 - x)
             case "linear":
                 return lambda x: 1 - x
             case "sqrt":
