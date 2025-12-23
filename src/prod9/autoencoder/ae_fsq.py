@@ -1,14 +1,8 @@
-from typing import override
+from typing import override, Tuple, List, Sequence
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 from monai.apps.generation.maisi.networks.autoencoderkl_maisi import AutoencoderKlMaisi
-from typing import Tuple
-
-from typing import List, Sequence
-
-import torch
-import torch.nn as nn
 
 
 class FiniteScalarQuantizer(nn.Module):
@@ -114,7 +108,8 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         return super().decode(z)
     
     def quantize_stage_2_inputs(self, x: torch.Tensor):
-        z = self.encode_stage_2_inputs(x)
+        """Encode and quantize input for Stage 2 transformer training."""
+        z, _ = self.encode(x)  # Returns (z_mu, z_sigma)
         return self.quantizer.quantize(z)
     
     def embed(self, indices):

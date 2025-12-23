@@ -7,7 +7,12 @@ dynamic = ["version"]
 dependencies = [
     "torch",
     "einops",
-    "monai"
+    "monai[all]",
+    "pytorch-lightning>=2.0",
+    "torchmetrics",
+    "numpy",
+    "pyyaml",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
@@ -17,7 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-# spam-cli = "spam:main_cli"
+prod9-train = "prod9.training.cli:main"
 
 [build-system]
 requires = ["hatchling >= 1.26"]

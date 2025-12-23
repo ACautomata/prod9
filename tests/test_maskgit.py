@@ -224,9 +224,9 @@ class TestMaskGiTSampler:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        # Mock decode output
+        # Mock decode output (returns decoded image)
         mock_output = torch.randn(1, 4, 8, 8, 1)
-        mock_vae.decode_stage_2_outputs.return_value = mock_output
+        mock_vae.decode.return_value = mock_output
 
         # Mock transformer
         mock_transformer.return_value = torch.randn(1, 64, 32)
@@ -260,7 +260,7 @@ class TestMaskGiTSampler:
             return torch.randn(B, K, 4)
 
         mock_vae.embed = mock_embed
-        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
 
@@ -292,7 +292,7 @@ class TestMaskGiTSampler:
             return torch.randn(B, K, 4)
 
         mock_vae.embed = mock_embed
-        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         cond = torch.randn(1, 1, 16)
@@ -459,7 +459,7 @@ class TestEdgeCases:
 
         mock_transformer.return_value = torch.randn(1, 64, 32)
         mock_vae.embed.return_value = torch.randn(1, 64, 4)
-        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         result = sampler.sample(mock_transformer, mock_vae, shape)
@@ -555,7 +555,7 @@ class TestEdgeCases:
                 return torch.randn(B, K, 4)
 
             mock_vae.embed = mock_embed
-            mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+            mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
             shape = (1, 4, 8, 8, 1)
             result = sampler.sample(mock_transformer, mock_vae, shape)
@@ -611,7 +611,7 @@ class TestNoGradDecorator:
             return torch.randn(B, K, 4)
 
         mock_vae.embed = mock_embed
-        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         result = sampler.sample(mock_transformer, mock_vae, shape)

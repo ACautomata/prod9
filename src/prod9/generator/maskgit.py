@@ -53,7 +53,7 @@ class MaskGiTSampler:
         last_indices = torch.stack(new_last_indices)
         return x, last_indices
     
-    @torch.no_grad() 
+    @torch.no_grad()
     def sample(self, transformer, vae, shape, cond=None):
         bs, c, h, w, d = shape
         if transformer.device != vae.device:
@@ -62,8 +62,8 @@ class MaskGiTSampler:
         last_indices = torch.arange(end=h * w * d, device=transformer.device)[None, :].repeat(bs, 1)
         for step in range(self.steps):
             z, last_indices = self.step(step, transformer, vae, z, cond, last_indices)
-        z = rearrange(z, 'bs (h w d) c -> bs c h w d', h=h, w=w, d=d) 
-        return vae.decode_stage_2_outputs(z)
+        z = rearrange(z, 'bs (h w d) c -> bs c h w d', h=h, w=w, d=d)
+        return vae.decode(z)
         
     @torch.no_grad()
     def schedule(self, step, seq_len):
