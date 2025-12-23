@@ -61,11 +61,13 @@ class VAEGANLoss(nn.Module):
             self.perceptual_loss = PerceptualLoss(
                 spatial_dims=spatial_dims,
                 network_type="medicalnet_resnet10_23datasets",
+                is_fake_3d=False,  # MedicalNet requires real 3D
             )
         else:
             self.perceptual_loss = PerceptualLoss(
                 spatial_dims=spatial_dims,
                 network_type=perceptual_network,
+                is_fake_3d=False,  # Assume real 3D for medical images
             )
 
         # Adversarial loss using MONAI's PatchAdversarialLoss

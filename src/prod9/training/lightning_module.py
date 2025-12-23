@@ -20,7 +20,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.training.losses import VAEGANLoss
 from prod9.training.metrics import CombinedMetric
-from prod9.training.networks import MultiScaleDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
 class AutoencoderLightning(pl.LightningModule):
@@ -55,7 +55,7 @@ class AutoencoderLightning(pl.LightningModule):
     def __init__(
         self,
         autoencoder: AutoencoderFSQ,
-        discriminator: MultiScaleDiscriminator,
+        discriminator: MultiScalePatchDiscriminator,
         lr_g: float = 1e-4,
         lr_d: float = 4e-4,
         b1: float = 0.5,
@@ -150,9 +150,9 @@ class AutoencoderLightning(pl.LightningModule):
             z_embedded = self.autoencoder.embed(z_quantized)
             fake_images = self.autoencoder.decode(z_embedded)
 
-        # Discriminator outputs
-        real_outputs = self.discriminator(real_images)
-        fake_outputs = self.discriminator(fake_images.detach())
+        # Discriminator outputs (MONAI returns (outputs, features) tuple)
+        real_outputs, _ = self.discriminator(real_images)
+        fake_outputs, _ = self.discriminator(fake_images.detach())
 
         # Compute discriminator loss using VAEGANLoss
         disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
@@ -174,8 +174,8 @@ class AutoencoderLightning(pl.LightningModule):
         z_embedded = self.autoencoder.embed(z_quantized)
         fake_images = self.autoencoder.decode(z_embedded)
 
-        # Discriminator outputs (no detach for generator)
-        fake_outputs = self.discriminator(fake_images)
+        # Discriminator outputs (no detach for generator, MONAI returns (outputs, features) tuple)
+        fake_outputs, _ = self.discriminator(fake_images)
 
         # Compute VAEGAN loss
         losses = self.vaegan_loss(
@@ -376,14 +376,19 @@ class AutoencoderLightningConfig:
     @staticmethod
     def _create_discriminator(
         config: Dict[str, Any]
-    ) -> MultiScaleDiscriminator:
-        """Create MultiScaleDiscriminator from config."""
-        return MultiScaleDiscriminator(
+    ) -> MultiScalePatchDiscriminator:
+        """Create MultiScalePatchDiscriminator from config."""
+        return MultiScalePatchDiscriminator(
             in_channels=config.get("in_channels", 1),
             num_d=config.get("num_d", 3),
-            ndf=config.get("ndf", 64),
-            n_layers=config.get("n_layers", 3),
+            channels=config.get("ndf", 64),  # ndf → channels
+            num_layers_d=config.get("n_layers", 3),  # n_layers → num_layers_d
             spatial_dims=config["spatial_dims"],
+            out_channels=1,  # MONAI必需参数
+            kernel_size=4,  # 默认值
+            activation=("LEAKYRELU", {"negative_slope": 0.2}),  # 默认值
+            norm="BATCH",  # 默认值
+            minimum_size_im=64,  # 适合医学图像
         )
 
 
