@@ -23,9 +23,9 @@ class MaskGiTSampler:
     def step(self, step, transformer, vae, x, cond, last_indices):
         bs, s, d = x.shape
         
-        logits = transformer(x, cond)          # [B,S,V]
-        conf = logits.softmax(-1).amax(-1)     # [B,S]
-        token_id = logits.argmax(-1)           # [B,S] 预测 token id
+        logits = transformer(x, cond) - transformer(x, None)   # [B,S,V]
+        conf = logits.softmax(-1).amax(-1)                     # [B,S]
+        token_id = logits.argmax(-1)                           # [B,S] 预测 token id
 
         # mask 出候选位置：last_mask [B,S]
         last_mask = torch.zeros_like(conf, dtype=torch.bool)

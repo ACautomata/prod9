@@ -51,6 +51,8 @@ class TransformerDecoder(nn.Module):
         
     def forward(self, x, cond, attn_mask=None):
         h = self.input_patch_proj(x)
+        if cond is None:
+            cond = torch.zeros_like(x)
         cond = self.cond_patch_proj(cond)
         bs, c, _, w, d = h.shape
         
