@@ -116,4 +116,16 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         return self.quantizer.embed(indices)
 
     def quantize(self, embed):
-        return self.quantizer.quantize(embed) 
+        return self.quantizer.quantize(embed)
+
+    def get_last_layer(self) -> torch.Tensor:
+        """
+        Get the last layer weight of the decoder for adaptive weight calculation.
+
+        This is used by VAEGANLoss to compute gradient-norm-based adaptive weights
+        as described in the VQGAN paper (Esser et al., 2021).
+
+        Returns:
+            The weight tensor of the decoder's final convolution layer.
+        """
+        return self.decoder.blocks[-1].conv.conv.weight 

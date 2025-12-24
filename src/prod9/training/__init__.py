@@ -63,24 +63,10 @@ __all__ = [
 ]
 
 # CLI imports (optional, may not be available in all contexts)
+# CLI functions are now in prod9.training.cli.autoencoder and prod9.training.cli.transformer
+# The main entry points are autoencoder_main and transformer_main
 try:
-    from prod9.training.cli import (
-        train_autoencoder,
-        train_transformer,
-        validate,
-        test,
-        infer,
-        generate,
-        main,
-    )
-    __all__.extend([
-        "train_autoencoder",
-        "train_transformer",
-        "validate",
-        "test",
-        "infer",
-        "generate",
-        "main",
-    ])
+    from prod9.training.cli import autoencoder_main, transformer_main
+    __all__.extend(["autoencoder_main", "transformer_main"])
 except ImportError:
     pass

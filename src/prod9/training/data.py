@@ -20,7 +20,10 @@ from monai.transforms.spatial.dictionary import Spacingd, Orientationd, RandFlip
 from monai.transforms.intensity.dictionary import ScaleIntensityRanged, RandShiftIntensityd
 from monai.transforms.croppad.dictionary import CropForegroundd, RandCropByPosNegLabeld
 from monai.transforms.utility.dictionary import EnsureTyped
-from monai.data import CacheDataset
+# Use correct import path for CacheDataset (MONAI v1.2+)
+from monai.data.dataset import CacheDataset
+
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
 # Modality names for BraTS dataset
@@ -421,6 +424,10 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         train_val_split: float = 0.8,
         modalities: Optional[List[str]] = None,
         cache_dir: Optional[str] = None,
+        # Sliding window config for pre-encoding
+        sw_roi_size: Tuple[int, int, int] = (64, 64, 64),
+        sw_overlap: float = 0.5,
+        sw_batch_size: int = 1,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -434,12 +441,28 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.modalities = modalities or MODALITY_KEYS
         self.cache_dir = cache_dir or os.path.join(data_dir, "encoded_cache")
 
+        # Sliding window config for pre-encoding
+        self.sw_roi_size = sw_roi_size
+        self.sw_overlap = sw_overlap
+        self.sw_batch_size = sw_batch_size
+
         self.train_dataset: Optional[_PreEncodedDataset] = None
         self.val_dataset: Optional[_PreEncodedDataset] = None
 
     def set_autoencoder(self, autoencoder: object) -> None:
-        """Set the autoencoder for pre-encoding."""
-        self._autoencoder = autoencoder
+        """
+        Set the autoencoder for pre-encoding and wrap with sliding window.
+
+        The wrapper ensures memory-safe encoding of large 3D volumes.
+        """
+        # Wrap with SW config (device is auto-detected by wrapper)
+        sw_config = SlidingWindowConfig(
+            roi_size=self.sw_roi_size,
+            overlap=self.sw_overlap,
+            sw_batch_size=self.sw_batch_size,
+        )
+        wrapper = AutoencoderInferenceWrapper(autoencoder, sw_config)  # type: ignore[arg-type]
+        self._autoencoder = wrapper
 
     def setup(self, stage: Optional[str] = None) -> None:
         """Setup pre-encoded datasets."""
@@ -510,7 +533,9 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                         # image: [1, 1, H, W, D]
 
                         # Encode to latent
-                        latent = self._autoencoder.encode(image)  # type: ignore
+                        latent_tuple = self._autoencoder.encode(image)  # type: ignore
+                        # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar
+                        latent = latent_tuple[0] if isinstance(latent_tuple, tuple) else latent_tuple
                         # latent: [1, C, H', W', D']
 
                         # Get token indices

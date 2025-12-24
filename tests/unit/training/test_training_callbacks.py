@@ -111,7 +111,7 @@ class TestAutoencoderCheckpoint:
         assert os.path.exists(checkpoint_path)
 
         # Verify checkpoint contents
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
         assert "state_dict" in checkpoint
         assert checkpoint["score"] == 7.0
         assert checkpoint["epoch"] == 1
@@ -170,7 +170,7 @@ class TestAutoencoderCheckpoint:
         import os
         checkpoint_path = os.path.join(temp_checkpoint_dir, "best_autoencoder.pth")
         assert os.path.exists(checkpoint_path)
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
         assert checkpoint["score"] == 3.0
 
     def test_checkpoint_no_autoencoder_attribute(
@@ -401,7 +401,7 @@ class TestAutoencoderCheckpointIntegration:
             assert os.path.exists(checkpoint_path)
 
             # Load checkpoint
-            loaded = torch.load(checkpoint_path)
+            loaded = torch.load(checkpoint_path, weights_only=False)
             assert loaded["score"] == 42.0
             assert loaded["epoch"] == 5
             assert loaded["global_step"] == 1000

@@ -7,28 +7,37 @@ Tests for BraTS data loading, cross-modality sampling, and data transforms.
 import os
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from unittest.mock import Mock, MagicMock, patch
 
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
 
-try:
-    from prod9.training.data import (
-        BraTSDataModule,
-        CrossModalitySampler,
-        BraTSDataset,
-        Stage1Transforms,
-        Stage2Transforms,
+if TYPE_CHECKING:
+    from prod9.training.data import (  # type: ignore[attr-defined]
+        BraTSDataModule,  # type: ignore[attr-defined]
+        CrossModalitySampler,  # type: ignore[attr-defined]
+        BraTSDataset,  # type: ignore[attr-defined]
+        Stage1Transforms,  # type: ignore[attr-defined]
+        Stage2Transforms,  # type: ignore[attr-defined]
     )
-except ImportError:
-    # Data module not implemented yet - skip tests
-    BraTSDataModule = None
-    CrossModalitySampler = None
-    BraTSDataset = None
-    Stage1Transforms = None
-    Stage2Transforms = None
+else:
+    try:
+        from prod9.training.data import (
+            BraTSDataModule,
+            CrossModalitySampler,
+            BraTSDataset,
+            Stage1Transforms,
+            Stage2Transforms,
+        )
+    except ImportError:
+        # Data module not implemented yet - skip tests
+        BraTSDataModule = None  # type: ignore[assignment]
+        CrossModalitySampler = None  # type: ignore[assignment]
+        BraTSDataset = None  # type: ignore[assignment]
+        Stage1Transforms = None  # type: ignore[assignment]
+        Stage2Transforms = None  # type: ignore[assignment]
 
 
 class TestBraTSDataModule(unittest.TestCase):

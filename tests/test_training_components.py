@@ -118,11 +118,11 @@ class TestVAEGANLoss:
                 "commitment_weight": 1.0,
             }
 
-            loss_fn = VAEGANLoss(**custom_weights)
+            loss_fn = VAEGANLoss(**custom_weights)  # type: ignore[call-arg]
 
             assert loss_fn.recon_weight == 2.0
             assert loss_fn.perceptual_weight == 0.1
-            assert loss_fn.adv_weight == 0.05
+            assert loss_fn.disc_factor == 0.05  # adv_weight is stored as disc_factor
             assert loss_fn.commitment_weight == 1.0
 
     def test_vaegan_loss_commitment_computation(self, loss_fn):
@@ -296,13 +296,9 @@ class TestLPIPSMetric:
 
     @pytest.fixture
     def lpips_metric(self):
-        """Create an LPIPSMetric instance with mocked perceptual loss."""
-        # Patch at the import location in metrics.py
-        with patch('monai.losses.PerceptualLoss') as mock_perc_loss:
-            mock_instance = Mock()
-            mock_instance.return_value = torch.tensor(0.3)
-            mock_perc_loss.return_value = mock_instance
-            yield LPIPSMetric(spatial_dims=3)
+        """Create an LPIPSMetric instance."""
+        # User manually downloaded LPIPS weights, use real PerceptualLoss
+        yield LPIPSMetric(spatial_dims=3)
 
     def test_lpips_forward(self, lpips_metric):
         """Test basic forward pass."""
@@ -321,7 +317,7 @@ class TestLPIPSMetric:
 
         lpips = lpips_metric(pred, target)
 
-        # Since we're mocking the perceptual loss, we just check it's a valid tensor
+        # LPIPS should be near 0 for identical images
         assert isinstance(lpips, torch.Tensor)
         assert lpips >= 0, "LPIPS should be non-negative"
 
@@ -341,17 +337,13 @@ class TestCombinedMetric:
 
     @pytest.fixture
     def combined_metric(self):
-        """Create a CombinedMetric instance with mocked LPIPS."""
-        # Patch at the import location in metrics.py
-        with patch('monai.losses.PerceptualLoss') as mock_perc_loss:
-            mock_instance = Mock()
-            mock_instance.return_value = torch.tensor(0.2)
-            mock_perc_loss.return_value = mock_instance
-            yield CombinedMetric(
-                psnr_weight=1.0,
-                ssim_weight=1.0,
-                lpips_weight=1.0,
-            )
+        """Create a CombinedMetric instance."""
+        # User manually downloaded LPIPS weights, use real PerceptualLoss
+        yield CombinedMetric(
+            psnr_weight=1.0,
+            ssim_weight=1.0,
+            lpips_weight=1.0,
+        )
 
     def test_combined_metric_forward(self, combined_metric):
         """Test basic forward pass."""
@@ -387,31 +379,26 @@ class TestCombinedMetric:
 
     def test_combined_metric_custom_weights(self):
         """Test CombinedMetric with custom weights."""
-        # Patch at the import location in metrics.py
-        with patch('monai.losses.PerceptualLoss') as mock_perc_loss:
-            mock_instance = Mock()
-            mock_instance.return_value = torch.tensor(0.2)
-            mock_perc_loss.return_value = mock_instance
+        # User manually downloaded LPIPS weights, use real PerceptualLoss
+        custom_metric = CombinedMetric(
+            psnr_weight=2.0,
+            ssim_weight=0.5,
+            lpips_weight=0.1,
+        )
 
-            custom_metric = CombinedMetric(
-                psnr_weight=2.0,
-                ssim_weight=0.5,
-                lpips_weight=0.1,
-            )
+        pred = torch.randn(2, 1, 32, 32, 32)
+        target = torch.randn(2, 1, 32, 32, 32)
 
-            pred = torch.randn(2, 1, 32, 32, 32)
-            target = torch.randn(2, 1, 32, 32, 32)
+        metrics = custom_metric(pred, target)
 
-            metrics = custom_metric(pred, target)
+        # Combined score should be: 2.0*PSNR + 0.5*SSIM - 0.1*LPIPS
+        expected_combined = (
+            2.0 * metrics["psnr"]
+            + 0.5 * metrics["ssim"]
+            - 0.1 * metrics["lpips"]
+        )
 
-            # Combined score should be: 2.0*PSNR + 0.5*SSIM - 0.1*LPIPS
-            expected_combined = (
-                2.0 * metrics["psnr"]
-                + 0.5 * metrics["ssim"]
-                - 0.1 * metrics["lpips"]
-            )
-
-            assert torch.isclose(metrics["combined"], expected_combined, atol=1e-5)
+        assert torch.isclose(metrics["combined"], expected_combined, atol=1e-5)
 
     def test_combined_metric_perfect_match(self, combined_metric):
         """Test combined metric for identical images."""
@@ -567,11 +554,14 @@ class TestDataModuleStage2:
     def test_stage2_set_autoencoder(self, temp_data_dir, mock_autoencoder):
         """Test setting the autoencoder."""
         from prod9.training.data import BraTSDataModuleStage2
+        from prod9.autoencoder.inference import AutoencoderInferenceWrapper
 
         dm = BraTSDataModuleStage2(data_dir=temp_data_dir)
         dm.set_autoencoder(mock_autoencoder)
 
-        assert dm._autoencoder is mock_autoencoder
+        # Autoencoder is wrapped in AutoencoderInferenceWrapper
+        assert isinstance(dm._autoencoder, AutoencoderInferenceWrapper)
+        assert dm._autoencoder.autoencoder is mock_autoencoder
 
     def test_stage2_setup_without_autoencoder(self, temp_data_dir):
         """Test that setup raises error when autoencoder is not set."""
@@ -655,9 +645,9 @@ class TestPreEncodedDataset:
         assert "source_modality_idx" in item
 
         # Check shapes
-        assert item["source_latent"].shape == (4, 8, 8, 8)
-        assert item["target_latent"].shape == (4, 8, 8, 8)
-        assert item["target_indices"].shape == (512,)
+        assert item["source_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
+        assert item["target_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
+        assert item["target_indices"].shape == (512,)  # type: ignore[has-attribute]
 
         # Check modality indices are in valid range
         assert 0 <= item["target_modality_idx"] <= 3

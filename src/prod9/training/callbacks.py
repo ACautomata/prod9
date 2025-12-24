@@ -7,7 +7,7 @@ This module provides callbacks for:
 """
 
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING, cast
 
 import torch
 import pytorch_lightning as pl
@@ -16,6 +16,9 @@ from pytorch_lightning.callbacks import Callback
 from prod9.generator.maskgit import MaskGiTSampler
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.generator.transformer import TransformerDecoder
+
+if TYPE_CHECKING:
+    from unittest.mock import Mock
 
 
 class AutoencoderCheckpoint(Callback):
@@ -107,10 +110,20 @@ class AutoencoderCheckpoint(Callback):
         checkpoint_path = os.path.join(self.save_dir, self.filename)
 
         # Save only autoencoder state_dict (smaller, for Stage 2)
-        autoencoder = pl_module.autoencoder  # type: AutoencoderFSQ
+        autoencoder = pl_module.autoencoder
+        # Runtime duck typing check for testing (allows mock objects)
+        # For type checking, we cast to the expected type
+        state_dict_method = getattr(autoencoder, "state_dict", None)  # type: ignore[attr-defined]
+        if not callable(state_dict_method):
+            pl_module.print(f"Warning: autoencoder has no 'state_dict' method, skipping checkpoint save")
+            return
+
+        # Type narrowing via cast for pyright
+        ae = cast(AutoencoderFSQ, autoencoder)
+
         torch.save(
             {
-                "state_dict": autoencoder.state_dict(),
+                "state_dict": ae.state_dict(),
                 "score": score,
                 "epoch": trainer.current_epoch,
                 "global_step": trainer.global_step,
@@ -211,15 +224,29 @@ class GenerateSampleCallback(Callback):
             pl_module: Lightning module
             batch: Validation batch dictionary
         """
-        transformer = pl_module.transformer  # type: TransformerDecoder
-        autoencoder = pl_module.autoencoder  # type: AutoencoderFSQ
+        transformer = pl_module.transformer
+        # Runtime duck typing check for testing (allows mock objects)
+        if not hasattr(transformer, "parameters") or not callable(getattr(transformer, "parameters", None)):
+            pl_module.print("Warning: transformer has no 'parameters' method")
+            return
+
+        autoencoder = pl_module.autoencoder
+        # Runtime duck typing check for testing (allows mock objects)
+        encode_method = getattr(autoencoder, "encode", None)  # type: ignore[attr-defined]
+        if not callable(encode_method):
+            pl_module.print("Warning: autoencoder has no 'encode' method")
+            return
+
+        # Type narrowing via cast for pyright
+        trans = cast(TransformerDecoder, transformer)
+        ae = cast(AutoencoderFSQ, autoencoder)
 
         # Determine device
-        device = next(transformer.parameters()).device
+        device = next(trans.parameters()).device
 
         # Ensure autoencoder is on same device
-        if next(autoencoder.parameters()).device != device:
-            autoencoder = autoencoder.to(device)
+        if next(ae.parameters()).device != device:
+            ae = ae.to(device)
 
         # Initialize sampler if needed
         if self._sampler is None:
@@ -246,7 +273,7 @@ class GenerateSampleCallback(Callback):
 
         # Encode condition to latent
         with torch.no_grad():
-            z_cond, _ = autoencoder.encode(condition_images)
+            z_cond, _ = ae.encode(condition_images)
 
         # Get shape for generation
         bs = min(self.num_samples, condition_images.shape[0])
@@ -255,8 +282,8 @@ class GenerateSampleCallback(Callback):
         # Generate samples using MaskGiTSampler
         with torch.no_grad():
             generated_latent = self._sampler.sample(
-                transformer=transformer,
-                vae=autoencoder,
+                transformer=trans,
+                vae=ae,
                 shape=(bs, c, h, w, d),
                 cond=z_cond[:bs],
             )
@@ -285,7 +312,13 @@ class GenerateSampleCallback(Callback):
             generated: Generated images [B, 1, H, W, D]
             modality: Modality name for logging
         """
-        if trainer.logger.experiment is None:
+        # Check if logger and experiment are available
+        if trainer.logger is None:
+            return
+
+        # Get experiment safely
+        experiment = getattr(trainer.logger, 'experiment', None)
+        if experiment is None:
             return
 
         # Log middle slice for each sample
@@ -295,16 +328,18 @@ class GenerateSampleCallback(Callback):
 
             # Condition image
             condition_slice = condition[i, 0, :, :, mid_slice]  # [H, W]
-            trainer.logger.experiment.add_image(
-                f"samples/{modality}_condition_{i}",
-                condition_slice.unsqueeze(0),  # Add channel dim
-                global_step=trainer.global_step,
-            )
+            if experiment and hasattr(experiment, 'add_image'):
+                experiment.add_image(
+                    f"samples/{modality}_condition_{i}",
+                    condition_slice.unsqueeze(0),  # Add channel dim
+                    global_step=trainer.global_step,
+                )
 
             # Generated image
             generated_slice = generated[i, 0, :, :, mid_slice]  # [H, W]
-            trainer.logger.experiment.add_image(
-                f"samples/{modality}_generated_{i}",
-                generated_slice.unsqueeze(0),  # Add channel dim
-                global_step=trainer.global_step,
-            )
+            if experiment and hasattr(experiment, 'add_image'):
+                experiment.add_image(
+                    f"samples/{modality}_generated_{i}",
+                    generated_slice.unsqueeze(0),  # Add channel dim
+                    global_step=trainer.global_step,
+                )

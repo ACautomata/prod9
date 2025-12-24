@@ -6,13 +6,16 @@ Tests environment variable replacement and config loading functionality.
 import os
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-try:
+if TYPE_CHECKING:
     from prod9.training.config import load_config
-except ImportError:
-    # Config module not implemented yet - skip tests
-    load_config = None
+else:
+    try:
+        from prod9.training.config import load_config
+    except ImportError:
+        # Config module not implemented yet - skip tests
+        load_config = None  # type: ignore[assignment]
 
 
 class TestTrainingConfig(unittest.TestCase):

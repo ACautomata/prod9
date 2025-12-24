@@ -11,7 +11,7 @@ This module implements metrics for evaluating generated/reconstructed images:
 import torch
 import torch.nn as nn
 from typing import Dict
-from monai.metrics import SSIMMetric as MonaiSSIMMetric
+from monai.metrics.regression import SSIMMetric as MonaiSSIMMetric
 
 
 class PSNRMetric(nn.Module):
@@ -98,10 +98,12 @@ class SSIMMetric(nn.Module):
             SSIM value (tensor in range [-1, 1], typically [0, 1])
         """
         # MONAI's SSIMMetric expects shape [B, C, H, W, D]
-        # and returns average over batch, but might have shape [B, 1]
-        ssim_value = self.ssim(pred, target)
-        # Take mean over batch to get scalar
-        return ssim_value.mean()
+        # and returns a sequence of tensors or tensor
+        ssim_result = self.ssim(pred, target)
+        # Convert to tensor and take mean to get scalar
+        if isinstance(ssim_result, (list, tuple)):
+            return torch.stack([torch.as_tensor(x) for x in ssim_result]).mean()
+        return torch.as_tensor(ssim_result).mean()
 
 
 class LPIPSMetric(nn.Module):
@@ -125,11 +127,12 @@ class LPIPSMetric(nn.Module):
         network_type: str = "medicalnet_resnet10_23datasets",
     ):
         super().__init__()
-        from monai.losses import PerceptualLoss
+        from monai.losses.perceptual import PerceptualLoss
 
         self.lpips_network = PerceptualLoss(
             spatial_dims=spatial_dims,
             network_type=network_type,
+            is_fake_3d=False,
         )
 
     def forward(
@@ -168,6 +171,7 @@ class CombinedMetric(nn.Module):
         psnr_weight: Weight for PSNR (default: 1.0)
         ssim_weight: Weight for SSIM (default: 1.0)
         lpips_weight: Weight for LPIPS (default: 1.0, subtracted)
+        device: Device to place metrics on (default: CPU)
     """
 
     def __init__(
@@ -175,11 +179,12 @@ class CombinedMetric(nn.Module):
         psnr_weight: float = 1.0,
         ssim_weight: float = 1.0,
         lpips_weight: float = 1.0,
+        device: torch.device = torch.device('cpu'),
     ):
         super().__init__()
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric()
+        self.lpips = LPIPSMetric().to(device)
 
         self.psnr_weight = psnr_weight
         self.ssim_weight = ssim_weight

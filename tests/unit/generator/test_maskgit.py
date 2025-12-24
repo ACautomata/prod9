@@ -690,6 +690,7 @@ class TestTokenGenerationConsistency:
         # Track tokens generated at each step
         initial_seq_len = last_indices.shape[0] * last_indices.shape[1]
         tokens_generated_per_step = []
+        step = 0  # Initialize to avoid "possibly unbound" error
 
         # Run through all steps
         for step in range(steps):

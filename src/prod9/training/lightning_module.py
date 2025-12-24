@@ -18,6 +18,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.losses import VAEGANLoss
 from prod9.training.metrics import CombinedMetric
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
@@ -33,8 +34,11 @@ class AutoencoderLightning(pl.LightningModule):
         3. Compute all losses (recon, perceptual, adversarial, commitment)
         4. Update generator and discriminator alternately
 
+    The adversarial loss weight is computed adaptively based on gradient norms,
+    following the VQGAN paper implementation.
+
     Validation:
-        - Uses SlidingWindowInferer for full-volume inference
+        - Uses batch processing for all modalities
         - Computes PSNR, SSIM, LPIPS metrics
         - Saves best checkpoint based on combined metric
 
@@ -47,9 +51,10 @@ class AutoencoderLightning(pl.LightningModule):
         b2: Adam beta2 (default: 0.999)
         recon_weight: Weight for reconstruction loss (default: 1.0)
         perceptual_weight: Weight for perceptual loss (default: 0.5)
-        adv_weight: Weight for adversarial loss (default: 0.1)
+        adv_weight: Base weight for adversarial loss (default: 0.1)
         commitment_weight: Weight for commitment loss (default: 0.25)
         sample_every_n_steps: Log samples every N steps (default: 100)
+        discriminator_iter_start: Step to start discriminator training (default: 0)
     """
 
     def __init__(
@@ -65,13 +70,26 @@ class AutoencoderLightning(pl.LightningModule):
         adv_weight: float = 0.1,
         commitment_weight: float = 0.25,
         sample_every_n_steps: int = 100,
+        discriminator_iter_start: int = 0,  # Warmup: start disc training after N steps
+        # Sliding window inference config (for validation only)
+        use_sliding_window: bool = False,
+        sw_roi_size: tuple[int, int, int] = (64, 64, 64),
+        sw_overlap: float = 0.5,
+        sw_batch_size: int = 1,
     ):
         super().__init__()
+
+        # Enable manual optimization for GAN training
+        self.automatic_optimization = False
 
         self.save_hyperparameters(ignore=["autoencoder", "discriminator"])
 
         self.autoencoder = autoencoder
         self.discriminator = discriminator
+
+        # Store reference to last layer for adaptive weight calculation
+        # The decoder's final convolution layer (used for gradient norm computation)
+        self.last_layer: torch.Tensor = self.autoencoder.get_last_layer()
 
         # Loss functions
         self.vaegan_loss = VAEGANLoss(
@@ -80,10 +98,18 @@ class AutoencoderLightning(pl.LightningModule):
             adv_weight=adv_weight,
             commitment_weight=commitment_weight,
             spatial_dims=3,
+            discriminator_iter_start=discriminator_iter_start,
         )
 
         # Metrics for validation
         self.metrics = CombinedMetric()
+
+        # Sliding window config (for validation only - training uses direct calls)
+        self.use_sliding_window = use_sliding_window
+        self.sw_roi_size = sw_roi_size
+        self.sw_overlap = sw_overlap
+        self.sw_batch_size = sw_batch_size
+        self._inference_wrapper: Optional[AutoencoderInferenceWrapper] = None
 
         # Logging config
         self.sample_every_n_steps = sample_every_n_steps
@@ -104,6 +130,28 @@ class AutoencoderLightning(pl.LightningModule):
         reconstructed = self.autoencoder.decode(z_embedded)
         return reconstructed
 
+    def _get_inference_wrapper(self) -> Optional[AutoencoderInferenceWrapper]:
+        """
+        Lazy-create inference wrapper only when needed (validation/inference).
+
+        Training uses direct autoencoder calls for efficiency (data loader crops to ROI).
+        Returns None if sliding window is disabled.
+        """
+        if not self.use_sliding_window:
+            return None
+
+        if self._inference_wrapper is None:
+            sw_config = SlidingWindowConfig(
+                roi_size=self.sw_roi_size,
+                overlap=self.sw_overlap,
+                sw_batch_size=self.sw_batch_size,
+            )
+            self._inference_wrapper = AutoencoderInferenceWrapper(
+                self.autoencoder, sw_config
+            )
+
+        return self._inference_wrapper
+
     def training_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int
     ) -> STEP_OUTPUT:
@@ -117,15 +165,19 @@ class AutoencoderLightning(pl.LightningModule):
         Returns:
             Loss dictionary for logging
         """
+        # Get optimizers (Lightning returns tuple when using manual optimization)
+        optimizers = self.optimizers()
+        opt_g, opt_d = optimizers  # type: ignore[misc]
+
         # Sample random modality for training
         modality = self._sample_random_modality(batch)
         images = batch[modality]
 
         # Train discriminator
-        disc_loss = self._train_discriminator(images)
+        disc_loss = self._train_discriminator(images, opt_d)
 
-        # Train generator (autoencoder)
-        gen_losses = self._train_generator(images)
+        # Train generator (autoencoder) with adaptive adversarial weight
+        gen_losses = self._train_generator(images, opt_g)
 
         # Log all losses
         self.log("train/disc_loss", disc_loss, prog_bar=True)
@@ -134,6 +186,7 @@ class AutoencoderLightning(pl.LightningModule):
         self.log("train/gen_perceptual", gen_losses["perceptual"])
         self.log("train/gen_adv", gen_losses["generator_adv"])
         self.log("train/gen_commitment", gen_losses["commitment"])
+        self.log("train/adv_weight", gen_losses.get("adv_weight", 0.0))
 
         # Log samples periodically
         if batch_idx % self.sample_every_n_steps == 0:
@@ -141,8 +194,17 @@ class AutoencoderLightning(pl.LightningModule):
 
         return {"loss": gen_losses["total"], "modality": modality}
 
-    def _train_discriminator(self, real_images: torch.Tensor) -> torch.Tensor:
-        """Train discriminator with real and fake images."""
+    def _train_discriminator(self, real_images: torch.Tensor, opt_d) -> torch.Tensor:
+        """
+        Train discriminator with real and fake images.
+
+        Args:
+            real_images: Real images from the batch
+            opt_d: Discriminator optimizer
+
+        Returns:
+            Discriminator loss
+        """
         # Generate fake images
         with torch.no_grad():
             z_mu, _ = self.autoencoder.encode(real_images)
@@ -157,17 +219,30 @@ class AutoencoderLightning(pl.LightningModule):
         # Compute discriminator loss using VAEGANLoss
         disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
 
-        # Optimize discriminator
+        # Apply warmup: zero out loss before discriminator_iter_start
+        if self.global_step < self.vaegan_loss.discriminator_iter_start:
+            disc_loss = disc_loss * 0.0
+
+        # Backward and optimize
         self.manual_backward(disc_loss)
-        self.optimizers()[1].step()
-        self.optimizers()[1].zero_grad()
+        self._optimizer_step(opt_d)
+        self._optimizer_zero_grad(opt_d)
 
         return disc_loss
 
     def _train_generator(
-        self, real_images: torch.Tensor
+        self, real_images: torch.Tensor, opt_g
     ) -> Dict[str, torch.Tensor]:
-        """Train generator (autoencoder) with all losses."""
+        """
+        Train generator (autoencoder) with adaptive adversarial weight.
+
+        Args:
+            real_images: Real images from the batch
+            opt_g: Generator optimizer
+
+        Returns:
+            Dictionary of losses for logging
+        """
         # Encode and decode
         z_mu, _ = self.autoencoder.encode(real_images)
         z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
@@ -177,60 +252,84 @@ class AutoencoderLightning(pl.LightningModule):
         # Discriminator outputs (no detach for generator, MONAI returns (outputs, features) tuple)
         fake_outputs, _ = self.discriminator(fake_images)
 
-        # Compute VAEGAN loss
+        # Compute VAEGAN loss with adaptive weight
         losses = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
             encoder_output=z_mu,
             quantized_output=z_embedded,
             discriminator_output=fake_outputs,
+            global_step=self.global_step,  # For warmup
+            last_layer=self.last_layer,  # For adaptive weight calculation
         )
 
-        # Optimize generator
+        # Backward and optimize
         self.manual_backward(losses["total"])
-        self.optimizers()[0].step()
-        self.optimizers()[0].zero_grad()
+        self._optimizer_step(opt_g)
+        self._optimizer_zero_grad(opt_g)
 
         return losses
 
+    def _optimizer_step(self, optimizer) -> None:
+        """Helper to step optimizer, handling both LightningOptimizer and raw optimizers."""
+        if hasattr(optimizer, 'optimizer'):
+            optimizer.optimizer.step()
+        else:
+            optimizer.step()
+
+    def _optimizer_zero_grad(self, optimizer) -> None:
+        """Helper to zero grad, handling both LightningOptimizer and raw optimizers."""
+        if hasattr(optimizer, 'optimizer'):
+            optimizer.optimizer.zero_grad()
+        else:
+            optimizer.zero_grad()
+
     def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
+        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
     ) -> Optional[STEP_OUTPUT]:
         """
-        Validation step with sliding window inference.
+        Validation step with batch processing for all modalities.
+
+        MONAI metrics support batched computation, so we process all modalities
+        together for efficiency.
 
         Args:
             batch: Dictionary with all 4 modalities
-            batch_idx: Batch index
+            batch_idx: Batch index (unused, required by Lightning)
 
         Returns:
             Metrics dictionary
         """
-        metrics = {}
+        # Stack all modalities into a single batch
+        all_images = []
+        modalities = []
 
         for modality, images in batch.items():
             if modality == "seg":
                 continue
+            all_images.append(images)
+            modalities.append(modality)
 
-            # Reconstruct images
-            reconstructed = self.forward(images)
+        # Stack: [B*M, C, H, W, D] where M is number of modalities
+        all_images = torch.cat(all_images, dim=0)
 
-            # Compute metrics
-            modality_metrics = self.metrics(reconstructed, images)
+        # Reconstruct all at once - use SW if enabled, otherwise direct
+        wrapper = self._get_inference_wrapper()
+        if wrapper is not None:
+            reconstructed = wrapper.forward(all_images)
+        else:
+            reconstructed = self.forward(all_images)  # Direct for speed
 
-            # Log metrics
-            for metric_name, metric_value in modality_metrics.items():
-                self.log(f"val/{modality}_{metric_name}", metric_value)
+        # Compute metrics on batch (MONAI metrics support batched inputs)
+        metrics = self.metrics(reconstructed, all_images)
 
-            metrics[modality] = modality_metrics
+        # Log metrics
+        for metric_name, metric_value in metrics.items():
+            self.log(f"val/{metric_name}", metric_value)
 
         # Log combined metric for model checkpointing
-        combined_scores = [
-            m["combined"] for m in metrics.values() if isinstance(m, dict)
-        ]
-        if combined_scores:
-            avg_combined = torch.stack(combined_scores).mean()
-            self.log("val/combined_metric", avg_combined, prog_bar=True)
+        if "combined" in metrics:
+            self.log("val/combined_metric", metrics["combined"], prog_bar=True)
 
         return metrics
 
@@ -238,8 +337,6 @@ class AutoencoderLightning(pl.LightningModule):
         self, batch: Dict[str, torch.Tensor]
     ) -> str:
         """Sample a random modality from the batch."""
-        import random
-
         modalities = [k for k in batch.keys() if k != "seg"]
         return random.choice(modalities)
 
@@ -248,32 +345,44 @@ class AutoencoderLightning(pl.LightningModule):
         if not self.logger:
             return
 
+        # Get experiment safely
+        experiment = getattr(self.logger, 'experiment', None)
+        if experiment is None:
+            return
+
         with torch.no_grad():
             reconstructed = self.forward(images)
 
         # Log first sample from batch
-        self.logger.experiment.add_image(
-            f"val/{modality}_real",
-            images[0, 0].unsqueeze(-1),
-            self.global_step,
-        )
-        self.logger.experiment.add_image(
-            f"val/{modality}_recon",
-            reconstructed[0, 0].unsqueeze(-1),
-            self.global_step,
-        )
+        if experiment and hasattr(experiment, 'add_image'):
+            experiment.add_image(
+                f"val/{modality}_real",
+                images[0, 0].unsqueeze(-1),
+                self.global_step,
+            )
+            experiment.add_image(
+                f"val/{modality}_recon",
+                reconstructed[0, 0].unsqueeze(-1),
+                self.global_step,
+            )
 
     def configure_optimizers(self):
         """Configure separate optimizers for generator and discriminator."""
+        # Access hyperparameters with getattr for type safety
+        lr_g = float(getattr(self.hparams, 'lr_g', 1e-4))
+        lr_d = float(getattr(self.hparams, 'lr_d', 4e-4))
+        b1 = float(getattr(self.hparams, 'b1', 0.5))
+        b2 = float(getattr(self.hparams, 'b2', 0.999))
+
         opt_g = torch.optim.Adam(
             self.autoencoder.parameters(),
-            lr=self.hparams.lr_g,
-            betas=(self.hparams.b1, self.hparams.b2),
+            lr=lr_g,
+            betas=(b1, b2),
         )
         opt_d = torch.optim.Adam(
             self.discriminator.parameters(),
-            lr=self.hparams.lr_d,
-            betas=(self.hparams.b1, self.hparams.b2),
+            lr=lr_d,
+            betas=(b1, b2),
         )
 
         return [opt_g, opt_d]
@@ -295,7 +404,8 @@ class AutoencoderLightning(pl.LightningModule):
             output_path,
         )
 
-        self.print(f"Autoencoder exported to {output_path}")
+        # 使用直接打印而不是self.print，因为self.print需要trainer
+        print(f"Autoencoder exported to {output_path}")
 
     def on_validation_end(self) -> None:
         """
@@ -305,7 +415,7 @@ class AutoencoderLightning(pl.LightningModule):
         """
         # Get best combined metric from all checkpoints
         if self.trainer.checkpoint_callback:
-            best_model_path = self.trainer.checkpoint_callback.best_model_path
+            best_model_path = getattr(self.trainer.checkpoint_callback, 'best_model_path', '')
             if best_model_path:
                 self.print(f"Best model: {best_model_path}")
 
@@ -344,6 +454,9 @@ class AutoencoderLightningConfig:
         # Create lightning module
         training_config = config.get("training", {})
 
+        # Load sliding window config
+        sw_config = config.get("sliding_window", {})
+
         return AutoencoderLightning(
             autoencoder=autoencoder,
             discriminator=discriminator,
@@ -356,6 +469,12 @@ class AutoencoderLightningConfig:
             adv_weight=training_config.get("adv_weight", 0.1),
             commitment_weight=training_config.get("commitment_weight", 0.25),
             sample_every_n_steps=training_config.get("sample_every_n_steps", 100),
+            discriminator_iter_start=training_config.get("discriminator_iter_start", 0),
+            # Sliding window config
+            use_sliding_window=sw_config.get("enabled", False),
+            sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
+            sw_overlap=sw_config.get("overlap", 0.5),
+            sw_batch_size=sw_config.get("sw_batch_size", 1),
         )
 
     @staticmethod
@@ -369,7 +488,6 @@ class AutoencoderLightningConfig:
             num_channels=config["num_channels"],
             attention_levels=config["attention_levels"],
             num_res_blocks=config["num_res_blocks"],
-            latent_channels=config.get("latent_channels", len(config["levels"])),
             norm_num_groups=config.get("norm_num_groups", 32),
         )
 
@@ -381,14 +499,14 @@ class AutoencoderLightningConfig:
         return MultiScalePatchDiscriminator(
             in_channels=config.get("in_channels", 1),
             num_d=config.get("num_d", 3),
-            channels=config.get("ndf", 64),  # ndf → channels
-            num_layers_d=config.get("n_layers", 3),  # n_layers → num_layers_d
+            channels=config.get("channels", config.get("ndf", 64)),
+            num_layers_d=config.get("num_layers_d", config.get("n_layers", 3)),
             spatial_dims=config["spatial_dims"],
-            out_channels=1,  # MONAI必需参数
-            kernel_size=4,  # 默认值
+            out_channels=config.get("out_channels", 1),
+            kernel_size=config.get("kernel_size", 4),  # Configurable
             activation=("LEAKYRELU", {"negative_slope": 0.2}),  # 默认值
             norm="BATCH",  # 默认值
-            minimum_size_im=64,  # 适合医学图像
+            minimum_size_im=config.get("minimum_size_im", 64),
         )
 
 
@@ -434,7 +552,11 @@ class TransformerLightning(pl.LightningModule):
     def __init__(
         self,
         autoencoder_path: str,
-        transformer,
+        transformer: Optional[nn.Module] = None,
+        # Autoencoder config (needed for loading checkpoint)
+        spatial_dims: int = 3,
+        levels: tuple[int, ...] = (8, 8, 8),
+        # Transformer config
         latent_channels: int = 4,
         cond_channels: int = 4,
         patch_size: int = 2,
@@ -450,14 +572,35 @@ class TransformerLightning(pl.LightningModule):
         unconditional_prob: float = 0.1,
         lr: float = 1e-4,
         sample_every_n_steps: int = 100,
+        # Sliding window inference config (REQUIRED for transformer)
+        sw_roi_size: tuple[int, int, int] = (64, 64, 64),
+        sw_overlap: float = 0.5,
+        sw_batch_size: int = 1,
     ):
         super().__init__()
+
+        # Create transformer if not provided
+        if transformer is None:
+            from prod9.generator.transformer import TransformerDecoder
+            transformer = TransformerDecoder(
+                latent_channels=latent_channels,
+                cond_channels=cond_channels,
+                patch_size=patch_size,
+                num_blocks=num_blocks,
+                hidden_dim=hidden_dim,
+                cond_dim=cond_dim,
+                num_heads=num_heads,
+            )
 
         self.save_hyperparameters(ignore=["autoencoder", "transformer"])
 
         self.autoencoder_path = autoencoder_path
-        self.autoencoder: Optional[AutoencoderFSQ] = None  # Loaded in setup()
+        self.autoencoder: Optional[AutoencoderInferenceWrapper] = None  # Wrapped with SW in setup()
         self.transformer = transformer
+
+        # Autoencoder config (needed for loading checkpoint)
+        self.spatial_dims = spatial_dims
+        self.levels = levels
 
         self.latent_channels = latent_channels
         self.cond_channels = cond_channels
@@ -470,6 +613,11 @@ class TransformerLightning(pl.LightningModule):
         self.lr = lr
         self.sample_every_n_steps = sample_every_n_steps
 
+        # Sliding window config (REQUIRED for transformer - always uses SW)
+        self.sw_roi_size = sw_roi_size
+        self.sw_overlap = sw_overlap
+        self.sw_batch_size = sw_batch_size
+
         # Learnable contrast embeddings for each modality
         self.contrast_embeddings = nn.Embedding(num_modalities, contrast_embed_dim)
 
@@ -480,21 +628,41 @@ class TransformerLightning(pl.LightningModule):
         # Metrics for validation
         self.metrics = CombinedMetric()
 
-    def _get_autoencoder(self) -> AutoencoderFSQ:
-        """Helper to get autoencoder with type assertion."""
+    def _get_autoencoder(self) -> AutoencoderInferenceWrapper:
+        """Helper to get autoencoder wrapper with type assertion."""
         if self.autoencoder is None:
             raise RuntimeError("Autoencoder not loaded. Call setup() first.")
-        return self.autoencoder
+        return self.autoencoder  # type: ignore
 
     def setup(self, stage: str) -> None:
-        """Load frozen autoencoder from checkpoint."""
+        """Load frozen autoencoder from checkpoint and wrap with SW."""
         if stage == "fit":
-            autoencoder = AutoencoderFSQ.load_from_checkpoint(self.autoencoder_path)
+            # AutoencoderFSQ inherits from MONAI's AutoencoderKlMaisi
+            # Use torch.load to load the checkpoint weights
+            checkpoint = torch.load(self.autoencoder_path, map_location='cpu')
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            else:
+                state_dict = checkpoint
+
+            # Create autoencoder with stored config
+            autoencoder = AutoencoderFSQ(
+                spatial_dims=self.spatial_dims,
+                levels=self.levels,
+            )
+            autoencoder.load_state_dict(state_dict)
             autoencoder.eval()
             # Freeze autoencoder parameters
             for param in autoencoder.parameters():
                 param.requires_grad = False
-            self.autoencoder = autoencoder
+
+            # Wrap with inference wrapper (REQUIRED for transformer)
+            sw_config = SlidingWindowConfig(
+                roi_size=self.sw_roi_size,
+                overlap=self.sw_overlap,
+                sw_batch_size=self.sw_batch_size,
+            )
+            self.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
 
     def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -556,6 +724,8 @@ class TransformerLightning(pl.LightningModule):
         """
         Training step with conditional/unconditional generation.
 
+        Uses automatic optimization (Lightning handles backward and optimizer steps).
+
         Args:
             batch: Dictionary with pre-encoded data
             batch_idx: Batch index
@@ -571,7 +741,6 @@ class TransformerLightning(pl.LightningModule):
             # Unconditional generation
             source_latent = batch["source_latent"]
             target_latent = batch["target_latent"]
-            target_indices = batch["target_indices"]
 
             # Prepare condition (None for unconditional)
             cond = None
@@ -583,7 +752,6 @@ class TransformerLightning(pl.LightningModule):
             # Conditional generation
             source_latent = batch["source_latent"]
             target_latent = batch["target_latent"]
-            target_indices = batch["target_indices"]
             target_modality_idx = batch["target_modality_idx"]
 
             # Prepare condition with source latent and target contrast embedding
@@ -621,11 +789,6 @@ class TransformerLightning(pl.LightningModule):
         else:
             loss = torch.tensor(0.0, device=predicted_tokens.device, requires_grad=True)
 
-        # Optimize
-        self.manual_backward(loss)
-        self.optimizers().step()
-        self.optimizers().zero_grad()
-
         # Log loss
         self.log("train/loss", loss, prog_bar=True)
         self.log("train/unconditional", float(is_unconditional), prog_bar=False)
@@ -633,14 +796,16 @@ class TransformerLightning(pl.LightningModule):
         return {"loss": loss, "unconditional": is_unconditional}
 
     def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
+        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
     ) -> Optional[STEP_OUTPUT]:
         """
-        Validation step on all 16 modality pairs.
+        Validation step with full sampling steps.
+
+        Uses configured num_steps for generation (not reduced to 1).
 
         Args:
             batch: Dictionary with pre-encoded data
-            batch_idx: Batch index
+            batch_idx: Batch index (unused, required by Lightning)
 
         Returns:
             Metrics dictionary
@@ -651,16 +816,15 @@ class TransformerLightning(pl.LightningModule):
         # Get source and target latents
         source_latent = batch["source_latent"]
         target_latent = batch["target_latent"]
-        source_modality_idx = batch.get("source_modality_idx", torch.zeros(1, dtype=torch.long))
         target_modality_idx = batch.get("target_modality_idx", torch.ones(1, dtype=torch.long))
 
         # Prepare condition
         cond = self.prepare_condition(source_latent, target_modality_idx, False)
 
-        # Use MaskGiTSampler for generation (single step for efficiency)
+        # Use MaskGiTSampler for generation with configured num_steps
         from prod9.generator.maskgit import MaskGiTSampler
         sampler = MaskGiTSampler(
-            steps=1,  # Single step for validation efficiency
+            steps=self.num_steps,  # Use configured steps, not 1
             mask_value=self.mask_value,
             scheduler_type=self.scheduler_type,
         )
@@ -790,6 +954,9 @@ class TransformerLightningConfig:
         # Create lightning module
         training_config = config.get("training", {})
 
+        # Load sliding window config (REQUIRED for transformer)
+        sw_config = config.get("sliding_window", {})
+
         return TransformerLightning(
             autoencoder_path=config["autoencoder_path"],
             transformer=transformer,
@@ -808,6 +975,10 @@ class TransformerLightningConfig:
             unconditional_prob=training_config.get("unconditional_prob", 0.1),
             lr=training_config.get("lr", 1e-4),
             sample_every_n_steps=training_config.get("sample_every_n_steps", 100),
+            # Sliding window config (REQUIRED)
+            sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
+            sw_overlap=sw_config.get("overlap", 0.5),
+            sw_batch_size=sw_config.get("sw_batch_size", 1),
         )
 
     @staticmethod

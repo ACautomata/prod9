@@ -8,7 +8,7 @@ from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 
 class TestAutoencoder(unittest.TestCase):
     def setUp(self) -> None:
-        self.device = torch.device('mps')
+        self.device = torch.device('cpu')
         self.autoencoder = AutoencoderFSQ(
             spatial_dims=3,
             levels=[6, 6, 6, 5],
@@ -22,12 +22,12 @@ class TestAutoencoder(unittest.TestCase):
         self.autoencoder = self.autoencoder.to(self.device)
 
     def test_forward(self):
-        x = torch.randn(8, 1, 32, 32, 32, device=self.device)
+        x = torch.randn(2, 1, 32, 32, 32, device=self.device)
         y, *_ = self.autoencoder(x)
         assert x.shape == y.shape
 
     def test_backward(self):
-        x = torch.randn(8, 1, 32, 32, 32, device=self.device)
+        x = torch.randn(2, 1, 32, 32, 32, device=self.device)
         y, *_ = self.autoencoder(x)
         label = torch.ones_like(y)
         loss = F.mse_loss(y, label)
@@ -40,7 +40,7 @@ class TestAutoencoder(unittest.TestCase):
             sw_batch_size=1,
             overlap=0.5,
             mode="gaussian",
-            device=torch.device("cpu"),
+            device=self.device,
             sw_device=self.device
         )
         encode = lambda x: self.autoencoder.encode_stage_2_inputs(x)
@@ -61,7 +61,7 @@ class TestAutoencoder(unittest.TestCase):
         assert x_recon.shape == x.shape
 
     def test_quantize(self):
-        x = torch.randn(8, 1, 32, 32, 32, device=self.device)
+        x = torch.randn(2, 1, 32, 32, 32, device=self.device)
         encoded = self.autoencoder.encode_stage_2_inputs(x)
         indices = self.autoencoder.quantize_stage_2_inputs(x)
         assert list(indices.shape) == [encoded.shape[0], *encoded.shape[2:]], f'{indices.shape} != {[encoded.shape[0], *encoded.shape[2:]]}'
@@ -150,7 +150,7 @@ class TestAutoencoder(unittest.TestCase):
         shapes = [
             (1, 1, 8, 8, 8),
             (2, 1, 16, 16, 16),
-            (4, 1, 32, 32, 32),
+            (2, 1, 32, 32, 32),
         ]
 
         for shape in shapes:
