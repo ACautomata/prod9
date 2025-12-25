@@ -7,26 +7,27 @@ from .modules import AdaLNZeroBlock, SinCosPosEmbed
 class TransformerDecoder(nn.Module):
     def __init__(
         self,
-        latent_channels,
-        cond_channels,
+        d_model,
+        c_model,
         patch_size,
         num_blocks,
         hidden_dim,
         cond_dim,
         num_heads,
+        codebook_size,
         mlp_ratio=4.0,
         dropout=0.0,
     ):
         super().__init__()
         self.patch_size = patch_size
         self.input_patch_proj = nn.Conv3d(
-            latent_channels,
+            d_model,
             hidden_dim,
             kernel_size=patch_size,
             stride=patch_size
         )
         self.cond_patch_proj = nn.Conv3d(
-            cond_channels,
+            c_model,
             hidden_dim,
             kernel_size=patch_size,
             stride=patch_size
@@ -46,7 +47,13 @@ class TransformerDecoder(nn.Module):
         ])
         self.unpatch_proj = nn.Linear(
             hidden_dim,
-            patch_size ** 3 * latent_channels
+            patch_size ** 3 * d_model
+        )
+        self.out_proj = nn.Conv3d(
+            d_model,
+            codebook_size,
+            kernel_size=1,
+            padding=0,
         )
         
     def forward(self, x, cond, attn_mask=None):
@@ -65,7 +72,7 @@ class TransformerDecoder(nn.Module):
            h =  block(h, cond, attn_mask)
         
         h = self.unpatch_proj(h)
-        return rearrange(
+        h = rearrange(
             tensor=h, 
             pattern='b (h w d) (ph pw pd c) -> b c (h ph) (w pw) (d pd)', 
             ph=self.patch_size,
@@ -74,4 +81,5 @@ class TransformerDecoder(nn.Module):
             w=w,
             d=d
         )
+        return self.out_proj(h)
             

@@ -17,13 +17,14 @@ class TestTransformer:
     def transformer(self, device: torch.device) -> TransformerDecoder:
         """Create transformer instance for testing."""
         transformer = TransformerDecoder(
-            latent_channels=4,
-            cond_channels=4,
+            d_model=4,
+            c_model=4,
             patch_size=2,
             num_blocks=4,
             hidden_dim=256,
             cond_dim=256,
             num_heads=8,
+            codebook_size=512,  # ADD THIS
         )
         return transformer.to(device)
 
@@ -32,7 +33,9 @@ class TestTransformer:
         x = torch.randn((8, 4, 16, 16, 16), device=device)
         cond = torch.rand_like(x)
         h = transformer(x, cond)
-        assert x.shape == h.shape, f'{x.shape} does not match {h.shape}'
+        # Transformer outputs logits [B, codebook_size, H, W, D]
+        expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+        assert h.shape == expected_shape, f'{h.shape} does not match expected {expected_shape}'
 
     def test_forward_different_spatial_dimensions(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test with different spatial dimensions"""
@@ -46,8 +49,10 @@ class TestTransformer:
             x = torch.randn((batch, channels, d, h, w), device=device)
             cond = torch.rand_like(x)
             output = transformer(x, cond)
-            assert output.shape == (batch, channels, d, h, w), \
-                f"Shape mismatch for input {(batch, channels, d, h, w)}: got {output.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (batch, transformer.out_proj.out_channels, d, h, w)
+            assert output.shape == expected_shape, \
+                f"Shape mismatch for input {(batch, channels, d, h, w)}: got {output.shape}, expected {expected_shape}"
 
     def test_forward_with_attention_mask(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test forward pass with attention mask"""
@@ -61,7 +66,9 @@ class TestTransformer:
         attn_mask[:32, 32:] = float('-inf')  # Mask first half attending to second half
 
         output = transformer(x, cond, attn_mask=attn_mask)
-        assert output.shape == x.shape, f"Output shape {output.shape} != input shape {x.shape}"
+        # Transformer outputs logits [B, codebook_size, H, W, D]
+        expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+        assert output.shape == expected_shape, f"Output shape {output.shape} != expected {expected_shape}"
 
     def test_backward_gradients(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test that gradients flow correctly through the network"""
@@ -95,13 +102,14 @@ class TestTransformer:
         """Test with different patch sizes"""
         for patch_size in [1, 2, 4]:
             transformer = TransformerDecoder(
-                latent_channels=4,
-                cond_channels=4,
+                d_model=4,
+                c_model=4,
                 patch_size=patch_size,
                 num_blocks=2,
                 hidden_dim=128,
                 cond_dim=128,
                 num_heads=4,
+                codebook_size=512,
             ).to(device)
 
             # Input size should be divisible by patch_size
@@ -110,68 +118,79 @@ class TestTransformer:
             cond = torch.rand_like(x)
 
             output = transformer(x, cond)
-            assert output.shape == x.shape, \
-                f"Patch size {patch_size}: output shape {output.shape} != input shape {x.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+            assert output.shape == expected_shape, \
+                f"Patch size {patch_size}: output shape {output.shape} != expected {expected_shape}"
 
     def test_different_num_blocks(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test with different numbers of transformer blocks"""
         for num_blocks in [1, 2, 4, 6]:
             transformer = TransformerDecoder(
-                latent_channels=4,
-                cond_channels=4,
+                d_model=4,
+                c_model=4,
                 patch_size=2,
                 num_blocks=num_blocks,
                 hidden_dim=128,
                 cond_dim=128,
                 num_heads=4,
+                codebook_size=512,
             ).to(device)
 
             x = torch.randn((1, 4, 8, 8, 8), device=device)
             cond = torch.rand_like(x)
 
             output = transformer(x, cond)
-            assert output.shape == x.shape, \
-                f"num_blocks={num_blocks}: output shape {output.shape} != input shape {x.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+            assert output.shape == expected_shape, \
+                f"num_blocks={num_blocks}: output shape {output.shape} != expected {expected_shape}"
 
     def test_different_hidden_dimensions(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test with different hidden dimensions"""
         for hidden_dim in [64, 128, 256, 512]:
             transformer = TransformerDecoder(
-                latent_channels=4,
-                cond_channels=4,
+                d_model=4,
+                c_model=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=hidden_dim,
                 cond_dim=hidden_dim,
                 num_heads=4,
+                codebook_size=512,
             ).to(device)
 
             x = torch.randn((1, 4, 8, 8, 8), device=device)
             cond = torch.rand_like(x)
 
             output = transformer(x, cond)
-            assert output.shape == x.shape, \
-                f"hidden_dim={hidden_dim}: output shape {output.shape} != input shape {x.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+            assert output.shape == expected_shape, \
+                f"hidden_dim={hidden_dim}: output shape {output.shape} != expected {expected_shape}"
 
     def test_different_num_heads(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test with different numbers of attention heads"""
         for num_heads in [1, 2, 4, 8]:
             transformer = TransformerDecoder(
-                latent_channels=4,
-                cond_channels=4,
+                d_model=4,
+                c_model=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,
                 cond_dim=128,
                 num_heads=num_heads,
+                codebook_size=512,
             ).to(device)
 
             x = torch.randn((1, 4, 8, 8, 8), device=device)
             cond = torch.rand_like(x)
 
             output = transformer(x, cond)
-            assert output.shape == x.shape, \
-                f"num_heads={num_heads}: output shape {output.shape} != input shape {x.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+            assert output.shape == expected_shape, \
+                f"num_heads={num_heads}: output shape {output.shape} != expected {expected_shape}"
 
     def test_output_value_range(self, transformer: TransformerDecoder, device: torch.device) -> None:
         """Test that output values are reasonable (no extreme values)"""
@@ -204,19 +223,22 @@ class TestTransformer:
         """Test with different latent and cond channels"""
         for latent_ch, cond_ch in [(1, 4), (2, 8), (4, 16)]:
             transformer = TransformerDecoder(
-                latent_channels=latent_ch,
-                cond_channels=cond_ch,
+                d_model=latent_ch,
+                c_model=cond_ch,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,
                 cond_dim=128,
                 num_heads=4,
+                codebook_size=512,
             ).to(device)
 
             x = torch.randn((1, latent_ch, 8, 8, 8), device=device)
             cond = torch.randn((1, cond_ch, 8, 8, 8), device=device)
 
             output = transformer(x, cond)
-            assert output.shape == x.shape, \
-                f"channels={latent_ch},{cond_ch}: output shape {output.shape} != input shape {x.shape}"
+            # Transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
+            assert output.shape == expected_shape, \
+                f"channels={latent_ch},{cond_ch}: output shape {output.shape} != expected {expected_shape}"
         

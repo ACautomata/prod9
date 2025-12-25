@@ -26,13 +26,14 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         num_heads = 4
 
         transformer = TransformerDecoder(
-            latent_channels=latent_channels,
-            cond_channels=cond_channels,
+            d_model=latent_channels,
+            c_model=cond_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,
             cond_dim=cond_dim,
             num_heads=num_heads,
+            codebook_size=64,  # 4*4*4 for levels=[4,4,4]
             mlp_ratio=4.0,
             dropout=0.1,
         ).to(self.device)
@@ -47,8 +48,8 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         with torch.no_grad():
             output = transformer(latent, condition)
 
-        # Verify output shape
-        expected_shape = (batch_size, latent_channels, 3, 3, 3)
+        # Verify output shape - transformer outputs logits [B, codebook_size, H, W, D]
+        expected_shape = (batch_size, transformer.out_proj.out_channels, 3, 3, 3)
         self.assertEqual(
             output.shape, expected_shape,
             f"Output shape {output.shape} should match {expected_shape}"
@@ -73,13 +74,14 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         num_heads = 4
 
         transformer = TransformerDecoder(
-            latent_channels=latent_channels,
-            cond_channels=cond_channels,
+            d_model=latent_channels,
+            c_model=cond_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,
             cond_dim=cond_dim,
             num_heads=num_heads,
+            codebook_size=64,  # 4*4*4 for levels=[4,4,4]
             mlp_ratio=4.0,
             dropout=0.1,
         ).to(self.device)

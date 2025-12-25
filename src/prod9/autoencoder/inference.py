@@ -172,6 +172,78 @@ class AutoencoderInferenceWrapper:
             return result[list(result.keys())[0]]
         return result
 
+    def encode_stage_2_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Encode image and return token indices for Stage 2 transformer training.
+
+        Delegates to self.autoencoder.encode_stage_2_inputs() with sliding window.
+
+        Args:
+            x: Input image [B, C, H, W, D]
+
+        Returns:
+            Token indices [B, H, W, D] (flat scalar indices for FSQ)
+        """
+        inferer = self._create_inferer()
+        result = inferer(x, self.autoencoder.encode_stage_2_inputs)
+
+        if isinstance(result, tuple):
+            result = result[0]
+        elif isinstance(result, dict):
+            result = result[list(result.keys())[0]]
+
+        return result
+
+    def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
+        """
+        Decode latent to image with sliding window.
+
+        Delegates to self.autoencoder.decode_stage_2_outputs() with sliding window.
+
+        Args:
+            latent: Latent [B, C, H, W, D]
+
+        Returns:
+            Decoded image [B, 1, H, W, D]
+        """
+        inferer = self._create_inferer()
+        result = inferer(latent, self.autoencoder.decode_stage_2_outputs)
+
+        if isinstance(result, tuple):
+            result = result[0]
+        elif isinstance(result, dict):
+            result = result[list(result.keys())[0]]
+
+        return result
+
+    def embed(self, indices: torch.Tensor) -> torch.Tensor:
+        """
+        Embed token indices to continuous vectors.
+
+        Delegates to self.autoencoder.embed().
+
+        Args:
+            indices: Token indices [B, H, W, D]
+
+        Returns:
+            Embedded continuous vectors [B, C, H, W, D]
+        """
+        return self.autoencoder.embed(indices)
+
+    def quantize(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        Quantize continuous latent to token indices.
+
+        Delegates to self.autoencoder.quantize().
+
+        Args:
+            z: Continuous latent vectors [B, C, H, W, D]
+
+        Returns:
+            Token indices [B, H, W, D]
+        """
+        return self.autoencoder.quantize(z)
+
     def encode_with_sw(self, x: torch.Tensor) -> torch.Tensor:
         """
         Explicit encode with sliding window (alias for encode).

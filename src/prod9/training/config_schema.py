@@ -78,12 +78,13 @@ class TransformerModelConfig(BaseModel):
     """
 
     # REQUIRED: Core transformer architecture - no defaults
-    latent_channels: int = Field(ge=1, description="Latent token dimension")
-    cond_channels: int = Field(ge=1, description="cond latent token dimension")
+    d_model: int = Field(ge=1, description="Latent token dimension (was latent_channels)")
+    c_model: int = Field(ge=1, description="Condition token dimension (was cond_channels)")
     cond_dim: int = Field(ge=1, description="Transformer cond hidden dimension")
     hidden_dim: int = Field(ge=1, description="Transformer hidden dimension")
     num_heads: int = Field(ge=1, description="Number of attention heads")
     num_blocks: int = Field(ge=1, description="Number of transformer blocks")
+    codebook_size: int = Field(ge=1, description="Codebook size for token prediction")
 
     # Other parameters (can have defaults)
     patch_size: int = Field(default=2, ge=1)

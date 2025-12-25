@@ -627,13 +627,14 @@ class TransformerLightning(pl.LightningModule):
         if transformer is None:
             from prod9.generator.transformer import TransformerDecoder
             transformer = TransformerDecoder(
-                latent_channels=latent_channels,
-                cond_channels=cond_channels,
+                d_model=latent_channels,
+                c_model=cond_channels,
                 patch_size=patch_size,
                 num_blocks=num_blocks,
                 hidden_dim=hidden_dim,
                 cond_dim=cond_dim,
                 num_heads=num_heads,
+                codebook_size=int(__import__("numpy").prod(self.levels)),
             )
 
         self.save_hyperparameters(ignore=["autoencoder", "transformer"])
@@ -808,31 +809,38 @@ class TransformerLightning(pl.LightningModule):
         # Generate masked pairs via MaskGiTScheduler
         # First, select indices to mask based on random step
         step = random.randint(1, self.num_steps)
-        mask_indices = self.scheduler.select_indices(target_tokens, step)
+        target_embed = autoencoder.embed(target_tokens)
+        mask_indices = self.scheduler.select_indices(target_embed, step)
         # Then generate masked tokens and labels
-        masked_tokens, label_tokens = self.scheduler.generate_pair(target_tokens, mask_indices)
+        masked_tokens, label_tokens = self.scheduler.generate_pair(target_embed, mask_indices)
 
         # Forward through transformer
-        predicted_tokens = self.transformer(masked_tokens, cond)
+        predicted_logits = self.transformer(masked_tokens, cond)  # [B, codebook_size, H, W, D]
 
         # Compute cross-entropy loss on masked positions only
-        # Reshape for loss computation
-        batch_size, channels, h, w, d = predicted_tokens.shape
-        predicted_flat = predicted_tokens.view(batch_size, channels, -1).permute(0, 2, 1)
-        label_flat = label_tokens.view(batch_size, channels, -1).permute(0, 2, 1)
+        batch_size, codebook_size, _, _, _ = predicted_logits.shape
 
-        # Only compute loss on masked positions (where label is not mask_value)
-        mask = (label_flat != self.mask_value).any(dim=-1)
+        # Flatten: [B, codebook_size, H, W, D] -> [B, H*W*D, codebook_size]
+        predicted_flat = predicted_logits.permute(0, 2, 3, 4, 1).reshape(batch_size, -1, codebook_size)
+
+        # label_tokens are embedded vectors [B, C, H, W, D]
+        # Need to convert back to token indices by quantizing them
+        autoencoder = self._get_autoencoder()
+        label_indices = autoencoder.autoencoder.quantize(label_tokens)  # [B, H, W, D]
+        label_flat = label_indices.reshape(batch_size, -1)  # [B, H*W*D]
+
+        # Create mask for valid positions (not masked)
+        mask = (label_flat != self.mask_value)
 
         if mask.any():
             # Cross-entropy loss
             loss = nn.functional.cross_entropy(
                 predicted_flat[mask],
-                label_flat[mask].argmax(dim=-1),
+                label_flat[mask].long(),
                 reduction="mean",
             )
         else:
-            loss = torch.tensor(0.0, device=predicted_tokens.device, requires_grad=True)
+            loss = torch.tensor(0.0, device=predicted_logits.device, requires_grad=True)
 
         # Log loss
         self.log("train/loss", loss, prog_bar=True)
@@ -893,10 +901,10 @@ class TransformerLightning(pl.LightningModule):
 
             # Reconstruct
             reconstructed_latent = z.view(batch_size, channels, h, w, d)
-            reconstructed_image = autoencoder.decode(reconstructed_latent)
+            reconstructed_image = autoencoder.decode_stage_2_outputs(reconstructed_latent)
 
             # Decode target for comparison
-            target_image = autoencoder.decode(target_latent)
+            target_image = autoencoder.decode_stage_2_outputs(target_latent)
 
             # Compute metrics
             modality_metrics = self.metrics(reconstructed_image, target_image)
@@ -1043,11 +1051,12 @@ class TransformerLightningConfig:
         from prod9.generator.transformer import TransformerDecoder
 
         return TransformerDecoder(
-            latent_channels=config.get("latent_channels", 192),
-            cond_channels=config.get("cond_channels", 192),
+            d_model=config.get("d_model", 192),  # was "latent_channels"
+            c_model=config.get("c_model", 192),  # was "cond_channels"
             patch_size=config.get("patch_size", 2),
             num_blocks=config.get("num_blocks", 12),
             hidden_dim=config.get("hidden_dim", 512),
             cond_dim=config.get("cond_dim", 512),
             num_heads=config.get("num_heads", 8),
+            codebook_size=config.get("codebook_size", 512),  # ADD THIS
         )

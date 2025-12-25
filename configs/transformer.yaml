@@ -13,13 +13,14 @@ output_dir: "outputs/stage2"
 model:
   # Transformer decoder configuration
   transformer:
-    latent_channels: 192  # latent_shape[0]*latent_shape[1]*latent_shape[2]*len(levels)
-    cond_channels: 192  # latent + contrast_embed
+    d_model: 192  # Latent token dimension (was latent_channels)
+    c_model: 192  # Condition token dimension (was cond_channels)
     patch_size: 2  # 3D patch size
     hidden_dim: 512
     cond_dim: 512
     num_heads: 8
     num_blocks: 12
+    codebook_size: 512  # FSQ codebook size (8*8*8 for levels=[8,8,8])
     mlp_ratio: 4.0
     dropout: 0.1
 
