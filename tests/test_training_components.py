@@ -466,29 +466,17 @@ class TestDataModuleStage1:
         assert dm.data_dir == temp_data_dir
         assert dm.batch_size == 2
         assert dm.num_workers == 0
-        assert dm.current_modality_idx == 0
         assert len(dm.modalities) == 4
 
-    def test_stage1_datamodule_advance_modality(self, temp_data_dir):
-        """Test modality advancement."""
-        from prod9.training.data import BraTSDataModuleStage1
+    def test_stage1_datamodule_random_modality_dataset(self, temp_data_dir):
+        """Test that random modality dataset is used."""
+        from prod9.training.data import BraTSDataModuleStage1, _RandomModalityDataset
 
         dm = BraTSDataModuleStage1(data_dir=temp_data_dir)
 
-        # Initial modality
-        assert dm.current_modality_idx == 0
-
-        # Advance once
-        mod = dm.advance_modality()
-        assert dm.current_modality_idx == 1
-        assert mod == dm.modalities[1]
-
-        # Advance through all modalities
-        for _ in range(5):
-            dm.advance_modality()
-
-        # Should wrap around
-        assert dm.current_modality_idx == (1 + 5) % 4
+        # The data module should not have train_dataset until setup is called
+        assert dm.train_dataset is None
+        assert dm.val_dataset is None
 
     def test_stage1_datamodule_custom_modalities(self, temp_data_dir):
         """Test with custom modality list."""

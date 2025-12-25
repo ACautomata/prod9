@@ -3,6 +3,9 @@ Sliding window inference wrapper for AutoencoderFSQ.
 
 Provides memory-safe inference for large 3D volumes using MONAI's SlidingWindowInferer.
 Training should use direct autoencoder calls for efficiency (data loader crops to ROI).
+
+Note: This wrapper does NOT handle padding. Use pad_for_sliding_window() and
+unpad_from_sliding_window() from prod9.autoencoder.padding for padding operations.
 """
 
 from dataclasses import dataclass
@@ -36,16 +39,17 @@ class SlidingWindowConfig:
 
 class AutoencoderInferenceWrapper:
     """
-    Wrapper for AutoencoderFSQ with automatic sliding window inference.
+    Wrapper for AutoencoderFSQ with sliding window inference.
 
-    This wrapper intercepts encode/decode calls and applies SlidingWindowInferer
-    for memory-safe processing of large volumes.
+    This wrapper applies SlidingWindowInferer for memory-safe processing of large volumes.
+    Padding should be handled externally using pad_for_sliding_window() and
+    unpad_from_sliding_window() from prod9.autoencoder.padding.
 
     Key features:
-    - Automatic SW application for all inference operations
+    - SW application for encode/decode operations
     - Configurable via SlidingWindowConfig
     - Device handling (MPS/CUDA/CPU)
-    - Preserves AutoencoderFSQ interface for drop-in replacement
+    - Preserves AutoencoderFSQ interface
 
     Usage:
         # Create wrapper
@@ -54,9 +58,13 @@ class AutoencoderInferenceWrapper:
             sw_config=SlidingWindowConfig(roi_size=(64,64,64), overlap=0.5)
         )
 
-        # Use exactly like AutoencoderFSQ
-        latent = wrapper.encode(image)  # Automatically uses SW
-        decoded = wrapper.decode(latent)  # Automatically uses SW
+        # Use padding for arbitrary input sizes
+        from prod9.autoencoder.padding import pad_for_sliding_window, unpad_from_sliding_window
+
+        x_padded, padding_info = pad_for_sliding_window(x, scale_factor=16, overlap=0.5, roi_size=(64,64,64))
+        z_mu, z_sigma = wrapper.encode(x_padded)
+        reconstructed = wrapper.decode(z)
+        reconstructed = unpad_from_sliding_window(reconstructed, padding_info)
 
     Note:
         Training code should use autoencoder directly (data loader crops to ROI).
@@ -118,6 +126,7 @@ class AutoencoderInferenceWrapper:
 
         Args:
             x: Input image [B, C, H, W, D]
+            Note: Input should be pre-padded using pad_for_sliding_window() if needed
 
         Returns:
             z_mu: Encoded latent representation
@@ -148,6 +157,7 @@ class AutoencoderInferenceWrapper:
 
         Args:
             z: Latent representation [B, C, H, W, D]
+            Note: Input should be pre-padded using pad_for_sliding_window() if needed
 
         Returns:
             Decoded image [B, C, H, W, D]
@@ -172,7 +182,7 @@ class AutoencoderInferenceWrapper:
             x: Input image [B, C, H, W, D]
 
         Returns:
-            z_mu: Encoded latent [B, latent_channels, H', W', D']
+            z_mu: Encoded latent [B, latent_channels, H'*W'*D']
         """
         z_mu, _ = self.encode(x)
         return z_mu
@@ -199,6 +209,7 @@ class AutoencoderInferenceWrapper:
 
         Args:
             x: Input image [B, C, H, W, D]
+            Note: Input should be pre-padded using pad_for_sliding_window() if needed
 
         Returns:
             Token indices [B, H'*W'*D']
@@ -214,6 +225,7 @@ class AutoencoderInferenceWrapper:
 
         Args:
             x: Input image [B, C, H, W, D]
+            Note: Input should be pre-padded using pad_for_sliding_window() if needed
 
         Returns:
             Reconstructed image [B, C, H, W, D]

@@ -70,7 +70,7 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_main_help(self):
         """Test CLI main help command."""
-        from prod9.training.cli.autoencoder import main
+        from prod9.cli.autoencoder import main
         import argparse
 
         # Mock sys.argv to simulate --help
@@ -82,7 +82,7 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_train_command_requires_config(self):
         """Test that train command requires valid config."""
-        from prod9.training.cli.autoencoder import main
+        from prod9.cli.autoencoder import main
 
         # Mock sys.argv with non-existent config
         with patch("sys.argv", ["prod9-train-autoencoder", "train", "--config", "nonexistent.yaml"]):
@@ -91,7 +91,7 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_validate_command_requires_checkpoint(self):
         """Test that validate command requires checkpoint path."""
-        from prod9.training.cli.autoencoder import main
+        from prod9.cli.autoencoder import main
 
         config_path = os.path.join(self.temp_dir, "config.yaml")
         self._create_minimal_config(config_path)
@@ -104,7 +104,7 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_infer_command_output_type(self):
         """Test that infer functions return correct type."""
-        from prod9.training.cli.autoencoder import validate_autoencoder
+        from prod9.cli.autoencoder import validate_autoencoder
         from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
@@ -113,7 +113,7 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
-        from prod9.training.cli.autoencoder import test_autoencoder
+        from prod9.cli.autoencoder import test_autoencoder
         from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]

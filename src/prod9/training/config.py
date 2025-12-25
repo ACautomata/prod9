@@ -2,7 +2,7 @@
 Configuration management with environment variable support.
 
 This module provides utilities for loading YAML configuration files
-with environment variable substitution.
+with environment variable substitution and Pydantic validation.
 """
 
 import os
@@ -109,3 +109,90 @@ def save_config(config: Dict[str, Any], output_path: str) -> None:
 
     with open(output_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
+# =============================================================================
+# Validated Configuration Loading
+# =============================================================================
+
+def load_validated_config(
+    config_path: str,
+    stage: str = "autoencoder",
+) -> Dict[str, Any]:
+    """
+    Load YAML config with environment variable substitution and Pydantic validation.
+
+    Args:
+        config_path: Path to YAML configuration file
+        stage: "autoencoder" or "transformer"
+
+    Returns:
+        Validated configuration dictionary
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If config validation fails
+
+    Example:
+        >>> config = load_validated_config("configs/autoencoder.yaml", "autoencoder")
+        >>> model = AutoencoderLightningConfig.from_config(config)
+    """
+    # Load base config with env var substitution
+    config = load_config(config_path)
+
+    # Import Pydantic models
+    try:
+        from prod9.training.config_schema import (
+            AutoencoderFullConfig,
+            TransformerFullConfig,
+        )
+    except ImportError as e:
+        raise ImportError(
+            f"Failed to import config schema: {e}\n"
+            "Ensure pydantic is installed: pip install pydantic"
+        ) from e
+
+    # Validate with appropriate schema
+    if stage == "autoencoder":
+        validated = AutoencoderFullConfig(**config)
+    elif stage == "transformer":
+        validated = TransformerFullConfig(**config)
+    else:
+        raise ValueError(f"Unknown stage: {stage}. Must be 'autoencoder' or 'transformer'")
+
+    # Return as dict (validated)
+    return validated.model_dump()
+
+
+def get_default_config(stage: str = "autoencoder") -> Dict[str, Any]:
+    """
+    Get default configuration for a stage.
+
+    Args:
+        stage: "autoencoder" or "transformer"
+
+    Returns:
+        Default configuration dictionary
+    """
+    from prod9.training.config_schema import (
+        AutoencoderFullConfig,
+        TransformerFullConfig,
+        DataConfig,
+    )
+
+    if stage == "autoencoder":
+        default_config = AutoencoderFullConfig(
+            output_dir="outputs/stage1",
+            autoencoder_export_path="outputs/autoencoder_final.pt",
+            data=DataConfig(data_dir="data"), 
+        )
+    elif stage == "transformer":
+        default_config = TransformerFullConfig(
+            output_dir="outputs/stage2",
+            autoencoder_path="outputs/autoencoder_final.pt",
+            data=DataConfig(data_dir="data"),  
+        )
+    else:
+        raise ValueError(f"Unknown stage: {stage}. Must be 'autoencoder' or 'transformer'")
+
+    return default_config.model_dump()

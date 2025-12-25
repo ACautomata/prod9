@@ -15,14 +15,15 @@ import torch
 import numpy as np
 
 if TYPE_CHECKING:
-    from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2  # type: ignore[attr-defined]
+    from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2, _RandomModalityDataset  # type: ignore[attr-defined]
 else:
     try:
-        from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2
+        from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2, _RandomModalityDataset
     except ImportError:
         # Data module not implemented yet - skip tests
         BraTSDataModuleStage1 = None  # type: ignore[assignment]
         BraTSDataModuleStage2 = None  # type: ignore[assignment]
+        _RandomModalityDataset = None  # type: ignore[assignment]
 
 
 class TestBraTSDataModuleStage1(unittest.TestCase):
@@ -113,9 +114,9 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
         # Setup creates datasets (skip if no real data available)
         try:
             data_module.setup(stage="fit")
-            # Verify datasets were created
-            self.assertIsInstance(data_module.train_datasets, dict)
-            self.assertIsInstance(data_module.val_datasets, dict)
+            # Verify datasets were created (singular form)
+            self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
+            self.assertIsInstance(data_module.val_dataset, _RandomModalityDataset)
         except (FileNotFoundError, RuntimeError):
             # If no real data files exist, skip test gracefully
             self.skipTest("Real data files not available for setup test")
@@ -128,10 +129,10 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
             num_workers=0,
         )
 
-        # Mock train datasets (real class uses dict of datasets)
+        # Mock train dataset (real class uses single dataset)
         mock_dataset = MagicMock()
         mock_dataset.__len__ = Mock(return_value=10)
-        data_module.train_datasets = {data_module.modalities[0]: mock_dataset}
+        data_module.train_dataset = mock_dataset
 
         # Patch DataLoader in the data module where it's imported
         with patch('prod9.training.data.DataLoader') as mock_dataloader:
@@ -155,10 +156,10 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
             num_workers=0,
         )
 
-        # Mock val datasets (real class uses dict of datasets)
+        # Mock val dataset (real class uses single dataset)
         mock_dataset = MagicMock()
         mock_dataset.__len__ = Mock(return_value=5)
-        data_module.val_datasets = {data_module.modalities[0]: mock_dataset}
+        data_module.val_dataset = mock_dataset
 
         # Patch DataLoader in the data module where it's imported
         with patch('prod9.training.data.DataLoader') as mock_dataloader:
@@ -187,24 +188,25 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
             data_module.test_dataloader()
 
     def test_advance_modality(self):
-        """Test cycling through modalities."""
+        """Test that random modality dataset provides all modalities."""
         data_module = BraTSDataModuleStage1(
             data_dir=str(self.braats_root),
             batch_size=1,
             num_workers=0,
         )
 
-        # Get current modality
-        current = data_module.current_modality_idx
-        current_modality = data_module.modalities[current]
-
-        # Advance to next modality
-        next_modality = data_module.advance_modality()
-
-        # Should advance to next modality in list
-        expected_idx = (current + 1) % len(data_module.modalities)
-        self.assertEqual(data_module.current_modality_idx, expected_idx)
-        self.assertEqual(next_modality, data_module.modalities[expected_idx])
+        # Setup to create the dataset
+        try:
+            data_module.setup(stage="fit")
+            # Verify that the dataset uses random modality sampling
+            self.assertIsNotNone(data_module.train_dataset)
+            self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
+            # The dataset should have access to all modalities
+            if data_module.train_dataset is not None:
+                self.assertEqual(data_module.train_dataset.modalities, data_module.modalities)
+        except (FileNotFoundError, RuntimeError):
+            # If no real data files exist, skip test gracefully
+            self.skipTest("Real data files not available for setup test")
 
 
 class TestBraTSDataModuleStage2(unittest.TestCase):
@@ -343,10 +345,10 @@ class TestIntegration(unittest.TestCase):
             try:
                 data_module.setup(stage="fit")
 
-                # Check if datasets were created
-                if hasattr(data_module, 'train_datasets') and data_module.train_datasets:
-                    # At least one modality should have datasets
-                    self.assertGreater(len(data_module.train_datasets), 0)
+                # Check if dataset was created
+                if hasattr(data_module, 'train_dataset') and data_module.train_dataset is not None:
+                    # Dataset should be created
+                    self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
             except (FileNotFoundError, RuntimeError, ImportError):
                 # If no real data files or nibabel not available, skip test gracefully
                 self.skipTest("Toy dataset or nibabel not available for integration test")

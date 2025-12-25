@@ -56,11 +56,44 @@ class TrainingConfigDict(TypedDict, total=False):
     sample_every_n_steps: int
 
 
-class SystemTestConfig(TypedDict, total=False):
-    """Complete system test configuration."""
+class ModelConfigDict(TypedDict, total=False):
+    """Type-safe model configuration wrapper."""
     autoencoder: AutoencoderConfigDict
     discriminator: DiscriminatorConfigDict
-    training: TrainingConfigDict
+
+
+class LossConfigDict(TypedDict, total=False):
+    """Type-safe loss configuration."""
+    reconstruction: Dict[str, float]
+    perceptual: Dict[str, float]
+    adversarial: Dict[str, float]
+    commitment: Dict[str, float]
+
+
+class OptimizerConfigDict(TypedDict, total=False):
+    """Type-safe optimizer configuration."""
+    lr_g: float
+    lr_d: float
+    b1: float
+    b2: float
+
+
+class LoopConfigDict(TypedDict, total=False):
+    """Type-safe training loop configuration."""
+    sample_every_n_steps: int
+
+
+class NestedTrainingConfigDict(TypedDict, total=False):
+    """Type-safe nested training configuration."""
+    optimizer: OptimizerConfigDict
+    loop: LoopConfigDict
+
+
+class SystemTestConfig(TypedDict, total=False):
+    """Complete system test configuration (new hierarchical structure)."""
+    model: ModelConfigDict
+    loss: LossConfigDict
+    training: NestedTrainingConfigDict
     trainer: Dict[str, Any]
     data: Dict[str, Any]
 
@@ -138,11 +171,29 @@ MINIMAL_DATA_CONFIG: Dict[str, Any] = {
 
 
 def get_minimal_system_config() -> SystemTestConfig:
-    """Get minimal system test configuration."""
+    """Get minimal system test configuration (new hierarchical structure)."""
     return {
-        "autoencoder": MINIMAL_AUTOENCODER_CONFIG,
-        "discriminator": MINIMAL_DISCRIMINATOR_CONFIG,
-        "training": MINIMAL_TRAINING_CONFIG,
+        "model": {
+            "autoencoder": MINIMAL_AUTOENCODER_CONFIG,
+            "discriminator": MINIMAL_DISCRIMINATOR_CONFIG,
+        },
+        "loss": {
+            "reconstruction": {"weight": 1.0},
+            "perceptual": {"weight": 0.1},
+            "adversarial": {"weight": 0.05},
+            "commitment": {"weight": 0.25},
+        },
+        "training": {
+            "optimizer": {
+                "lr_g": 1e-4,
+                "lr_d": 4e-4,
+                "b1": 0.5,
+                "b2": 0.999,
+            },
+            "loop": {
+                "sample_every_n_steps": 100,
+            },
+        },
         "trainer": MINIMAL_TRAINER_CONFIG,
         "data": MINIMAL_DATA_CONFIG,
     }

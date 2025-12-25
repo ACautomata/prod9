@@ -24,35 +24,43 @@ class TestAutoencoderTraining:
     def minimal_config(self) -> SystemTestConfig:
         """Create minimal configuration for testing."""
         return {
-            "autoencoder": {
-                "spatial_dims": 3,
-                "levels": [4, 4, 4],  # Reduced for 64x64x64 input
-                "in_channels": 1,
-                "out_channels": 1,
-                "num_res_blocks": [2, 2, 2],
-                "num_channels": [32, 64, 128],  # Reduced channels for memory
-                "attention_levels": [False, False, False],
-                "num_splits": 1,
+            "model": {
+                "autoencoder": {
+                    "spatial_dims": 3,
+                    "levels": [4, 4, 4],  # Reduced for 64x64x64 input
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "num_res_blocks": [2, 2, 2],
+                    "num_channels": [32, 64, 128],  # Reduced channels for memory
+                    "attention_levels": [False, False, False],
+                    "num_splits": 1,
+                },
+                "discriminator": {
+                    "in_channels": 1,  # Autoencoder outputs 1 channel
+                    "num_d": 1,  # Single scale
+                    "channels": 32,  # Smaller for memory
+                    "num_layers_d": 1,  # Single layer
+                    "spatial_dims": 3,
+                    "out_channels": 1,
+                    "minimum_size_im": 16,  # Safe value for 64x64x64 input with single layer
+                },
             },
-            "discriminator": {
-                "in_channels": 1,  # Autoencoder outputs 1 channel
-                "num_d": 1,  # Single scale
-                "channels": 32,  # Smaller for memory
-                "num_layers_d": 1,  # Single layer
-                "spatial_dims": 3,
-                "out_channels": 1,
-                "minimum_size_im": 16,  # Safe value for 64x64x64 input with single layer
+            "loss": {
+                "reconstruction": {"weight": 1.0},
+                "perceptual": {"weight": 0.1},  # Lower for faster testing
+                "adversarial": {"weight": 0.05},  # Enable adversarial training with safe discriminator
+                "commitment": {"weight": 0.25},
             },
             "training": {
-                "lr_g": 1e-4,
-                "lr_d": 4e-4,
-                "b1": 0.5,
-                "b2": 0.999,
-                "recon_weight": 1.0,
-                "perceptual_weight": 0.1,  # Lower for faster testing
-                "adv_weight": 0.05,  # Enable adversarial training with safe discriminator
-                "commitment_weight": 0.25,
-                "sample_every_n_steps": 100,
+                "optimizer": {
+                    "lr_g": 1e-4,
+                    "lr_d": 4e-4,
+                    "b1": 0.5,
+                    "b2": 0.999,
+                },
+                "loop": {
+                    "sample_every_n_steps": 100,
+                },
             },
             "trainer": {
                 "max_epochs": 1,
@@ -168,8 +176,8 @@ class TestAutoencoderTraining:
         # Verify model can still do forward pass
         device = torch.device("cuda" if torch.cuda.is_available() else "mps")
         model = model.to(device)
-        # Use larger input to avoid shape issues in autoencoder
-        x = torch.randn(1, 1, 128, 128, 128).to(device)
+        # Use smaller input for memory efficiency
+        x = torch.randn(1, 1, 64, 64, 64).to(device)
 
         with torch.no_grad():
             try:

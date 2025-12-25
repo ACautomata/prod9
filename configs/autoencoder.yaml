@@ -1,165 +1,217 @@
-# Autoencoder Stage 1 Configuration
-# Training configuration for AutoencoderFSQ with Finite Scalar Quantization
+# =============================================================================
+# prod9 Autoencoder Stage 1 Configuration
+# Complete configuration for VQGAN-style autoencoder training with FSQ
+# =============================================================================
 
-# Output directory for checkpoints and logs
+# Output paths
 output_dir: "outputs/stage1"
-
-# Autoencoder export path (final model for Stage 2)
 autoencoder_export_path: "outputs/autoencoder_final.pt"
 
-# Model configuration
+# =============================================================================
+# Model Architecture
+# =============================================================================
 model:
-  # Spatial dimensions of input images
-  spatial_dims: 3
+  # AutoencoderFSQ configuration
+  autoencoder:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 1
+    levels: [8, 8, 8]  # 8^3 = 512 codebook size
+    num_channels: [32, 64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
+    attention_levels: [False, False, True, True, True]
+    num_res_blocks: [1, 1, 1, 1, 1]
+    norm_num_groups: 32  # Group normalization groups
 
-  # Input channels (1 for single modality, 4 for multi-modal)
-  in_channels: 1
+  # MultiScalePatchDiscriminator configuration
+  discriminator:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 1
+    num_d: 2  # Number of discriminators (multi-scale) - reduced to avoid error
+    channels: 64  # Base channel count
+    num_layers_d: 3  # Layers per discriminator
+    kernel_size: 4
+    activation: ["LEAKYRELU", {"negative_slope": 0.2}]
+    norm: "BATCH"
+    minimum_size_im: 64
 
-  # Output channels (reconstruction)
-  out_channels: 1
+  # Modality configuration
+  num_modalities: 4  # T1, T1ce, T2, FLAIR
+  contrast_embed_dim: 64
 
-  # FSQ quantization levels per dimension
-  # Product should be >= vocabulary size needed
-  levels: [8, 8, 8]  # 8^3 = 512 codebook size
-
-  # Number of channels in encoder/decoder (last channel count)
-  num_channels: 512
-
-  # Attention levels for each encoder/decoder stage
-  # False = no attention, True = with attention
-  attention_levels: [False, False, True, True, True]
-
-  # Number of residual blocks per stage
-  num_res_blocks: [1, 1, 1, 1, 1]
-
-# Training configuration
+# =============================================================================
+# Training Configuration
+# =============================================================================
 training:
-  # Generator (autoencoder) learning rate
-  lr_g: 1e-4
+  # Optimizer settings
+  optimizer:
+    lr_g: 1e-4  # Generator (autoencoder) learning rate
+    lr_d: 4e-4  # Discriminator learning rate
+    b1: 0.5  # Adam beta1
+    b2: 0.999  # Adam beta2
+    weight_decay: 1e-5
 
-  # Discriminator learning rate
-  lr_d: 4e-4
+  # Learning rate scheduler (optional, currently constant)
+  scheduler:
+    type: "constant"  # Options: constant, cosine, step
+    # T_max: 100  # For cosine
+    # step_size: 30  # For step
+    # gamma: 0.1  # For step
+    # eta_min: 0  # For cosine
 
-  # Adam optimizer beta1
-  b1: 0.5
+  # Training loop settings
+  loop:
+    gradient_clip_val: 1.0
+    gradient_clip_algorithm: "norm"  # norm or value
+    accumulation_batches: 1  # Gradient accumulation steps
+    sample_every_n_steps: 100
 
-  # Adam optimizer beta2
-  b2: 0.999
-
-  # Weight decay (L2 regularization)
-  weight_decay: 1e-5
-
-  # Gradient clipping value (0 to disable)
-  grad_clip: 1.0
-
-  # Reconstruction loss weight
-  recon_weight: 1.0
-
-  # Perceptual loss weight
-  perceptual_weight: 0.5
-
-  # Adversarial loss weight
-  adv_weight: 0.1
-
-  # FSQ commitment loss weight
-  commitment_weight: 0.25
+  # Discriminator warmup
+  warmup:
+    disc_iter_start: 0  # Step to start discriminator training
 
   # Number of training epochs
   max_epochs: 100
 
-# Discriminator configuration (for adversarial training)
-discriminator:
-  # Number of channels in discriminator
-  fmaps: [64, 128, 256, 512]
-
-  # Number of discriminator layers
-  depth: 4
-
-  # Discriminator learning rate
-  learning_rate: 1e-4
-
-  # Loss weight for adversarial loss
-  lambda_adv: 0.1
-
-# Sliding window configuration (for inference/validation)
-sliding_window:
-  # ROI size for sliding window inference
-  # Should be <= training roi_size to match training distribution
-  roi_size: [64, 64, 64]
-
-  # Overlap between adjacent windows (0-1)
-  # Higher = smoother transitions but slower
-  overlap: 0.5
-
-  # Number of windows to process simultaneously
-  # Increase if GPU memory allows
-  sw_batch_size: 1
-
-  # Blending mode: 'gaussian', 'constant', or 'mean'
-  mode: gaussian
-
-  # Enable SW for validation (training always uses direct calls)
-  enabled: false
-
-# Data configuration
+# =============================================================================
+# Data Configuration
+# =============================================================================
 data:
-  # Path to BraTS dataset (use BRATS_DATA_DIR env var, default: data/BraTS)
+  # Data paths
   data_dir: "${BRATS_DATA_DIR:data/BraTS}"
 
-  # Batch size (adjust based on GPU memory)
+  # Modalities to use
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]
+
+  # Data loader settings
   batch_size: 2
-
-  # Number of data loader workers
   num_workers: 4
-
-  # Cache rate for MONAI cache (0-1)
-  # 1.0 = cache all data in RAM
-  cache_rate: 0.5
-
-  # ROI size for training crops (data loader provides this size)
-  roi_size: [64, 64, 64]
-
-  # Train/validation split ratio
+  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
+  pin_memory: true
   train_val_split: 0.8
 
-# Loss configuration
+  # Training crop size
+  roi_size: [64, 64, 64]
+
+  # Preprocessing transforms
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions
+    spacing_mode: "bilinear"
+    orientation: "RAS"  # NIfTI orientation
+    intensity_a_min: 0.0  # ScaleIntensityRanged
+    intensity_a_max: 500.0
+    intensity_b_min: 0.0
+    intensity_b_max: 1.0
+    clip: true
+
+  # Data augmentation
+  augmentation:
+    # Random flip
+    flip_prob: 0.5
+    flip_axes: [0, 1, 2]  # Axial, coronal, sagittal
+
+    # Random rotation
+    rotate_prob: 0.5
+    rotate_max_k: 3  # 0-3 (90-degree multiples)
+    rotate_axes: [0, 1]  # Rotate in axial plane
+
+    # Random intensity shift
+    shift_intensity_prob: 0.5
+    shift_intensity_offset: 0.1  # +/- 10% shift
+
+# =============================================================================
+# Loss Configuration
+# =============================================================================
 loss:
-  # Pixel-wise loss weight (L1 + SSIM)
-  lambda_pixel: 1.0
+  discriminator_iter_start: 0  # Discriminator warmup
 
-  # Perceptual loss weight (VGG features if available)
-  lambda_perceptual: 0.1
+  # Reconstruction loss (L1)
+  reconstruction:
+    weight: 1.0
 
-# Callbacks configuration
+  # Perceptual loss
+  perceptual:
+    weight: 0.5
+    network_type: "medicalnet_resnet10_23datasets"
+    is_fake_3d: false
+
+  # Adversarial loss
+  adversarial:
+    weight: 0.1  # Base weight (scaled adaptively)
+    criterion: "least_squares"  # hinge, least_squares, bce
+
+  # Commitment loss (FSQ)
+  commitment:
+    weight: 0.25  # Beta in VQ terminology
+
+  # Adaptive weight calculation
+  adaptive:
+    max_weight: 10000.0  # Clamp adaptive weight
+    grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
 callbacks:
-  # Model checkpoint
+  # Model checkpointing
   checkpoint:
     monitor: "val/combined_metric"
     mode: "max"
     save_top_k: 3
+    save_last: true
+    every_n_epochs: null  # null = check every epoch
 
   # Early stopping
   early_stop:
+    enabled: true
     monitor: "val/combined_metric"
     patience: 10
     mode: "max"
+    min_delta: 0.0  # Minimum change to qualify as improvement
 
-  # Learning rate monitor
+  # Learning rate monitoring
   lr_monitor: true
 
-# Trainer configuration
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
 trainer:
-  # Accelerator: 'gpu', 'cpu', 'mps' (Apple Silicon)
-  accelerator: "mps"
+  # Training settings
+  max_epochs: 100
 
-  # Devices to use
-  devices: 1
+  # Hardware
+  hardware:
+    accelerator: "mps"  # gpu, cpu, mps (Apple Silicon)
+    devices: 1
+    precision: 32  # 32, 16, bf16
 
-  # Precision: 32, 16, or bf16
-  precision: 32
+  # Logging
+  logging:
+    log_every_n_steps: 10
+    val_check_interval: 1.0  # Validate every N epochs
+    limit_train_batches: null  # null = all batches
+    limit_val_batches: 5
+    logger_version: null  # null = auto-increment
 
-  # Number of validation batches to log
-  limit_val_batches: 5
+  # Gradient handling
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
 
-  # Log every N training batches
-  log_every_n_steps: 10
+  # Debugging/profiling
+  profiler: null  # null, simple, advanced, pytorch
+  detect_anomaly: false
+  benchmark: false
+
+# =============================================================================
+# Sliding Window Inference
+# =============================================================================
+sliding_window:
+  # Enable SW for validation (training always uses direct calls)
+  enabled: false
+
+  # Window configuration
+  roi_size: [64, 64, 64]
+  overlap: 0.5  # 0-1, higher = smoother but slower
+  sw_batch_size: 1  # Increase if GPU memory allows
+  mode: "gaussian"  # gaussian, constant, mean

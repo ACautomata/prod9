@@ -22,35 +22,45 @@ class TestEndToEnd:
     def minimal_autoencoder_config(self) -> Dict[str, Any]:
         """Create minimal autoencoder configuration."""
         return {
-            "autoencoder": {
-                "spatial_dims": 3,
-                "levels": [4, 4, 4],
-                "in_channels": 1,
-                "out_channels": 1,
-                "num_channels": [32, 64, 128],
-                "attention_levels": [False, False, False],
-                "num_res_blocks": [1, 1, 1],
-                "num_splits": 1,
-                "latent_channels": 3,
-                "norm_num_groups": 16,
+            "model": {
+                "autoencoder": {
+                    "spatial_dims": 3,
+                    "levels": [4, 4, 4],
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "num_channels": [32, 64, 128],
+                    "attention_levels": [False, False, False],
+                    "num_res_blocks": [1, 1, 1],
+                    "num_splits": 1,
+                    "latent_channels": 3,
+                    "norm_num_groups": 16,
+                },
+                "discriminator": {
+                    "in_channels": 1,
+                    "num_d": 1,  # CHANGED: 2 -> 1 (single-scale)
+                    "channels": 32,  # CHANGED: ndf -> channels
+                    "num_layers_d": 1,  # CHANGED: n_layers -> num_layers_d, 2 -> 1
+                    "spatial_dims": 3,
+                    "out_channels": 1,
+                    "minimum_size_im": 16,  # CHANGED: Add explicit minimum
+                },
             },
-            "discriminator": {
-                "in_channels": 1,
-                "num_d": 2,
-                "ndf": 32,
-                "n_layers": 2,
-                "spatial_dims": 3,
+            "loss": {
+                "reconstruction": {"weight": 1.0},
+                "perceptual": {"weight": 0.1},
+                "adversarial": {"weight": 0.05},
+                "commitment": {"weight": 0.25},
             },
             "training": {
-                "lr_g": 1e-4,
-                "lr_d": 4e-4,
-                "b1": 0.5,
-                "b2": 0.999,
-                "recon_weight": 1.0,
-                "perceptual_weight": 0.1,
-                "adv_weight": 0.05,
-                "commitment_weight": 0.25,
-                "discriminator_iter_start": 0,
+                "optimizer": {
+                    "lr_g": 1e-4,
+                    "lr_d": 4e-4,
+                    "b1": 0.5,
+                    "b2": 0.999,
+                },
+                "loop": {
+                    "discriminator_iter_start": 0,
+                },
             },
         }
 

@@ -96,13 +96,16 @@ class AutoencoderLightning(pl.LightningModule):
         # The decoder's final convolution layer (used for gradient norm computation)
         self.last_layer: torch.Tensor = self.autoencoder.get_last_layer()
 
-        # Loss functions
+        # Loss functions - use default values for perceptual network and adv criterion
+        # These will be read from config in the future if needed
         self.vaegan_loss = VAEGANLoss(
             recon_weight=recon_weight,
             perceptual_weight=perceptual_weight,
             adv_weight=adv_weight,
             commitment_weight=commitment_weight,
             spatial_dims=3,
+            perceptual_network=None,  # Will use default
+            adv_criterion="least_squares",  # Default
             discriminator_iter_start=discriminator_iter_start,
         )
 
@@ -324,7 +327,28 @@ class AutoencoderLightning(pl.LightningModule):
         # Reconstruct - use SW if enabled, otherwise direct
         wrapper = self._get_inference_wrapper()
         if wrapper is not None:
-            reconstructed = wrapper.forward(images)
+            # Apply padding for sliding window
+            from prod9.autoencoder.padding import (
+                compute_scale_factor,
+                pad_for_sliding_window,
+                unpad_from_sliding_window,
+            )
+
+            scale_factor = compute_scale_factor(self.autoencoder)
+
+            # Pad input to satisfy MONAI constraints
+            images_padded, padding_info = pad_for_sliding_window(
+                images,
+                scale_factor=scale_factor,
+                overlap=self.sw_overlap,
+                roi_size=self.sw_roi_size,
+            )
+
+            # Encode/Decode with SW
+            reconstructed = wrapper.forward(images_padded)
+
+            # Unpad output to original size
+            reconstructed = unpad_from_sliding_window(reconstructed, padding_info)
         else:
             reconstructed = self.forward(images)  # Direct for speed
 
@@ -434,43 +458,57 @@ class AutoencoderLightningConfig:
         Create AutoencoderLightning from config dictionary.
 
         Args:
-            config: Configuration dictionary with keys:
-                - autoencoder: Autoencoder config
-                - discriminator: Discriminator config
-                - training: Training hyperparameters
+            config: Configuration dictionary with hierarchical structure:
+                - model: Model configuration (autoencoder, discriminator)
+                - training: Training hyperparameters (optimizer, loop, warmup)
+                - loss: Loss configuration
+                - sliding_window: Sliding window configuration
 
         Returns:
             Configured AutoencoderLightning instance
         """
+        # Get model configuration
+        model_config = config.get("model", {})
+
         # Create autoencoder
         autoencoder = AutoencoderLightningConfig._create_autoencoder(
-            config["autoencoder"]
+            model_config.get("autoencoder", {})
         )
 
         # Create discriminator
         discriminator = AutoencoderLightningConfig._create_discriminator(
-            config["discriminator"]
+            model_config.get("discriminator", {})
         )
 
-        # Create lightning module
+        # Get training configuration
         training_config = config.get("training", {})
+        optimizer_config = training_config.get("optimizer", {})
+        loop_config = training_config.get("loop", {})
+        warmup_config = training_config.get("warmup", {})
 
-        # Load sliding window config
+        # Get loss configuration
+        loss_config = config.get("loss", {})
+        recon_config = loss_config.get("reconstruction", {})
+        perceptual_config = loss_config.get("perceptual", {})
+        adv_config = loss_config.get("adversarial", {})
+        commitment_config = loss_config.get("commitment", {})
+
+        # Get sliding window config
         sw_config = config.get("sliding_window", {})
 
         return AutoencoderLightning(
             autoencoder=autoencoder,
             discriminator=discriminator,
-            lr_g=training_config.get("lr_g", 1e-4),
-            lr_d=training_config.get("lr_d", 4e-4),
-            b1=training_config.get("b1", 0.5),
-            b2=training_config.get("b2", 0.999),
-            recon_weight=training_config.get("recon_weight", 1.0),
-            perceptual_weight=training_config.get("perceptual_weight", 0.5),
-            adv_weight=training_config.get("adv_weight", 0.1),
-            commitment_weight=training_config.get("commitment_weight", 0.25),
-            sample_every_n_steps=training_config.get("sample_every_n_steps", 100),
-            discriminator_iter_start=training_config.get("discriminator_iter_start", 0),
+            lr_g=optimizer_config.get("lr_g", 1e-4),
+            lr_d=optimizer_config.get("lr_d", 4e-4),
+            b1=optimizer_config.get("b1", 0.5),
+            b2=optimizer_config.get("b2", 0.999),
+            recon_weight=recon_config.get("weight", 1.0),
+            perceptual_weight=perceptual_config.get("weight", 0.5),
+            adv_weight=adv_config.get("weight", 0.1),
+            commitment_weight=commitment_config.get("weight", 0.25),
+            sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
+            discriminator_iter_start=warmup_config.get("disc_iter_start", 0),
             # Sliding window config
             use_sliding_window=sw_config.get("enabled", False),
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
@@ -482,13 +520,13 @@ class AutoencoderLightningConfig:
     def _create_autoencoder(config: Dict[str, Any]) -> AutoencoderFSQ:
         """Create AutoencoderFSQ from config."""
         return AutoencoderFSQ(
-            spatial_dims=config["spatial_dims"],
-            levels=config["levels"],
+            spatial_dims=config.get("spatial_dims", 3),
+            levels=config.get("levels", [8, 8, 8]),
             in_channels=config.get("in_channels", 1),
             out_channels=config.get("out_channels", 1),
-            num_channels=config["num_channels"],
-            attention_levels=config["attention_levels"],
-            num_res_blocks=config["num_res_blocks"],
+            num_channels=config.get("num_channels", [32, 64, 128, 256, 512]),
+            attention_levels=config.get("attention_levels", [False, False, True, True, True]),
+            num_res_blocks=config.get("num_res_blocks", [1, 1, 1, 1, 1]),
             norm_num_groups=config.get("norm_num_groups", 32),
         )
 
@@ -497,16 +535,21 @@ class AutoencoderLightningConfig:
         config: Dict[str, Any]
     ) -> MultiScalePatchDiscriminator:
         """Create MultiScalePatchDiscriminator from config."""
+        # Extract activation tuple if provided
+        activation = config.get("activation", ("LEAKYRELU", {"negative_slope": 0.2}))
+        if isinstance(activation, list):
+            activation = tuple(activation)
+
         return MultiScalePatchDiscriminator(
             in_channels=config.get("in_channels", 1),
             num_d=config.get("num_d", 3),
-            channels=config.get("channels", config.get("ndf", 64)),
-            num_layers_d=config.get("num_layers_d", config.get("n_layers", 3)),
-            spatial_dims=config["spatial_dims"],
+            channels=config.get("channels", 64),
+            num_layers_d=config.get("num_layers_d", 3),
+            spatial_dims=config.get("spatial_dims", 3),
             out_channels=config.get("out_channels", 1),
-            kernel_size=config.get("kernel_size", 4),  # Configurable
-            activation=("LEAKYRELU", {"negative_slope": 0.2}),  # 默认值
-            norm="BATCH",  # 默认值
+            kernel_size=config.get("kernel_size", 4),
+            activation=activation,
+            norm=config.get("norm", "BATCH"),
             minimum_size_im=config.get("minimum_size_im", 64),
         )
 
@@ -597,7 +640,8 @@ class TransformerLightning(pl.LightningModule):
 
         self.autoencoder_path = autoencoder_path
         self.autoencoder: Optional[AutoencoderInferenceWrapper] = None  # Wrapped with SW in setup()
-        self.transformer = transformer
+        # transformer is guaranteed to be non-None here (either provided or created above)
+        self.transformer: nn.Module = transformer  # type: ignore[assignment]
 
         # Autoencoder config (needed for loading checkpoint)
         self.spatial_dims = spatial_dims
@@ -941,41 +985,52 @@ class TransformerLightningConfig:
         Create TransformerLightning from config dictionary.
 
         Args:
-            config: Configuration dictionary with keys:
-                - autoencoder: Autoencoder checkpoint path
-                - transformer: Transformer config
-                - training: Training hyperparameters
+            config: Configuration dictionary with hierarchical structure:
+                - model: Model configuration (transformer, num_modalities, contrast_embed_dim)
+                - training: Training hyperparameters (optimizer, loop, unconditional)
+                - sampler: MaskGiT sampler configuration
+                - sliding_window: Sliding window configuration
 
         Returns:
             Configured TransformerLightning instance
         """
+        # Get model configuration
+        model_config = config.get("model", {})
+        transformer_config = model_config.get("transformer", {})
+
         # Create transformer
-        transformer = TransformerLightningConfig._create_transformer(config["transformer"])
+        transformer = TransformerLightningConfig._create_transformer(transformer_config)
 
-        # Create lightning module
+        # Get training configuration
         training_config = config.get("training", {})
+        optimizer_config = training_config.get("optimizer", {})
+        loop_config = training_config.get("loop", {})
+        unconditional_config = training_config.get("unconditional", {})
 
-        # Load sliding window config (REQUIRED for transformer)
+        # Get sampler configuration
+        sampler_config = config.get("sampler", {})
+
+        # Get sliding window config (REQUIRED for transformer)
         sw_config = config.get("sliding_window", {})
 
         return TransformerLightning(
-            autoencoder_path=config["autoencoder_path"],
+            autoencoder_path=config.get("autoencoder_path", "outputs/autoencoder_final.pt"),
             transformer=transformer,
-            latent_channels=config.get("latent_channels", 4),
-            cond_channels=config.get("cond_channels", 4),
-            patch_size=config.get("patch_size", 2),
-            num_blocks=config.get("num_blocks", 12),
-            hidden_dim=config.get("hidden_dim", 512),
-            cond_dim=config.get("cond_dim", 512),
-            num_heads=config.get("num_heads", 8),
-            num_modalities=config.get("num_modalities", 4),
-            contrast_embed_dim=config.get("contrast_embed_dim", 64),
-            scheduler_type=config.get("scheduler_type", "log2"),
-            num_steps=config.get("num_steps", 12),
-            mask_value=config.get("mask_value", -100),
-            unconditional_prob=training_config.get("unconditional_prob", 0.1),
-            lr=training_config.get("lr", 1e-4),
-            sample_every_n_steps=training_config.get("sample_every_n_steps", 100),
+            latent_channels=transformer_config.get("latent_channels", 192),
+            cond_channels=transformer_config.get("cond_channels", 192),
+            patch_size=transformer_config.get("patch_size", 2),
+            num_blocks=transformer_config.get("num_blocks", 12),
+            hidden_dim=transformer_config.get("hidden_dim", 512),
+            cond_dim=transformer_config.get("cond_dim", 512),
+            num_heads=transformer_config.get("num_heads", 8),
+            num_modalities=model_config.get("num_modalities", 4),
+            contrast_embed_dim=model_config.get("contrast_embed_dim", 64),
+            scheduler_type=sampler_config.get("scheduler_type", "log"),
+            num_steps=sampler_config.get("steps", 12),
+            mask_value=sampler_config.get("mask_value", -100),
+            unconditional_prob=unconditional_config.get("unconditional_prob", 0.1),
+            lr=optimizer_config.get("learning_rate", 1e-4),
+            sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             # Sliding window config (REQUIRED)
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
             sw_overlap=sw_config.get("overlap", 0.5),
@@ -988,8 +1043,8 @@ class TransformerLightningConfig:
         from prod9.generator.transformer import TransformerDecoder
 
         return TransformerDecoder(
-            latent_channels=config["latent_channels"],
-            cond_channels=config["cond_channels"],
+            latent_channels=config.get("latent_channels", 192),
+            cond_channels=config.get("cond_channels", 192),
             patch_size=config.get("patch_size", 2),
             num_blocks=config.get("num_blocks", 12),
             hidden_dim=config.get("hidden_dim", 512),

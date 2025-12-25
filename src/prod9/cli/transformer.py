@@ -34,23 +34,16 @@ def train_transformer(config: str = "configs/transformer.yaml") -> None:
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="transformer")
 
-    # Create lightning module
+    # Create lightning module from config
     model = TransformerLightningConfig.from_config(cfg)
 
-    # Create data module
-    data_config = cfg.get("data", {})
-    data_module = BraTSDataModuleStage2(
-        autoencoder_path=cfg["autoencoder_path"],
-        data_dir=data_config["data_dir"],
-        batch_size=data_config.get("batch_size", 2),
-        num_workers=data_config.get("num_workers", 4),
-        cache_rate=data_config.get("cache_rate", 0.5),
-        roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
-        train_val_split=data_config.get("train_val_split", 0.8),
-    )
+    # Create data module from config
+    data_module = BraTSDataModuleStage2.from_config(cfg)
+    data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
 
     # Create trainer
     output_dir = cfg.get("output_dir", "outputs/stage2")
@@ -77,23 +70,16 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="transformer")
 
     # Create model from config
     model = TransformerLightningConfig.from_config(cfg)
 
-    # Create data module
-    data_config = cfg.get("data", {})
-    data_module = BraTSDataModuleStage2(
-        autoencoder_path=cfg["autoencoder_path"],
-        data_dir=data_config["data_dir"],
-        batch_size=data_config.get("batch_size", 2),
-        num_workers=data_config.get("num_workers", 4),
-        cache_rate=data_config.get("cache_rate", 0.5),
-        roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
-        train_val_split=data_config.get("train_val_split", 0.8),
-    )
+    # Create data module from config
+    data_module = BraTSDataModuleStage2.from_config(cfg)
+    data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
 
     # Create trainer for validation
     output_dir = cfg.get("output_dir", "outputs/validation")

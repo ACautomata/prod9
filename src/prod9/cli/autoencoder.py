@@ -34,22 +34,15 @@ def train_autoencoder(config: str = "configs/autoencoder.yaml") -> None:
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="autoencoder")
 
-    # Create lightning module
+    # Create lightning module from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module
-    data_config = cfg.get("data", {})
-    data_module = BraTSDataModuleStage1(
-        data_dir=data_config["data_dir"],
-        batch_size=data_config.get("batch_size", 2),
-        num_workers=data_config.get("num_workers", 4),
-        cache_rate=data_config.get("cache_rate", 0.5),
-        roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
-        train_val_split=data_config.get("train_val_split", 0.8),
-    )
+    # Create data module from config
+    data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer
     output_dir = cfg.get("output_dir", "outputs/stage1")
@@ -80,22 +73,15 @@ def validate_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="autoencoder")
 
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module
-    data_config = cfg.get("data", {})
-    data_module = BraTSDataModuleStage1(
-        data_dir=data_config["data_dir"],
-        batch_size=data_config.get("batch_size", 2),
-        num_workers=data_config.get("num_workers", 4),
-        cache_rate=data_config.get("cache_rate", 0.5),
-        roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
-        train_val_split=data_config.get("train_val_split", 0.8),
-    )
+    # Create data module from config
+    data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer for validation
     output_dir = cfg.get("output_dir", "outputs/validation")
@@ -124,22 +110,15 @@ def test_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="autoencoder")
 
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module
-    data_config = cfg.get("data", {})
-    data_module = BraTSDataModuleStage1(
-        data_dir=data_config["data_dir"],
-        batch_size=data_config.get("batch_size", 2),
-        num_workers=data_config.get("num_workers", 4),
-        cache_rate=data_config.get("cache_rate", 0.5),
-        roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
-        train_val_split=data_config.get("train_val_split", 0.8),
-    )
+    # Create data module from config
+    data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer for testing
     output_dir = cfg.get("output_dir", "outputs/test")
@@ -182,8 +161,9 @@ def infer_autoencoder(
     """
     setup_environment()
 
-    # Load configuration
-    cfg = load_config(config)
+    # Load configuration with validation
+    from prod9.training.config import load_validated_config
+    cfg = load_validated_config(config, stage="autoencoder")
 
     # Create model from config and load checkpoint
     model = AutoencoderLightningConfig.from_config(cfg)
@@ -229,9 +209,29 @@ def infer_autoencoder(
     image = ensure_channel(image)
     image = image.unsqueeze(0).to(device)  # Add batch dimension
 
+    # Get scale_factor and apply padding
+    from prod9.autoencoder.padding import (
+        compute_scale_factor,
+        pad_for_sliding_window,
+        unpad_from_sliding_window,
+    )
+
+    scale_factor = compute_scale_factor(model.autoencoder)
+
+    # Pad input to satisfy MONAI constraints
+    image_padded, padding_info = pad_for_sliding_window(
+        image,
+        scale_factor=scale_factor,
+        overlap=sw_config.overlap,
+        roi_size=sw_config.roi_size,
+    )
+
     # Run inference with sliding window
     with torch.no_grad():
-        reconstruction = wrapper.forward(image)
+        reconstruction = wrapper.forward(image_padded)
+
+    # Unpad output to original size
+    reconstruction = unpad_from_sliding_window(reconstruction, padding_info)
 
     # Save output
     from monai.transforms.io.array import SaveImage

@@ -8,10 +8,10 @@ class TestCLIEntryPoints:
 
     def test_autoencoder_cli_entry_point(self) -> None:
         """Verify autoencoder CLI main function is callable."""
-        from prod9.training.cli.autoencoder import main
+        from prod9.cli.autoencoder import main
         assert callable(main)
 
     def test_transformer_cli_entry_point(self) -> None:
         """Verify transformer CLI main function is callable."""
-        from prod9.training.cli.transformer import main
+        from prod9.cli.transformer import main
         assert callable(main)

@@ -259,6 +259,20 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         train_val_split: Train/validation split ratio
         fold: Cross-validation fold
         modalities: List of modality names
+        spacing: Pixel dimensions for spacing transform
+        orientation: NIfTI orientation code
+        intensity_a_min: Minimum intensity for normalization
+        intensity_a_max: Maximum intensity for normalization
+        intensity_b_min: Minimum output intensity
+        intensity_b_max: Maximum output intensity
+        clip: Whether to clip intensity values
+        flip_prob: Probability of random flip
+        flip_axes: Axes to flip (None = use default [0,1,2])
+        rotate_prob: Probability of random rotation
+        rotate_max_k: Maximum rotation (90-degree multiples)
+        rotate_axes: Axes to rotate in
+        shift_intensity_prob: Probability of intensity shift
+        shift_intensity_offset: Intensity shift amount
     """
 
     def __init__(
@@ -271,6 +285,22 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         train_val_split: float = 0.8,
         fold: int = 0,
         modalities: Optional[List[str]] = None,
+        # Preprocessing parameters
+        spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        orientation: str = "RAS",
+        intensity_a_min: float = 0.0,
+        intensity_a_max: float = 500.0,
+        intensity_b_min: float = 0.0,
+        intensity_b_max: float = 1.0,
+        clip: bool = True,
+        # Augmentation parameters
+        flip_prob: float = 0.5,
+        flip_axes: Optional[List[int]] = None,
+        rotate_prob: float = 0.5,
+        rotate_max_k: int = 3,
+        rotate_axes: Tuple[int, int] = (0, 1),
+        shift_intensity_prob: float = 0.5,
+        shift_intensity_offset: float = 0.1,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -282,9 +312,68 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.fold = fold
         self.modalities = modalities or MODALITY_KEYS
 
+        # Preprocessing parameters
+        self.spacing = spacing
+        self.orientation = orientation
+        self.intensity_a_min = intensity_a_min
+        self.intensity_a_max = intensity_a_max
+        self.intensity_b_min = intensity_b_min
+        self.intensity_b_max = intensity_b_max
+        self.clip = clip
+
+        # Augmentation parameters
+        self.flip_prob = flip_prob
+        self.flip_axes = flip_axes if flip_axes is not None else [0, 1, 2]
+        self.rotate_prob = rotate_prob
+        self.rotate_max_k = rotate_max_k
+        self.rotate_axes = rotate_axes
+        self.shift_intensity_prob = shift_intensity_prob
+        self.shift_intensity_offset = shift_intensity_offset
+
         # Single dataset with random modality sampling (set in setup())
         self.train_dataset: Optional[_RandomModalityDataset] = None
         self.val_dataset: Optional[_RandomModalityDataset] = None
+
+    @classmethod
+    def from_config(cls, config: Dict[str, Any]) -> "BraTSDataModuleStage1":
+        """
+        Create BraTSDataModuleStage1 from config dictionary.
+
+        Args:
+            config: Configuration dictionary with hierarchical structure
+
+        Returns:
+            Configured BraTSDataModuleStage1 instance
+        """
+        data_config = config.get("data", {})
+        prep_config = data_config.get("preprocessing", {})
+        aug_config = data_config.get("augmentation", {})
+
+        return cls(
+            data_dir=data_config["data_dir"],
+            batch_size=data_config.get("batch_size", 2),
+            num_workers=data_config.get("num_workers", 4),
+            cache_rate=data_config.get("cache_rate", 0.5),
+            roi_size=tuple(data_config.get("roi_size", (64, 64, 64))),
+            train_val_split=data_config.get("train_val_split", 0.8),
+            modalities=data_config.get("modalities"),
+            # Preprocessing
+            spacing=tuple(prep_config.get("spacing", (1.0, 1.0, 1.0))),
+            orientation=prep_config.get("orientation", "RAS"),
+            intensity_a_min=prep_config.get("intensity_a_min", 0.0),
+            intensity_a_max=prep_config.get("intensity_a_max", 500.0),
+            intensity_b_min=prep_config.get("intensity_b_min", 0.0),
+            intensity_b_max=prep_config.get("intensity_b_max", 1.0),
+            clip=prep_config.get("clip", True),
+            # Augmentation
+            flip_prob=aug_config.get("flip_prob", 0.5),
+            flip_axes=aug_config.get("flip_axes"),
+            rotate_prob=aug_config.get("rotate_prob", 0.5),
+            rotate_max_k=aug_config.get("rotate_max_k", 3),
+            rotate_axes=tuple(aug_config.get("rotate_axes", (0, 1))),
+            shift_intensity_prob=aug_config.get("shift_intensity_prob", 0.5),
+            shift_intensity_offset=aug_config.get("shift_intensity_offset", 0.1),
+        )
 
     def setup(self, stage: Optional[str] = None) -> None:
         """Setup train/validation datasets with random modality sampling."""
@@ -331,15 +420,15 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
-            Spacingd(keys=["image"], pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
-            Orientationd(keys=["image"], axcodes="RAS"),
+            Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
+            Orientationd(keys=["image"], axcodes=self.orientation),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=0.0,
-                a_max=500.0,
-                b_min=0.0,
-                b_max=1.0,
-                clip=True,
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.clip,
             ),
             CropForegroundd(keys=["image"], source_key="image"),
             RandCropByPosNegLabeld(
@@ -350,9 +439,9 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
                 neg=1,
                 num_samples=1,
             ),
-            RandFlipd(keys=["image"], spatial_axis=[0, 1, 2], prob=0.5),
-            RandRotate90d(keys=["image"], max_k=3, spatial_axes=(0, 1), prob=0.5),
-            RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
+            RandFlipd(keys=["image"], spatial_axis=self.flip_axes, prob=self.flip_prob),
+            RandRotate90d(keys=["image"], max_k=self.rotate_max_k, spatial_axes=self.rotate_axes, prob=self.rotate_prob),
+            RandShiftIntensityd(keys=["image"], offsets=self.shift_intensity_offset, prob=self.shift_intensity_prob),
             EnsureTyped(keys=["image"]),
         ])
 
@@ -361,15 +450,15 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
-            Spacingd(keys=["image"], pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
-            Orientationd(keys=["image"], axcodes="RAS"),
+            Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
+            Orientationd(keys=["image"], axcodes=self.orientation),
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=0.0,
-                a_max=500.0,
-                b_min=0.0,
-                b_max=1.0,
-                clip=True,
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.clip,
             ),
             CropForegroundd(keys=["image"], source_key="image"),
             EnsureTyped(keys=["image"]),
@@ -434,6 +523,16 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         train_val_split: Train/validation split ratio
         modalities: List of modality names
         cache_dir: Directory to store pre-encoded data
+        sw_roi_size: Sliding window ROI size for pre-encoding
+        sw_overlap: Sliding window overlap for pre-encoding
+        sw_batch_size: Sliding window batch size for pre-encoding
+        spacing: Pixel dimensions for spacing transform
+        orientation: NIfTI orientation code
+        intensity_a_min: Minimum intensity for normalization
+        intensity_a_max: Maximum intensity for normalization
+        intensity_b_min: Minimum output intensity
+        intensity_b_max: Maximum output intensity
+        clip: Whether to clip intensity values
     """
 
     def __init__(
@@ -452,6 +551,14 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         sw_roi_size: Tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
         sw_batch_size: int = 1,
+        # Preprocessing parameters
+        spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        orientation: str = "RAS",
+        intensity_a_min: float = 0.0,
+        intensity_a_max: float = 500.0,
+        intensity_b_min: float = 0.0,
+        intensity_b_max: float = 1.0,
+        clip: bool = True,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -470,8 +577,54 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
 
+        # Preprocessing parameters
+        self.spacing = spacing
+        self.orientation = orientation
+        self.intensity_a_min = intensity_a_min
+        self.intensity_a_max = intensity_a_max
+        self.intensity_b_min = intensity_b_min
+        self.intensity_b_max = intensity_b_max
+        self.clip = clip
+
         self.train_dataset: Optional[_PreEncodedDataset] = None
         self.val_dataset: Optional[_PreEncodedDataset] = None
+
+    @classmethod
+    def from_config(cls, config: Dict[str, Any]) -> "BraTSDataModuleStage2":
+        """
+        Create BraTSDataModuleStage2 from config dictionary.
+
+        Args:
+            config: Configuration dictionary with hierarchical structure
+
+        Returns:
+            Configured BraTSDataModuleStage2 instance
+        """
+        data_config = config.get("data", {})
+        prep_config = data_config.get("preprocessing", {})
+        sw_config = config.get("sliding_window", {})
+
+        return cls(
+            data_dir=data_config["data_dir"],
+            batch_size=data_config.get("batch_size", 2),
+            num_workers=data_config.get("num_workers", 4),
+            cache_rate=data_config.get("cache_rate", 0.5),
+            roi_size=tuple(data_config.get("roi_size", (64, 64, 64))),
+            train_val_split=data_config.get("train_val_split", 0.8),
+            modalities=data_config.get("modalities"),
+            # Preprocessing
+            spacing=tuple(prep_config.get("spacing", (1.0, 1.0, 1.0))),
+            orientation=prep_config.get("orientation", "RAS"),
+            intensity_a_min=prep_config.get("intensity_a_min", 0.0),
+            intensity_a_max=prep_config.get("intensity_a_max", 500.0),
+            intensity_b_min=prep_config.get("intensity_b_min", 0.0),
+            intensity_b_max=prep_config.get("intensity_b_max", 1.0),
+            clip=prep_config.get("clip", True),
+            # Sliding window for pre-encoding
+            sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
+            sw_overlap=sw_config.get("overlap", 0.5),
+            sw_batch_size=sw_config.get("sw_batch_size", 1),
+        )
 
     def set_autoencoder(self, autoencoder: object) -> None:
         """
@@ -586,15 +739,15 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         return Compose([
             LoadImaged(keys=self.modalities, reader="NibabelReader"),
             EnsureChannelFirstd(keys=self.modalities, channel_dim="no_channel"),
-            Spacingd(keys=self.modalities, pixdim=(1.0, 1.0, 1.0), mode=("bilinear",) * len(self.modalities)),
-            Orientationd(keys=self.modalities, axcodes="RAS"),
+            Spacingd(keys=self.modalities, pixdim=self.spacing, mode=("bilinear",) * len(self.modalities)),
+            Orientationd(keys=self.modalities, axcodes=self.orientation),
             ScaleIntensityRanged(
                 keys=self.modalities,
-                a_min=0.0,
-                a_max=500.0,
-                b_min=0.0,
-                b_max=1.0,
-                clip=True,
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.clip,
             ),
             CropForegroundd(keys=self.modalities, source_key=self.modalities[0]),
             RandCropByPosNegLabeld(

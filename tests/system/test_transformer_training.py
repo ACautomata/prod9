@@ -111,4 +111,4 @@ class TestTransformerTraining:
         # Verify contrast embeddings exist
         assert model.contrast_embeddings is not None
         assert model.contrast_embeddings.num_embeddings == 4
-        assert model.contrast_embeddings.embedding_dim == 32
+        assert model.contrast_embeddings.embedding_dim == 64  # Match cond_dim in config

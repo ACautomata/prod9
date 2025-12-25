@@ -1,147 +1,176 @@
-# Transformer Stage 2 Configuration
-# Training configuration for MaskGiT transformer
+# =============================================================================
+# prod9 Transformer Stage 2 Configuration
+# Complete configuration for MaskGiT transformer training
+# =============================================================================
 
-# Path to trained Stage 1 autoencoder
+# Paths
 autoencoder_path: "outputs/autoencoder_final.pt"
-
-# Output directory for checkpoints and logs
 output_dir: "outputs/stage2"
 
-# Model configuration
+# =============================================================================
+# Model Architecture
+# =============================================================================
 model:
-  # Latent channels from Stage 1 autoencoder
-  # Calculated as: product of latent shape * number of FSQ vectors
-  # For latent_shape [4,4,4] with 3 FSQ vectors: 4*4*4*3 = 192
-  latent_channels: 192
+  # Transformer decoder configuration
+  transformer:
+    latent_channels: 192  # latent_shape[0]*latent_shape[1]*latent_shape[2]*len(levels)
+    cond_channels: 192  # latent + contrast_embed
+    patch_size: 2  # 3D patch size
+    hidden_dim: 512
+    cond_dim: 512
+    num_heads: 8
+    num_blocks: 12
+    mlp_ratio: 4.0
+    dropout: 0.1
 
-  # Condition channels (same as latent_channels)
-  cond_channels: 192
+  # Contrast embeddings for modalities
+  num_modalities: 4  # T1, T1ce, T2, FLAIR
+  contrast_embed_dim: 64
 
-  # Patch size for 3D transformer (splits latent into patches)
-  patch_size: 2
-
-  # Transformer dimension
-  hidden_dim: 512
-
-  # Condition embedding dimension
-  cond_dim: 512
-
-  # Number of attention heads
-  num_heads: 8
-
-  # Number of transformer blocks
-  num_blocks: 12
-
-  # MLP expansion ratio (hidden_dim * mlp_ratio = FFN dimension)
-  mlp_ratio: 4.0
-
-  # Dropout rate
-  dropout: 0.1
-
-# Training configuration
+# =============================================================================
+# Training Configuration
+# =============================================================================
 training:
-  # Learning rate
-  learning_rate: 1e-4
+  # Optimizer settings
+  optimizer:
+    learning_rate: 1e-4
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.01
 
-  # AdamW optimizer beta1
-  beta1: 0.9
+  # Learning rate scheduler
+  scheduler:
+    type: "constant"  # constant, cosine, step
+    # T_max: 50  # For cosine
+    # step_size: 15  # For step
+    # gamma: 0.1  # For step
+    # eta_min: 0  # For cosine
 
-  # AdamW optimizer beta2
-  beta2: 0.999
+  # Training loop
+  loop:
+    gradient_clip_val: 1.0
+    gradient_clip_algorithm: "norm"
+    accumulation_batches: 1
+    sample_every_n_steps: 100
 
-  # Weight decay
-  weight_decay: 0.01
-
-  # Gradient clipping value (0 to disable)
-  grad_clip: 1.0
+  # Unconditional generation probability
+  unconditional:
+    unconditional_prob: 0.1
 
   # Number of training epochs
   max_epochs: 50
 
-# MaskGiT sampler configuration
+# =============================================================================
+# MaskGiT Sampler Configuration
+# =============================================================================
 sampler:
-  # Number of sampling steps
   steps: 12
-
-  # Mask token value
   mask_value: -100
+  scheduler_type: "log"  # log, linear, sqrt
+  temperature: 1.0  # Sampling temperature (lower = more deterministic)
 
-  # Scheduler type: 'log', 'linear', or 'sqrt'
-  scheduler_type: log
-
-  # Temperature for sampling (lower = more deterministic)
-  temperature: 1.0
-
-# Sliding window configuration (for autoencoder during generation)
-sliding_window:
-  # ROI size for sliding window inference
-  # Should be <= training roi_size to match training distribution
-  roi_size: [64, 64, 64]
-
-  # Overlap between adjacent windows (0-1)
-  overlap: 0.5
-
-  # Number of windows to process simultaneously
-  sw_batch_size: 1
-
-  # Blending mode: 'gaussian', 'constant', or 'mean'
-  mode: gaussian
-
-# Data configuration
+# =============================================================================
+# Data Configuration
+# =============================================================================
 data:
-  # Path to BraTS dataset (use BRATS_DATA_DIR env var, default: data/BraTS)
+  # Data paths
   data_dir: "${BRATS_DATA_DIR:data/BraTS}"
 
-  # Batch size (adjust based on GPU memory)
+  # Modalities
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]
+
+  # Data loader
   batch_size: 2
-
-  # Number of data loader workers
   num_workers: 4
-
-  # Cache rate for MONAI cache (0-1)
   cache_rate: 0.5
-
-  # ROI size for training crops
-  roi_size: [64, 64, 64]
-
-  # Train/validation split ratio
+  pin_memory: true
   train_val_split: 0.8
 
-# Loss configuration
-loss:
-  # Cross-entropy loss weight
-  lambda_ce: 1.0
+  # Training crop size
+  roi_size: [64, 64, 64]
 
-# Callbacks configuration
+  # Preprocessing (same as stage 1)
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]
+    spacing_mode: "bilinear"
+    orientation: "RAS"
+    intensity_a_min: 0.0
+    intensity_a_max: 500.0
+    intensity_b_min: 0.0
+    intensity_b_max: 1.0
+    clip: true
+
+  # Augmentation (usually disabled for stage 2)
+  augmentation:
+    flip_prob: 0.0  # Disable for stage 2
+    flip_axes: null
+    rotate_prob: 0.0
+    rotate_max_k: 0
+    rotate_axes: [0, 1]
+    shift_intensity_prob: 0.0
+    shift_intensity_offset: 0.0
+
+# =============================================================================
+# Loss Configuration
+# =============================================================================
+loss:
+  # Cross-entropy loss
+  cross_entropy:
+    weight: 1.0
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
 callbacks:
-  # Model checkpoint
   checkpoint:
     monitor: "val/loss"
     mode: "min"
     save_top_k: 3
+    save_last: true
+    every_n_epochs: null
 
-  # Early stopping
   early_stop:
+    enabled: true
     monitor: "val/loss"
     patience: 10
     mode: "min"
+    min_delta: 0.001
 
-  # Learning rate monitor
   lr_monitor: true
 
-# Trainer configuration
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
 trainer:
-  # Accelerator: 'gpu', 'cpu', 'mps' (Apple Silicon)
-  accelerator: "mps"
+  max_epochs: 50
 
-  # Devices to use
-  devices: 1
+  hardware:
+    accelerator: "mps"
+    devices: 1
+    precision: 32
 
-  # Precision: 32, 16, or bf16
-  precision: 32
+  logging:
+    log_every_n_steps: 10
+    val_check_interval: 1.0
+    limit_train_batches: null
+    limit_val_batches: 5
+    logger_version: null
 
-  # Number of validation batches to log
-  limit_val_batches: 5
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
 
-  # Log every N training batches
-  log_every_n_steps: 10
+  profiler: null
+  detect_anomaly: false
+  benchmark: false
+
+# =============================================================================
+# Sliding Window Inference (REQUIRED for transformer)
+# =============================================================================
+sliding_window:
+  enabled: true  # Always true for transformer
+
+  roi_size: [64, 64, 64]
+  overlap: 0.5
+  sw_batch_size: 1
+  mode: "gaussian"

@@ -65,7 +65,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_main_help(self):
         """Test CLI main help command."""
-        from prod9.training.cli.transformer import main
+        from prod9.cli.transformer import main
 
         # Mock sys.argv to simulate --help
         with patch("sys.argv", ["prod9-train-transformer", "--help"]):
@@ -76,7 +76,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_train_command_requires_config(self):
         """Test that train command requires valid config."""
-        from prod9.training.cli.transformer import main
+        from prod9.cli.transformer import main
 
         # Mock sys.argv with non-existent config
         with patch("sys.argv", ["prod9-train-transformer", "train", "--config", "nonexistent.yaml"]):
@@ -85,7 +85,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_validate_command_requires_checkpoint(self):
         """Test that validate command requires checkpoint path."""
-        from prod9.training.cli.transformer import main
+        from prod9.cli.transformer import main
 
         config_path = os.path.join(self.temp_dir, "config.yaml")
         self._create_minimal_config(config_path)
@@ -98,7 +98,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_generate_command_requires_output(self):
         """Test that generate command requires output path."""
-        from prod9.training.cli.transformer import main
+        from prod9.cli.transformer import main
 
         config_path = os.path.join(self.temp_dir, "config.yaml")
         self._create_minimal_config(config_path)
@@ -111,7 +111,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_validate_command_output_type(self):
         """Test that validate functions return correct type."""
-        from prod9.training.cli.transformer import validate_transformer
+        from prod9.cli.transformer import validate_transformer
         from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
@@ -120,7 +120,7 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
-        from prod9.training.cli.transformer import test_transformer
+        from prod9.cli.transformer import test_transformer
         from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
