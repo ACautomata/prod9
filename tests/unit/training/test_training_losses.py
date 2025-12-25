@@ -1,7 +1,7 @@
 """
 Tests for training loss functions module.
 
-Tests VAEGAN loss, perceptual loss, and adversarial loss computations.
+Tests VAEGAN loss from prod9.training.losses.
 """
 import unittest
 import torch
@@ -14,8 +14,7 @@ else:
     try:
         from prod9.training.losses import VAEGANLoss
     except ImportError:
-        # Use placeholder classes from test_helpers
-        from test_helpers import VAEGANLoss
+        VAEGANLoss = None  # type: ignore[assignment]
 
 
 class TestVAEGANLoss(unittest.TestCase):
@@ -23,14 +22,17 @@ class TestVAEGANLoss(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures."""
+        if VAEGANLoss is None:
+            self.skipTest("VAEGANLoss not available in prod9.training.losses")
+
         self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
         self.batch_size = 4
         self.channels = 1
         self.spatial_size = 16
 
         # Create loss function
-        self.vaegan_loss = VAEGANLoss(
-            recon_weight=1.0,  # type: ignore[call-arg]
+        self.vaegan_loss = VAEGANLoss(  # type: ignore[misc]
+            recon_weight=1.0,
             perceptual_weight=0.1,
             adv_weight=0.5
         ).to(self.device)

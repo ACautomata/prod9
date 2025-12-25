@@ -2,7 +2,7 @@
 
 import argparse
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Mapping
 
 import torch
 
@@ -63,7 +63,7 @@ def train_autoencoder(config: str = "configs/autoencoder.yaml") -> None:
     model.export_autoencoder(export_path)
 
 
-def validate_autoencoder(config: str, checkpoint: str) -> dict[str, float]:
+def validate_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     Run validation on a trained autoencoder.
 
@@ -107,7 +107,7 @@ def validate_autoencoder(config: str, checkpoint: str) -> dict[str, float]:
     return metrics[0] if metrics else {}
 
 
-def test_autoencoder(config: str, checkpoint: str) -> dict[str, float]:
+def test_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     Run testing on a trained autoencoder.
 

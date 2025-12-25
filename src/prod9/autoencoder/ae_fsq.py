@@ -1,4 +1,4 @@
-from typing import override, Tuple, List, Sequence
+from typing import override, Tuple, List, Sequence, cast
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
@@ -128,4 +128,8 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         Returns:
             The weight tensor of the decoder's final convolution layer.
         """
-        return self.decoder.blocks[-1].conv.conv.weight 
+        decoder_blocks = cast(nn.ModuleList, self.decoder.blocks)
+        last_block = cast(nn.Module, decoder_blocks[-1])
+        last_conv = cast(nn.Module, last_block.conv)
+        conv3d = cast(nn.Conv3d, last_conv.conv)
+        return conv3d.weight 

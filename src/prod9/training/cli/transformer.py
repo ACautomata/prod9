@@ -2,7 +2,7 @@
 
 import argparse
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Mapping
 
 import torch
 
@@ -60,7 +60,7 @@ def train_transformer(config: str = "configs/transformer.yaml") -> None:
     trainer.fit(model, datamodule=data_module)
 
 
-def validate_transformer(config: str, checkpoint: str) -> dict[str, float]:
+def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     Run validation on a trained transformer.
 
@@ -105,7 +105,7 @@ def validate_transformer(config: str, checkpoint: str) -> dict[str, float]:
     return metrics[0] if metrics else {}
 
 
-def test_transformer(config: str, checkpoint: str) -> dict[str, float]:
+def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     """
     Run testing on a trained transformer.
 

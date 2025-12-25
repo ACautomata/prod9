@@ -105,20 +105,20 @@ class TestAutoencoderCLI(unittest.TestCase):
     def test_infer_command_output_type(self):
         """Test that infer functions return correct type."""
         from prod9.training.cli.autoencoder import validate_autoencoder
-        from typing import get_type_hints
+        from typing import get_type_hints, Mapping
 
-        # Check return type annotation is dict[str, float]
+        # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(validate_autoencoder)
-        self.assertEqual(hints.get("return"), dict[str, float])
+        self.assertEqual(hints.get("return"), Mapping[str, float])
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
         from prod9.training.cli.autoencoder import test_autoencoder
-        from typing import get_type_hints
+        from typing import get_type_hints, Mapping
 
-        # Check return type annotation is dict[str, float]
+        # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(test_autoencoder)
-        self.assertEqual(hints.get("return"), dict[str, float])
+        self.assertEqual(hints.get("return"), Mapping[str, float])
 
     def test_infer_sliding_window_config_type(self):
         """Test that sliding window config is properly typed."""

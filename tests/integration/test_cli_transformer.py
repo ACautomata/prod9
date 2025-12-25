@@ -112,20 +112,20 @@ class TestTransformerCLI(unittest.TestCase):
     def test_validate_command_output_type(self):
         """Test that validate functions return correct type."""
         from prod9.training.cli.transformer import validate_transformer
-        from typing import get_type_hints
+        from typing import get_type_hints, Mapping
 
-        # Check return type annotation is dict[str, float]
+        # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(validate_transformer)
-        self.assertEqual(hints.get("return"), dict[str, float])
+        self.assertEqual(hints.get("return"), Mapping[str, float])
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
         from prod9.training.cli.transformer import test_transformer
-        from typing import get_type_hints
+        from typing import get_type_hints, Mapping
 
-        # Check return type annotation is dict[str, float]
+        # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(test_transformer)
-        self.assertEqual(hints.get("return"), dict[str, float])
+        self.assertEqual(hints.get("return"), Mapping[str, float])
 
     def test_cli_argparse_roi_size_parsing(self):
         """Test that CLI correctly parses roi-size argument."""

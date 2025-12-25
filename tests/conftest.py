@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Generator, Dict, Any, Union, List, Callable
 
-from test_helpers import (
+from .test_helpers import (
     get_test_device,
     get_minimal_system_config,
     SystemTestConfig,
@@ -165,19 +165,19 @@ def skip_if_no_gpu() -> Callable[[Any], Any]:
 @pytest.fixture
 def autoencoder_config() -> AutoencoderConfigDict:
     """Get autoencoder configuration for testing."""
-    from test_helpers import MINIMAL_AUTOENCODER_CONFIG
+    from .test_helpers import MINIMAL_AUTOENCODER_CONFIG
     return MINIMAL_AUTOENCODER_CONFIG.copy()
 
 
 @pytest.fixture
 def discriminator_config() -> DiscriminatorConfigDict:
     """Get discriminator configuration for testing."""
-    from test_helpers import MINIMAL_DISCRIMINATOR_CONFIG
+    from .test_helpers import MINIMAL_DISCRIMINATOR_CONFIG
     return MINIMAL_DISCRIMINATOR_CONFIG.copy()
 
 
 @pytest.fixture
 def training_config() -> TrainingConfigDict:
     """Get training configuration for testing."""
-    from test_helpers import MINIMAL_TRAINING_CONFIG
+    from .test_helpers import MINIMAL_TRAINING_CONFIG
     return MINIMAL_TRAINING_CONFIG.copy()

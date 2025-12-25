@@ -81,7 +81,17 @@ class AutoencoderInferenceWrapper:
         # Auto-detect device if not specified
         if self.sw_config.device is None:
             if hasattr(autoencoder, 'device'):
-                self.sw_config.device = autoencoder.device
+                device = autoencoder.device
+                if isinstance(device, torch.device):
+                    self.sw_config.device = device
+                elif hasattr(autoencoder, 'parameters'):
+                    try:
+                        param = next(autoencoder.parameters())
+                        self.sw_config.device = param.device
+                    except StopIteration:
+                        self.sw_config.device = torch.device('cpu')
+                else:
+                    self.sw_config.device = torch.device('cpu')
             elif hasattr(autoencoder, 'parameters'):
                 try:
                     param = next(autoencoder.parameters())

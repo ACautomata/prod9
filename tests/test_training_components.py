@@ -533,8 +533,10 @@ class TestDataModuleStage2:
     def mock_autoencoder(self):
         """Create a mock autoencoder."""
         mock_ae = Mock()
-        mock_ae.encode = Mock(return_value=torch.randn(1, 4, 8, 8, 8))
+        mock_ae.encode = Mock(return_value=(torch.randn(1, 4, 8, 8, 8), torch.tensor(0.0)))
         mock_ae.quantize = Mock(return_value=torch.randint(0, 1000, (1, 512)))
+        # Add parameters() method to mock nn.Module behavior
+        mock_ae.parameters = Mock(return_value=iter([torch.randn(1)]))
         return mock_ae
 
     def test_stage2_datamodule_init(self, temp_data_dir):

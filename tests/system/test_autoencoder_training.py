@@ -13,7 +13,7 @@ from prod9.training.lightning_module import AutoencoderLightning, AutoencoderLig
 from prod9.training.data import BraTSDataModuleStage1
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
-from test_helpers import SystemTestConfig, get_minimal_system_config
+from ..test_helpers import SystemTestConfig, get_minimal_system_config
 
 
 class TestAutoencoderTraining:
@@ -111,7 +111,7 @@ class TestAutoencoderTraining:
         model = AutoencoderLightningConfig.from_config(config)  # type: ignore[arg-type]
 
         # Wrap discriminator to handle shape issues
-        from test_helpers import wrap_discriminator_in_lightning_module
+        from ..test_helpers import wrap_discriminator_in_lightning_module
         model = wrap_discriminator_in_lightning_module(model)
 
 
@@ -130,7 +130,7 @@ class TestAutoencoderTraining:
 
         # Run training for one epoch
         try:
-            trainer.fit(model, train_dataloaders=train_loader)
+            trainer.fit(model, train_dataloaders=train_loader)  # type: ignore[arg-type]
             assert True  # Training completed without error
         except RuntimeError as e:
             if "Calculated padded input size" in str(e):
