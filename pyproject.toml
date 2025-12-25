@@ -23,8 +23,8 @@ dev = [
 
 [project.scripts]
 # Modular CLI
-prod9-train-autoencoder = "prod9.training.cli.autoencoder:main"
-prod9-train-transformer = "prod9.training.cli.transformer:main"
+prod9-train-autoencoder = "prod9.cli.autoencoder:main"
+prod9-train-transformer = "prod9.cli.transformer:main"
 
 [build-system]
 requires = ["hatchling >= 1.26"]

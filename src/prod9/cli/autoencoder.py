@@ -12,7 +12,7 @@ from prod9.training.lightning_module import (
     AutoencoderLightningConfig,
 )
 from prod9.training.data import BraTSDataModuleStage1
-from prod9.training.cli.shared import setup_environment, get_device, create_trainer
+from prod9.cli.shared import setup_environment, get_device, create_trainer
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
@@ -284,7 +284,10 @@ def main() -> None:
     # Validation
     validate_parser = subparsers.add_parser("validate", help="Run validation")
     validate_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/autoencoder.yaml",
+        help="Path to configuration file",
     )
     validate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -293,7 +296,10 @@ def main() -> None:
     # Testing
     test_parser = subparsers.add_parser("test", help="Run testing")
     test_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/autoencoder.yaml",
+        help="Path to configuration file",
     )
     test_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -302,7 +308,10 @@ def main() -> None:
     # Inference
     infer_parser = subparsers.add_parser("infer", help="Run inference")
     infer_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/autoencoder.yaml",
+        help="Path to configuration file",
     )
     infer_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"

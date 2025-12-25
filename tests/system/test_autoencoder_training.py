@@ -1,6 +1,7 @@
 """System tests for autoencoder training."""
 
 import os
+import random
 import tempfile
 from typing import Dict, Any
 
@@ -97,12 +98,11 @@ class TestAutoencoderTraining:
                 return 4  # Small dataset for testing
 
             def __getitem__(self, idx):
+                # Randomly sample one modality (same as real dataset)
+                modality = random.choice(["T1", "T1ce", "T2", "FLAIR"])
                 return {
-                    "t1": torch.randn(1, 64, 64, 64),
-                    "t1ce": torch.randn(1, 64, 64, 64),
-                    "t2": torch.randn(1, 64, 64, 64),
-                    "flair": torch.randn(1, 64, 64, 64),
-                    "seg": torch.zeros(1, 64, 64, 64),
+                    "image": torch.randn(1, 64, 64, 64),
+                    "modality": modality,
                 }
 
         # Create model

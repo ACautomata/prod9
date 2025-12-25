@@ -29,7 +29,7 @@ class AutoencoderLightning(pl.LightningModule):
     Lightning module for Stage 1 autoencoder training.
 
     Training loop:
-        1. Sample random modality from batch
+        1. Dataset handles random modality sampling
         2. Encode -> Quantize -> Decode
         3. Compute all losses (recon, perceptual, adversarial, commitment)
         4. Update generator and discriminator alternately
@@ -38,9 +38,14 @@ class AutoencoderLightning(pl.LightningModule):
     following the VQGAN paper implementation.
 
     Validation:
-        - Uses batch processing for all modalities
+        - Uses random modality sampling from dataset (same as training)
+        - Batch may contain mixed modalities
         - Computes PSNR, SSIM, LPIPS metrics
         - Saves best checkpoint based on combined metric
+
+    Batch format (from dataset):
+        - 'image': Tensor[B,1,H,W,D] - mixed modalities, each independently sampled
+        - 'modality': List[str] - modality names for each sample
 
     Args:
         autoencoder: AutoencoderFSQ model
@@ -156,10 +161,14 @@ class AutoencoderLightning(pl.LightningModule):
         self, batch: Dict[str, torch.Tensor], batch_idx: int
     ) -> STEP_OUTPUT:
         """
-        Training step with random modality sampling.
+        Training step for single-modality reconstruction.
+
+        Batch contains mixed modalities (each sample independently sampled).
 
         Args:
-            batch: Dictionary with all 4 modalities
+            batch: Dictionary with keys:
+                - 'image': Tensor[B,1,H,W,D] (mixed modalities, each sampled independently)
+                - 'modality': List[str] of modality names for each sample
             batch_idx: Batch index
 
         Returns:
@@ -169,9 +178,10 @@ class AutoencoderLightning(pl.LightningModule):
         optimizers = self.optimizers()
         opt_g, opt_d = optimizers  # type: ignore[misc]
 
-        # Sample random modality for training
-        modality = self._sample_random_modality(batch)
-        images = batch[modality]
+        # Get images (mixed modalities, each processed independently by autoencoder)
+        images = batch["image"]
+        modalities: list = batch["modality"]  # type: ignore[index]
+        # List of strings, e.g., ['T1', 'T2', 'FLAIR', 'T1ce']
 
         # Train discriminator
         disc_loss = self._train_discriminator(images, opt_d)
@@ -188,11 +198,17 @@ class AutoencoderLightning(pl.LightningModule):
         self.log("train/gen_commitment", gen_losses["commitment"])
         self.log("train/adv_weight", gen_losses.get("adv_weight", 0.0))
 
-        # Log samples periodically
-        if batch_idx % self.sample_every_n_steps == 0:
-            self._log_samples(images, modality)
+        # Log per-modality count (track modality distribution in batch)
+        for modality in set(modalities):  # type: ignore[arg-type]
+            count = modalities.count(modality)
+            self.log(f"train/{modality}_count", float(count))  # Track modality distribution
 
-        return {"loss": gen_losses["total"], "modality": modality}
+        # Log samples periodically (use first sample's modality)
+        if batch_idx % self.sample_every_n_steps == 0:
+            first_modality = modalities[0] if modalities else "unknown"  # type: ignore[index]
+            self._log_samples(images[0:1], first_modality)  # Log single sample
+
+        return {"loss": gen_losses["total"], "modalities": modalities}
 
     def _train_discriminator(self, real_images: torch.Tensor, opt_d) -> torch.Tensor:
         """
@@ -288,42 +304,34 @@ class AutoencoderLightning(pl.LightningModule):
         self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
     ) -> Optional[STEP_OUTPUT]:
         """
-        Validation step with batch processing for all modalities.
+        Validation step for single-modality reconstruction.
 
-        MONAI metrics support batched computation, so we process all modalities
-        together for efficiency.
+        Uses random modality sampling from dataset (same as training).
+        Batch contains mixed modalities - each sample validated independently.
 
         Args:
-            batch: Dictionary with all 4 modalities
+            batch: Dictionary with keys:
+                - 'image': Tensor[B,1,H,W,D] (mixed modalities)
+                - 'modality': List[str]
             batch_idx: Batch index (unused, required by Lightning)
 
         Returns:
             Metrics dictionary
         """
-        # Stack all modalities into a single batch
-        all_images = []
-        modalities = []
+        images = batch["image"]
+        modalities: list = batch["modality"]  # type: ignore[index]
 
-        for modality, images in batch.items():
-            if modality == "seg":
-                continue
-            all_images.append(images)
-            modalities.append(modality)
-
-        # Stack: [B*M, C, H, W, D] where M is number of modalities
-        all_images = torch.cat(all_images, dim=0)
-
-        # Reconstruct all at once - use SW if enabled, otherwise direct
+        # Reconstruct - use SW if enabled, otherwise direct
         wrapper = self._get_inference_wrapper()
         if wrapper is not None:
-            reconstructed = wrapper.forward(all_images)
+            reconstructed = wrapper.forward(images)
         else:
-            reconstructed = self.forward(all_images)  # Direct for speed
+            reconstructed = self.forward(images)  # Direct for speed
 
-        # Compute metrics on batch (MONAI metrics support batched inputs)
-        metrics = self.metrics(reconstructed, all_images)
+        # Compute metrics (mixed modalities batch, evaluated together)
+        metrics = self.metrics(reconstructed, images)
 
-        # Log metrics
+        # Log overall metrics
         for metric_name, metric_value in metrics.items():
             self.log(f"val/{metric_name}", metric_value)
 
@@ -332,13 +340,6 @@ class AutoencoderLightning(pl.LightningModule):
             self.log("val/combined_metric", metrics["combined"], prog_bar=True)
 
         return metrics
-
-    def _sample_random_modality(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> str:
-        """Sample a random modality from the batch."""
-        modalities = [k for k in batch.keys() if k != "seg"]
-        return random.choice(modalities)
 
     def _log_samples(self, images: torch.Tensor, modality: str) -> None:
         """Log sample reconstructions to tensorboard."""

@@ -12,7 +12,7 @@ from prod9.training.lightning_module import (
     TransformerLightningConfig,
 )
 from prod9.training.data import BraTSDataModuleStage2
-from prod9.training.cli.shared import setup_environment, create_trainer
+from prod9.cli.shared import setup_environment, create_trainer
 from prod9.generator.maskgit import MaskGiTSampler
 
 
@@ -284,7 +284,10 @@ def main() -> None:
     # Validation
     validate_parser = subparsers.add_parser("validate", help="Run validation")
     validate_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/transformer.yaml",
+        help="Path to configuration file",
     )
     validate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -293,7 +296,10 @@ def main() -> None:
     # Testing
     test_parser = subparsers.add_parser("test", help="Run testing")
     test_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/transformer.yaml",
+        help="Path to configuration file",
     )
     test_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -302,7 +308,10 @@ def main() -> None:
     # Generation
     generate_parser = subparsers.add_parser("generate", help="Generate samples")
     generate_parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
+        "--config",
+        type=str,
+        default="configs/transformer.yaml",
+        help="Path to configuration file",
     )
     generate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to transformer checkpoint"

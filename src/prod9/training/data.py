@@ -145,6 +145,52 @@ class _AllModalitiesDataset(Dataset):
         return {mod: data[mod] for mod in self.data_files[idx]}
 
 
+class _RandomModalityDataset(Dataset):
+    """
+    Dataset for Stage 1: Random single-modality sampling.
+
+    Each __getitem__ randomly samples one modality for self-supervised reconstruction.
+
+    Returns:
+        Dict with keys:
+            - 'image': Tensor[1,1,H,W,D]
+            - 'modality': str (e.g., 'T1', 'T1ce', 'T2', 'FLAIR')
+    """
+
+    def __init__(
+        self,
+        data_files: List[Dict[str, str]],
+        transforms: Compose,
+        modalities: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Args:
+            data_files: List of dictionaries mapping modality names to file paths
+            transforms: MONAI transforms to apply
+            modalities: List of modality keys to sample from (default: MODALITY_KEYS)
+        """
+        self.data_files = data_files
+        self.transforms = transforms
+        self.modalities = modalities or MODALITY_KEYS
+
+    def __len__(self) -> int:
+        return len(self.data_files)
+
+    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str]]:
+        """Load and transform a randomly sampled modality."""
+        # Randomly sample one modality
+        modality = random.choice(self.modalities)
+
+        # Load the sampled modality
+        file_path: str = self.data_files[idx][modality]
+        data: Any = self.transforms({"image": file_path})
+
+        return {
+            "image": data["image"],
+            "modality": modality,
+        }
+
+
 class _PreEncodedDataset(Dataset):
     """
     Dataset for Stage 2 training with pre-encoded latents/indices.
@@ -236,14 +282,12 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.fold = fold
         self.modalities = modalities or MODALITY_KEYS
 
-        self.train_datasets: Dict[str, CacheDataset] = {}
-        self.val_datasets: Dict[str, CacheDataset] = {}
-
-        # Current modality for training (cycles through modalities)
-        self.current_modality_idx = 0
+        # Single dataset with random modality sampling (set in setup())
+        self.train_dataset: Optional[_RandomModalityDataset] = None
+        self.val_dataset: Optional[_RandomModalityDataset] = None
 
     def setup(self, stage: Optional[str] = None) -> None:
-        """Setup train/validation datasets for all modalities."""
+        """Setup train/validation datasets with random modality sampling."""
         if stage == "predict" or stage is None:
             return
 
@@ -261,7 +305,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         train_patients = patients[:n_train]
         val_patients = patients[n_train:]
 
-        # Get file lists for each split
+        # Get file lists for each split (keep all modalities)
         train_files = [_get_brats_files(self.data_dir, p) for p in train_patients]
         val_files = [_get_brats_files(self.data_dir, p) for p in val_patients]
 
@@ -269,25 +313,18 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         train_transforms = self._get_train_transforms()
         val_transforms = self._get_val_transforms()
 
-        # Create datasets for each modality
+        # Create datasets with RANDOM modality sampling
         if stage in ["fit", None]:
-            for modality in self.modalities:
-                self.train_datasets[modality] = CacheDataset(
-                    data=[
-                        {"image": f[modality]} for f in train_files
-                    ],
-                    transform=train_transforms,
-                    cache_rate=self.cache_rate,
-                    num_workers=self.num_workers,
-                )
-                self.val_datasets[modality] = CacheDataset(
-                    data=[
-                        {"image": f[modality]} for f in val_files
-                    ],
-                    transform=val_transforms,
-                    cache_rate=self.cache_rate,
-                    num_workers=self.num_workers,
-                )
+            self.train_dataset = _RandomModalityDataset(
+                data_files=train_files,
+                transforms=train_transforms,
+                modalities=self.modalities,
+            )
+            self.val_dataset = _RandomModalityDataset(
+                data_files=val_files,
+                transforms=val_transforms,
+                modalities=self.modalities,
+            )
 
     def _get_train_transforms(self) -> Compose:
         """Get training transforms with augmentation."""
@@ -339,48 +376,35 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         ])
 
     def train_dataloader(self) -> DataLoader:
-        """Get training dataloader for current modality."""
-        if not self.train_datasets:
+        """Get training dataloader with random modality sampling."""
+        if self.train_dataset is None:
             raise RuntimeError("Dataset not setup. Call setup('fit') first.")
 
-        modality = self.modalities[self.current_modality_idx]
-        dataset = self.train_datasets[modality]
-
         return DataLoader(
-            dataset,
+            self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=lambda batch: {"image": torch.stack([b["image"] for b in batch])},
+            # No custom collate_fn needed - PyTorch default works fine
+            # Default collate will:
+            #   - Stack tensors: List[Tensor[1,1,H,W,D]] → Tensor[B,1,H,W,D]
+            #   - Keep strings as list: List[str] → List[str]
         )
 
     def val_dataloader(self) -> DataLoader:
-        """Get validation dataloader for current modality."""
-        if not self.val_datasets:
+        """Get validation dataloader with random modality sampling."""
+        if self.val_dataset is None:
             raise RuntimeError("Dataset not setup. Call setup('fit') first.")
 
-        modality = self.modalities[self.current_modality_idx]
-        dataset = self.val_datasets[modality]
-
         return DataLoader(
-            dataset,
+            self.val_dataset,
             batch_size=1,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=lambda batch: {"image": torch.stack([b["image"] for b in batch])},
+            # No custom collate_fn needed
         )
-
-    def advance_modality(self) -> str:
-        """
-        Advance to next modality for training.
-
-        Returns:
-            Current modality name
-        """
-        self.current_modality_idx = (self.current_modality_idx + 1) % len(self.modalities)
-        return self.modalities[self.current_modality_idx]
 
 
 class BraTSDataModuleStage2(pl.LightningDataModule):

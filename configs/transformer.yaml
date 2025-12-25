@@ -9,29 +9,34 @@ output_dir: "outputs/stage2"
 
 # Model configuration
 model:
-  # Latent dimensions from Stage 1 autoencoder
-  latent_shape: [4, 4, 4]  # [H, W, D] of latent grid
+  # Latent channels from Stage 1 autoencoder
+  # Calculated as: product of latent shape * number of FSQ vectors
+  # For latent_shape [4,4,4] with 3 FSQ vectors: 4*4*4*3 = 192
+  latent_channels: 192
 
-  # Vocabulary size (product of FSQ levels)
-  vocab_size: 512  # 8^3 = 512
+  # Condition channels (same as latent_channels)
+  cond_channels: 192
+
+  # Patch size for 3D transformer (splits latent into patches)
+  patch_size: 2
 
   # Transformer dimension
   hidden_dim: 512
 
+  # Condition embedding dimension
+  cond_dim: 512
+
   # Number of attention heads
   num_heads: 8
 
-  # Number of transformer layers
-  num_layers: 12
+  # Number of transformer blocks
+  num_blocks: 12
 
-  # Feedforward dimension
-  ffn_dim: 2048
+  # MLP expansion ratio (hidden_dim * mlp_ratio = FFN dimension)
+  mlp_ratio: 4.0
 
   # Dropout rate
   dropout: 0.1
-
-  # Number of modalities (T1, T1ce, T2, FLAIR)
-  num_modalities: 4
 
 # Training configuration
 training:
@@ -56,13 +61,13 @@ training:
 # MaskGiT sampler configuration
 sampler:
   # Number of sampling steps
-  num_steps: 12
+  steps: 12
 
   # Mask token value
   mask_value: -100
 
-  # Scheduler type: 'log2', 'linear', or 'sqrt'
-  scheduler_type: log2
+  # Scheduler type: 'log', 'linear', or 'sqrt'
+  scheduler_type: log
 
   # Temperature for sampling (lower = more deterministic)
   temperature: 1.0
@@ -97,7 +102,7 @@ data:
   cache_rate: 0.5
 
   # ROI size for training crops
-  roi_size: [128, 128, 128]
+  roi_size: [64, 64, 64]
 
   # Train/validation split ratio
   train_val_split: 0.8

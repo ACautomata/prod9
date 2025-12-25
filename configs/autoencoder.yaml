@@ -18,35 +18,51 @@ model:
   # Output channels (reconstruction)
   out_channels: 1
 
-  # Number of latent channels (before quantization)
-  latent_channels: 64
-
   # FSQ quantization levels per dimension
   # Product should be >= vocabulary size needed
-  fsq_levels: [8, 8, 8]  # 8^3 = 512 codebook size
+  levels: [8, 8, 8]  # 8^3 = 512 codebook size
 
-  # Number of channels in encoder/decoder
-  fmaps: [32, 64, 128, 256, 512]
+  # Number of channels in encoder/decoder (last channel count)
+  num_channels: 512
 
-  # Downsampling factor (2^fmaps_depth = 32 for 5 levels)
-  fmaps_depth: 5
+  # Attention levels for each encoder/decoder stage
+  # False = no attention, True = with attention
+  attention_levels: [False, False, True, True, True]
+
+  # Number of residual blocks per stage
+  num_res_blocks: [1, 1, 1, 1, 1]
 
 # Training configuration
 training:
-  # Learning rate
-  learning_rate: 1e-4
+  # Generator (autoencoder) learning rate
+  lr_g: 1e-4
+
+  # Discriminator learning rate
+  lr_d: 4e-4
 
   # Adam optimizer beta1
-  beta1: 0.5
+  b1: 0.5
 
   # Adam optimizer beta2
-  beta2: 0.999
+  b2: 0.999
 
   # Weight decay (L2 regularization)
   weight_decay: 1e-5
 
   # Gradient clipping value (0 to disable)
   grad_clip: 1.0
+
+  # Reconstruction loss weight
+  recon_weight: 1.0
+
+  # Perceptual loss weight
+  perceptual_weight: 0.5
+
+  # Adversarial loss weight
+  adv_weight: 0.1
+
+  # FSQ commitment loss weight
+  commitment_weight: 0.25
 
   # Number of training epochs
   max_epochs: 100
@@ -101,7 +117,7 @@ data:
   cache_rate: 0.5
 
   # ROI size for training crops (data loader provides this size)
-  roi_size: [128, 128, 128]
+  roi_size: [64, 64, 64]
 
   # Train/validation split ratio
   train_val_split: 0.8
@@ -113,9 +129,6 @@ loss:
 
   # Perceptual loss weight (VGG features if available)
   lambda_perceptual: 0.1
-
-  # SSIM loss weight
-  lambda_ssim: 0.5
 
 # Callbacks configuration
 callbacks:
