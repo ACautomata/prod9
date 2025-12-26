@@ -20,7 +20,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import CombinedMetric
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
@@ -110,7 +110,12 @@ class AutoencoderLightning(pl.LightningModule):
         )
 
         # Metrics for validation
-        self.metrics = CombinedMetric()
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.psnr = PSNRMetric()
+        self.ssim = SSIMMetric()
+        self.lpips = LPIPSMetric().to(device)
+        # MetricCombiner will be created from config in AutoencoderLightningConfig.from_config()
+        self.metric_combiner: MetricCombiner | None = None
 
         # Sliding window config (for validation only - training uses direct calls)
         self.use_sliding_window = use_sliding_window
@@ -352,18 +357,28 @@ class AutoencoderLightning(pl.LightningModule):
         else:
             reconstructed = self.forward(images)  # Direct for speed
 
-        # Compute metrics (mixed modalities batch, evaluated together)
-        metrics = self.metrics(reconstructed, images)
+        # Compute individual metrics
+        psnr_value = self.psnr(reconstructed, images)
+        ssim_value = self.ssim(reconstructed, images)
+        lpips_value = self.lpips(reconstructed, images)
 
-        # Log overall metrics
-        for metric_name, metric_value in metrics.items():
-            self.log(f"val/{metric_name}", metric_value)
+        # Log individually for TensorBoard visualization
+        self.log("val/psnr", psnr_value, prog_bar=False)
+        self.log("val/ssim", ssim_value, prog_bar=False)
+        self.log("val/lpips", lpips_value, prog_bar=False)
 
-        # Log combined metric for model checkpointing
-        if "combined" in metrics:
-            self.log("val/combined_metric", metrics["combined"], prog_bar=True)
-
-        return metrics
+        # Combine for checkpointing
+        if self.metric_combiner is not None:
+            combined = self.metric_combiner(
+                psnr=psnr_value,
+                ssim=ssim_value,
+                lpips=lpips_value,
+            )
+            self.log("val/combined_metric", combined, prog_bar=True)
+            return {"combined": combined, "psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
+        else:
+            # Fallback: just return individual metrics
+            return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
 
     def _log_samples(self, images: torch.Tensor, modality: str) -> None:
         """Log sample reconstructions to tensorboard."""
@@ -496,6 +511,16 @@ class AutoencoderLightningConfig:
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
 
+        # Get metrics config
+        metrics_config = config.get("metrics", {})
+        combination_config = metrics_config.get("combination", {})
+
+        # Create MetricCombiner
+        metric_combiner = MetricCombiner(
+            weights=combination_config.get("weights"),
+            psnr_range=tuple(combination_config.get("psnr_range", (20.0, 40.0))),
+        )
+
         return AutoencoderLightning(
             autoencoder=autoencoder,
             discriminator=discriminator,
@@ -515,6 +540,10 @@ class AutoencoderLightningConfig:
             sw_overlap=sw_config.get("overlap", 0.5),
             sw_batch_size=sw_config.get("sw_batch_size", 1),
         )
+
+        # Set metric_combiner after creation
+        module.metric_combiner = metric_combiner
+        return module
 
     @staticmethod
     def _create_autoencoder(config: Dict[str, Any]) -> AutoencoderFSQ:
@@ -671,8 +700,11 @@ class TransformerLightning(pl.LightningModule):
         from prod9.generator.maskgit import MaskGiTScheduler
         self.scheduler = MaskGiTScheduler(steps=num_steps, mask_value=mask_value)
 
-        # Metrics for validation
-        self.metrics = CombinedMetric()
+        # Metrics for validation (individual metrics only, transformer uses val/loss for checkpointing)
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.psnr = PSNRMetric()
+        self.ssim = SSIMMetric()
+        self.lpips = LPIPSMetric().to(device)
 
     def _get_autoencoder(self) -> AutoencoderInferenceWrapper:
         """Helper to get autoencoder wrapper with type assertion."""
@@ -768,85 +800,66 @@ class TransformerLightning(pl.LightningModule):
         self, batch: Dict[str, torch.Tensor], batch_idx: int
     ) -> STEP_OUTPUT:
         """
-        Training step with conditional/unconditional generation.
+        Training step with conditional generation using cond_latent.
 
         Uses automatic optimization (Lightning handles backward and optimizer steps).
 
         Args:
-            batch: Dictionary with pre-encoded data
+            batch: Dictionary with:
+                - 'cond_latent': [B, C, H, W, D] - conditioning modality latent (zeros for unconditional)
+                - 'target_latent': [B, C, H, W, D] - target modality latent
+                - 'target_indices': [B, H*W*D] - target token indices
+                - 'target_modality_idx': [B] - target modality indices
             batch_idx: Batch index
 
         Returns:
             Loss dictionary for logging
         """
-        # Randomly choose: unconditional vs conditional
-        is_unconditional = random.random() < self.unconditional_prob
-        autoencoder = self._get_autoencoder()
 
-        if is_unconditional:
-            # Unconditional generation
-            source_latent = batch["source_latent"]
-            target_latent = batch["target_latent"]
+        cond_latent = batch["cond_latent"]  # [B, C, H, W, D] - zeros for unconditional
+        target_latent = batch["target_latent"]  # [B, C, H, W, D]
+        target_indices = batch["target_indices"]  # [B, H*W*D]
+        target_modality_idx = batch["target_modality_idx"]  # [B]
 
-            # Prepare condition (None for unconditional)
-            cond = None
+        # Prepare condition: concat cond_latent with contrast embedding
+        # Get contrast embedding for target modality
+        contrast_embed = self.contrast_embeddings(target_modality_idx)  # [B, contrast_embed_dim]
+        # Spatially broadcast to match latent spatial dimensions
+        batch_size = cond_latent.shape[0]
+        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
+        contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
+        # Concatenate cond_latent and contrast embedding
+        cond = torch.cat([cond_latent, contrast_embed], dim=1)  # [B, C + contrast_embed_dim, H, W, D]
 
-            # Get target tokens (already encoded)
-            target_tokens = autoencoder.quantize_stage_2_inputs(target_latent)
-
-        else:
-            # Conditional generation
-            source_latent = batch["source_latent"]
-            target_latent = batch["target_latent"]
-            target_modality_idx = batch["target_modality_idx"]
-
-            # Prepare condition with source latent and target contrast embedding
-            cond = self.prepare_condition(source_latent, target_modality_idx, False)
-
-            # Get target tokens (already encoded)
-            target_tokens = autoencoder.quantize_stage_2_inputs(target_latent)
-
-        # Generate masked pairs via MaskGiTScheduler
-        # First, select indices to mask based on random step
+        # Generate masked pairs via MaskGiTScheduler using target_latent
         step = random.randint(1, self.num_steps)
-        target_embed = autoencoder.embed(target_tokens)
-        mask_indices = self.scheduler.select_indices(target_embed, step)
-        # Then generate masked tokens and labels
-        masked_tokens, label_tokens = self.scheduler.generate_pair(target_embed, mask_indices)
+        mask_indices = self.scheduler.select_indices(target_latent, step)
+        masked_tokens, label_indices = self.scheduler.generate_pair(target_latent, mask_indices)
 
         # Forward through transformer
         predicted_logits = self.transformer(masked_tokens, cond)  # [B, codebook_size, H, W, D]
 
         # Compute cross-entropy loss on masked positions only
-        batch_size, codebook_size, _, _, _ = predicted_logits.shape
+        b, vocab_size, h, w, d = predicted_logits.shape
+        seq_len = h * w * d
 
-        # Flatten: [B, codebook_size, H, W, D] -> [B, H*W*D, codebook_size]
-        predicted_flat = predicted_logits.permute(0, 2, 3, 4, 1).reshape(batch_size, -1, codebook_size)
+        # Reshape logits: [B, codebook_size, H, W, D] -> [B, codebook_size, H*W*D]
+        predicted_flat = predicted_logits.view(b, vocab_size, seq_len)
 
-        # label_tokens are embedded vectors [B, C, H, W, D]
-        # Need to convert back to token indices by quantizing them
-        autoencoder = self._get_autoencoder()
-        label_indices = autoencoder.autoencoder.quantize(label_tokens)  # [B, H, W, D]
-        label_flat = label_indices.reshape(batch_size, -1)  # [B, H*W*D]
 
-        # Create mask for valid positions (not masked)
-        mask = (label_flat != self.mask_value)
+        # Cross-entropy per token
+        loss_per_token = nn.functional.cross_entropy(
+            predicted_flat,
+            label_indices,
+        )  # [B, seq_len]
 
-        if mask.any():
-            # Cross-entropy loss
-            loss = nn.functional.cross_entropy(
-                predicted_flat[mask],
-                label_flat[mask].long(),
-                reduction="mean",
-            )
-        else:
-            loss = torch.tensor(0.0, device=predicted_logits.device, requires_grad=True)
+        # Normalize by number of masked tokens
+        loss = loss_per_token / label_indices.shape[1]
 
         # Log loss
         self.log("train/loss", loss, prog_bar=True)
-        self.log("train/unconditional", float(is_unconditional), prog_bar=False)
 
-        return {"loss": loss, "unconditional": is_unconditional}
+        return {"loss": loss}
 
     def validation_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
@@ -857,7 +870,11 @@ class TransformerLightning(pl.LightningModule):
         Uses configured num_steps for generation (not reduced to 1).
 
         Args:
-            batch: Dictionary with pre-encoded data
+            batch: Dictionary with:
+                - 'cond_latent': [B, C, H, W, D] - conditioning modality latent
+                - 'target_latent': [B, C, H, W, D] - target modality latent
+                - 'target_indices': [B, H*W*D] - target token indices
+                - 'target_modality_idx': [B] - target modality indices
             batch_idx: Batch index (unused, required by Lightning)
 
         Returns:
@@ -866,13 +883,20 @@ class TransformerLightning(pl.LightningModule):
         metrics = {}
         autoencoder = self._get_autoencoder()
 
-        # Get source and target latents
-        source_latent = batch["source_latent"]
+        # Get cond_latent and target latents
+        cond_latent = batch["cond_latent"]
         target_latent = batch["target_latent"]
-        target_modality_idx = batch.get("target_modality_idx", torch.ones(1, dtype=torch.long))
+        target_modality_idx = batch["target_modality_idx"]
 
-        # Prepare condition
-        cond = self.prepare_condition(source_latent, target_modality_idx, False)
+        # Prepare condition: concat cond_latent with contrast embedding
+        # Get contrast embedding for target modality
+        contrast_embed = self.contrast_embeddings(target_modality_idx)  # [B, contrast_embed_dim]
+        # Spatially broadcast to match latent spatial dimensions
+        batch_size = cond_latent.shape[0]
+        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
+        contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
+        # Concatenate cond_latent and contrast embedding
+        cond = torch.cat([cond_latent, contrast_embed], dim=1)  # [B, C + contrast_embed_dim, H, W, D]
 
         # Use MaskGiTSampler for generation with configured num_steps
         from prod9.generator.maskgit import MaskGiTSampler
@@ -906,14 +930,22 @@ class TransformerLightning(pl.LightningModule):
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)
 
-            # Compute metrics
-            modality_metrics = self.metrics(reconstructed_image, target_image)
+            # Compute individual metrics
+            psnr_value = self.psnr(reconstructed_image, target_image)
+            ssim_value = self.ssim(reconstructed_image, target_image)
+            lpips_value = self.lpips(reconstructed_image, target_image)
+
+            modality_metrics = {
+                "psnr": psnr_value,
+                "ssim": ssim_value,
+                "lpips": lpips_value,
+            }
 
             # Log metrics
             for metric_name, metric_value in modality_metrics.items():
                 self.log(f"val/{metric_name}", metric_value, prog_bar=True)
 
-            metrics["combined"] = modality_metrics
+            metrics["modality_metrics"] = modality_metrics
 
         return metrics
 

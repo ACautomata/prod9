@@ -15,7 +15,7 @@ from typing import Dict
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, CombinedMetric
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner as CombinedMetric
 
 
 class TestVAEGANLoss:
@@ -628,17 +628,15 @@ class TestPreEncodedDataset:
         # Get first item
         item = dataset[0]
 
-        assert "source_latent" in item
+        assert "cond_latent" in item
         assert "target_latent" in item
         assert "target_indices" in item
         assert "target_modality_idx" in item
-        assert "source_modality_idx" in item
 
         # Check shapes
-        assert item["source_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
+        assert item["cond_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
         assert item["target_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
         assert item["target_indices"].shape == (512,)  # type: ignore[has-attribute]
 
-        # Check modality indices are in valid range
+        # Check modality index is in valid range
         assert 0 <= item["target_modality_idx"] <= 3
-        assert 0 <= item["source_modality_idx"] <= 3

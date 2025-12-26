@@ -12,7 +12,7 @@ from prod9.training.metrics import (
     PSNRMetric,
     SSIMMetric,
     LPIPSMetric,
-    CombinedMetric,
+    MetricCombiner as CombinedMetric,
 )
 from prod9.training.data import (
     BraTSDataModuleStage1,

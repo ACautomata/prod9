@@ -15,15 +15,26 @@ import torch
 import numpy as np
 
 if TYPE_CHECKING:
-    from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2, _RandomModalityDataset  # type: ignore[attr-defined]
+    from prod9.training.data import (
+        BraTSDataModuleStage1,
+        BraTSDataModuleStage2,
+        _RandomModalityDataset,
+        _PreEncodedDataset,
+    )  # type: ignore[attr-defined]
 else:
     try:
-        from prod9.training.data import BraTSDataModuleStage1, BraTSDataModuleStage2, _RandomModalityDataset
+        from prod9.training.data import (
+            BraTSDataModuleStage1,
+            BraTSDataModuleStage2,
+            _RandomModalityDataset,
+            _PreEncodedDataset,
+        )
     except ImportError:
         # Data module not implemented yet - skip tests
         BraTSDataModuleStage1 = None  # type: ignore[assignment]
         BraTSDataModuleStage2 = None  # type: ignore[assignment]
         _RandomModalityDataset = None  # type: ignore[assignment]
+        _PreEncodedDataset = None  # type: ignore[assignment]
 
 
 class TestBraTSDataModuleStage1(unittest.TestCase):
@@ -358,6 +369,253 @@ class TestIntegration(unittest.TestCase):
             import shutil
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
+
+
+class TestPreEncodedDatasetUnconditional(unittest.TestCase):
+    """Test suite for _PreEncodedDataset with unconditional generation."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        if _PreEncodedDataset is None:
+            self.skipTest("_PreEncodedDataset not implemented yet")
+
+        # Create mock encoded data
+        # Each item should have latents and indices for all 4 modalities
+        self.encoded_data = []
+        for i in range(10):
+            data_dict = {}
+            for modality in ["T1", "T1ce", "T2", "FLAIR"]:
+                # Create mock latent: [C, H, W, D]
+                latent = torch.randn(4, 8, 8, 8)
+                # Create mock indices: [H*W*D]
+                indices = torch.randint(0, 512, (8 * 8 * 8,))
+
+                data_dict[f"{modality}_latent"] = latent
+                data_dict[f"{modality}_indices"] = indices
+
+            self.encoded_data.append(data_dict)
+
+    def test_unconditional_prob_zero_all_conditional(self):
+        """Test with unconditional_prob=0.0 (all conditional)."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.0,
+        )
+
+        # Sample multiple times to verify behavior
+        for _ in range(10):
+            sample = dataset[0]
+
+            # cond_latent should NOT be all zeros (conditional)
+            self.assertFalse(torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"])))
+
+            # Should have all expected keys
+            self.assertIn("cond_latent", sample)
+            self.assertIn("target_latent", sample)
+            self.assertIn("target_indices", sample)
+            self.assertIn("target_modality_idx", sample)
+
+            # Shapes should be correct
+            self.assertEqual(sample["cond_latent"].shape, (4, 8, 8, 8))
+            self.assertEqual(sample["target_latent"].shape, (4, 8, 8, 8))
+            self.assertEqual(sample["target_indices"].shape, (8 * 8 * 8,))
+            self.assertIsInstance(sample["target_modality_idx"], int)
+
+    def test_unconditional_prob_one_all_unconditional(self):
+        """Test with unconditional_prob=1.0 (all unconditional)."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=1.0,
+        )
+
+        # Sample multiple times to verify behavior
+        for _ in range(10):
+            sample = dataset[0]
+
+            # cond_latent should be all zeros (unconditional)
+            self.assertTrue(torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"])))
+
+            # target_latent should still be valid (not all zeros)
+            self.assertFalse(torch.allclose(sample["target_latent"], torch.zeros_like(sample["target_latent"])))
+
+            # Shapes should be correct
+            self.assertEqual(sample["cond_latent"].shape, (4, 8, 8, 8))
+            self.assertEqual(sample["target_latent"].shape, (4, 8, 8, 8))
+
+    def test_unconditional_prob_half_mixed_generation(self):
+        """Test with unconditional_prob=0.5 (mixed conditional/unconditional)."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.5,
+        )
+
+        # Sample many times and count unconditional samples
+        num_samples = 100
+        unconditional_count = 0
+
+        for _ in range(num_samples):
+            sample = dataset[0]
+            is_uncond = torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"]))
+            if is_uncond:
+                unconditional_count += 1
+
+        # Should have roughly 50% unconditional (allow some variance)
+        # With 100 samples and p=0.5, expect ~50 ± 15
+        self.assertGreater(unconditional_count, 25)  # At least 25%
+        self.assertLess(unconditional_count, 75)  # At most 75%
+
+    def test_cond_latent_is_zeros_when_unconditional(self):
+        """Test that cond_latent is all zeros for unconditional samples."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=1.0,  # Force unconditional
+        )
+
+        sample = dataset[0]
+
+        # cond_latent should be exactly zeros
+        expected_zeros = torch.zeros_like(sample["cond_latent"])
+        self.assertTrue(torch.allclose(sample["cond_latent"], expected_zeros))
+
+        # Should have same shape as target_latent
+        self.assertEqual(sample["cond_latent"].shape, sample["target_latent"].shape)
+
+    def test_cond_latent_matches_source_when_conditional(self):
+        """Test that cond_latent matches a source modality when conditional."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.0,  # Force conditional
+        )
+
+        sample = dataset[0]
+
+        # cond_latent should be one of the source modality latents
+        # Get all source latents
+        source_latents = [
+            self.encoded_data[0]["T1_latent"],
+            self.encoded_data[0]["T1ce_latent"],
+            self.encoded_data[0]["T2_latent"],
+            self.encoded_data[0]["FLAIR_latent"],
+        ]
+
+        # cond_latent should match one of them
+        matches_any = any(
+            torch.allclose(sample["cond_latent"], source_latent)
+            for source_latent in source_latents
+        )
+        self.assertTrue(matches_any, "cond_latent should match one of the source modality latents")
+
+    def test_data_structure_consistency(self):
+        """Test that data structure is consistent across samples."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.5,
+        )
+
+        for i in range(5):
+            sample = dataset[i]
+
+            # Check keys
+            self.assertIn("cond_latent", sample)
+            self.assertIn("target_latent", sample)
+            self.assertIn("target_indices", sample)
+            self.assertIn("target_modality_idx", sample)
+
+            # Check types
+            self.assertIsInstance(sample["cond_latent"], torch.Tensor)
+            self.assertIsInstance(sample["target_latent"], torch.Tensor)
+            self.assertIsInstance(sample["target_indices"], torch.Tensor)
+            self.assertIsInstance(sample["target_modality_idx"], int)
+
+            # Check shapes
+            self.assertEqual(sample["cond_latent"].dim(), 4)  # [C, H, W, D]
+            self.assertEqual(sample["target_latent"].dim(), 4)
+            self.assertEqual(sample["target_indices"].dim(), 1)
+
+            # Check modality index range
+            self.assertGreaterEqual(sample["target_modality_idx"], 0)
+            self.assertLessEqual(sample["target_modality_idx"], 3)
+
+    def test_target_indices_match_modality(self):
+        """Test that target_indices correspond to the target modality."""
+        # Use a seed for reproducibility in this test
+        import random
+        random.seed(42)
+        torch.manual_seed(42)
+
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.0,
+        )
+
+        sample = dataset[0]
+        target_idx = sample["target_modality_idx"]
+        modality_keys = ["T1", "T1ce", "T2", "FLAIR"]
+        target_modality = modality_keys[target_idx]
+
+        # The target_latent should match the encoded latent for this modality
+        expected_latent = self.encoded_data[0][f"{target_modality}_latent"]
+        self.assertTrue(torch.allclose(sample["target_latent"], expected_latent))
+
+        # The target_indices should match the encoded indices
+        expected_indices = self.encoded_data[0][f"{target_modality}_indices"]
+        self.assertTrue(torch.equal(sample["target_indices"], expected_indices))
+
+    def test_different_indices_different_data(self):
+        """Test that different indices return different data."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.0,
+        )
+
+        sample_0 = dataset[0]
+        sample_1 = dataset[1]
+
+        # target_latent should be different (different patients)
+        self.assertFalse(torch.allclose(sample_0["target_latent"], sample_1["target_latent"]))
+
+    def test_dataset_length(self):
+        """Test that dataset length matches encoded data length."""
+        dataset = _PreEncodedDataset(
+            encoded_data=self.encoded_data,
+            unconditional_prob=0.5,
+        )
+
+        self.assertEqual(len(dataset), len(self.encoded_data))
+
+    def test_unconditional_prob_validation(self):
+        """Test that unconditional_prob accepts valid range [0, 1]."""
+        # Valid values
+        for prob in [0.0, 0.5, 1.0]:
+            dataset = _PreEncodedDataset(
+                encoded_data=self.encoded_data,
+                unconditional_prob=prob,
+            )
+            self.assertEqual(dataset.unconditional_prob, prob)
+
+    def test_empty_encoded_data(self):
+        """Test behavior with empty encoded data."""
+        dataset = _PreEncodedDataset(
+            encoded_data=[],
+            unconditional_prob=0.5,
+        )
+
+        self.assertEqual(len(dataset), 0)
+
+    def test_single_encoded_data(self):
+        """Test behavior with single encoded sample."""
+        single_data = [self.encoded_data[0]]
+
+        dataset = _PreEncodedDataset(
+            encoded_data=single_data,
+            unconditional_prob=0.5,
+        )
+
+        self.assertEqual(len(dataset), 1)
+
+        sample = dataset[0]
+        self.assertIn("cond_latent", sample)
+        self.assertIn("target_latent", sample)
 
 
 if __name__ == '__main__':

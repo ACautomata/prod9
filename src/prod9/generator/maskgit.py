@@ -8,22 +8,46 @@ class MaskGiTSampler:
         self,
         steps,
         mask_value,
-        scheduler_type='log'
+        scheduler_type='log',
+        guidance_scale=0.1
     ):
         super().__init__()
         self.mask_value = mask_value
         self.steps = steps
         self.scheduler = MaskGiTScheduler(
-            steps=steps, 
+            steps=steps,
             mask_value=mask_value
         )
         self.f = self.schedule_fatctory(scheduler_type)
-    
-    @torch.no_grad() 
-    def step(self, step, transformer, vae, x, cond, last_indices):
-        bs, s, d = x.shape
-        
-        logits = transformer(x, cond) - transformer(x, None)   # [B,S,V]
+        self.guidance_scale = guidance_scale
+
+    @torch.no_grad()
+    def step(self, step, transformer, vae, x, cond, last_indices, guidance_scale=None):
+        """
+        Single step of MaskGiT sampling with Classifier-Free Guidance.
+
+        Uses CFG formula:
+            logits = (1 + w) * f(x, cond) - w * f(x, 0)
+
+        where:
+            - w (guidance_scale): controls conditioning strength
+            - f(x, cond): conditional prediction
+            - f(x, 0): unconditional prediction (zero conditioning)
+
+        Reference: Ho and Salimans, "Classifier-Free Diffusion Guidance", 2022
+
+        Args:
+            cond: Conditioning tensor. Use zero tensor for unconditional generation.
+            guidance_scale: Optional override for self.guidance_scale
+                           Use 0.0 for unconditional, 1.0+ for stronger guidance
+        """
+        s, d = x.shape[1], x.shape[2]
+
+        # Use provided guidance_scale or fall back to default
+        w = guidance_scale if guidance_scale is not None else self.guidance_scale
+
+        # Classifier-Free Guidance formula
+        logits = (1 + w) * transformer(x, cond) - w * transformer(x, torch.zeros_like(cond))   # [B,S,V]
         conf = logits.softmax(-1).amax(-1)                     # [B,S]
         token_id = logits.argmax(-1)                           # [B,S] 预测 token id
 
@@ -54,12 +78,25 @@ class MaskGiTSampler:
         return x, last_indices
     
     @torch.no_grad()
-    def sample(self, transformer, vae, shape, cond=None):
+    def sample(self, transformer, vae, shape, cond):
+        """
+        Full sampling pipeline with Classifier-Free Guidance.
+
+        Args:
+            transformer: Transformer model for token prediction
+            vae: VAE model for decoding
+            shape: Target shape (bs, c, h, w, d)
+            cond: Conditioning tensor. Use zero tensor for unconditional generation.
+
+        Returns:
+            Generated image tensor
+        """
         bs, c, h, w, d = shape
         if transformer.device != vae.device:
             raise Exception(f'{transformer.device} != {vae.device}')
         z = torch.full((bs, h * w * d, c), self.mask_value, device=transformer.device)
         last_indices = torch.arange(end=h * w * d, device=transformer.device)[None, :].repeat(bs, 1)
+
         for step in range(self.steps):
             z, last_indices = self.step(step, transformer, vae, z, cond, last_indices)
         z = rearrange(z, 'bs (h w d) c -> bs c h w d', h=h, w=w, d=d)

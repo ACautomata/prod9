@@ -5,12 +5,12 @@ This module implements metrics for evaluating generated/reconstructed images:
 - PSNR: Peak Signal-to-Noise Ratio
 - SSIM: Structural Similarity Index (MONAI implementation)
 - LPIPS: Learned Perceptual Image Patch Similarity
-- Combined: Composite metric for model selection
+- MetricCombiner: Combines pre-computed metrics for model selection
 """
 
 import torch
 import torch.nn as nn
-from typing import Dict
+from typing import Dict, Tuple
 from monai.metrics.regression import SSIMMetric as MonaiSSIMMetric
 
 
@@ -153,77 +153,94 @@ class LPIPSMetric(nn.Module):
         return lpips_value
 
 
-class CombinedMetric(nn.Module):
+class MetricCombiner(nn.Module):
     """
-    Combined metric for model selection.
+    Combine pre-computed metrics for model selection.
 
-    Combines multiple metrics into a single score:
-    score = PSNR + SSIM - LPIPS
+    Uses normalized weighted sum strategy:
+    1. Normalize PSNR from [20, 40] dB to [0, 1]
+    2. Apply weights to normalized metrics
+    3. Combined score = w_psnr * psnr_norm + w_ssim * ssim - w_lpips * lpips
 
-    Rationale:
-    - Higher PSNR and SSIM indicate better reconstruction
-    - Lower LPIPS indicates better perceptual quality
-    - Combining them balances pixel-level accuracy and perceptual quality
-
-    Higher values indicate better overall quality.
+    Higher combined score indicates better overall quality.
 
     Args:
-        psnr_weight: Weight for PSNR (default: 1.0)
-        ssim_weight: Weight for SSIM (default: 1.0)
-        lpips_weight: Weight for LPIPS (default: 1.0, subtracted)
-        device: Device to place metrics on (default: CPU)
+        weights: Dictionary with keys 'psnr', 'ssim', 'lpips' (default: all 1.0)
+        psnr_range: Tuple of (min, max) PSNR values for normalization (default: (20, 40))
+
+    Example:
+        >>> combiner = MetricCombiner()
+        >>> score = combiner(psnr=28.5, ssim=0.85, lpips=0.15)
     """
+
+    # Buffer declarations (persistent tensors, not parameters)
+    psnr_weight: torch.Tensor
+    ssim_weight: torch.Tensor
+    lpips_weight: torch.Tensor
+    psnr_min: torch.Tensor
+    psnr_max: torch.Tensor
 
     def __init__(
         self,
-        psnr_weight: float = 1.0,
-        ssim_weight: float = 1.0,
-        lpips_weight: float = 1.0,
-        device: torch.device = torch.device('cpu'),
+        weights: Dict[str, float] | None = None,
+        psnr_range: Tuple[float, float] = (20.0, 40.0),
     ):
         super().__init__()
-        self.psnr = PSNRMetric()
-        self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric().to(device)
 
-        self.psnr_weight = psnr_weight
-        self.ssim_weight = ssim_weight
-        self.lpips_weight = lpips_weight
+        # Default weights: equal importance for all three metrics
+        if weights is None:
+            weights = {"psnr": 1.0, "ssim": 1.0, "lpips": 1.0}
+
+        # Validate weights
+        required_keys = {"psnr", "ssim", "lpips"}
+        if not required_keys.issubset(weights.keys()):
+            missing = required_keys - set(weights.keys())
+            raise ValueError(f"Missing weights for: {missing}")
+
+        # Register as buffers (not parameters, but persistent)
+        self.register_buffer("psnr_weight", torch.tensor(weights["psnr"]))
+        self.register_buffer("ssim_weight", torch.tensor(weights["ssim"]))
+        self.register_buffer("lpips_weight", torch.tensor(weights["lpips"]))
+
+        # Store PSNR range for normalization
+        self.register_buffer("psnr_min", torch.tensor(psnr_range[0]))
+        self.register_buffer("psnr_max", torch.tensor(psnr_range[1]))
 
     def forward(
-        self, pred: torch.Tensor, target: torch.Tensor
-    ) -> Dict[str, torch.Tensor]:
+        self,
+        psnr: torch.Tensor,
+        ssim: torch.Tensor,
+        lpips: torch.Tensor,
+    ) -> torch.Tensor:
         """
-        Compute all metrics and combined score.
+        Combine pre-computed metrics into a single score.
 
         Args:
-            pred: Predicted images [B, C, H, W, D]
-            target: Ground truth images [B, C, H, W, D]
+            psnr: PSNR value in dB (typically [20, 40])
+            ssim: SSIM value in [-1, 1] (typically [0, 1])
+            lpips: LPIPS distance in [0, 1]
 
         Returns:
-            Dictionary containing:
-                - 'combined': Combined score (higher is better)
-                - 'psnr': PSNR in dB
-                - 'ssim': SSIM in [-1, 1]
-                - 'lpips': LPIPS distance
+            Combined score (higher is better)
         """
-        psnr_value = self.psnr(pred, target)
-        ssim_value = self.ssim(pred, target)
-        lpips_value = self.lpips(pred, target)
+        # Normalize PSNR from [psnr_min, psnr_max] to [0, 1]
+        # Formula: (psnr - min) / (max - min)
+        psnr_range = self.psnr_max - self.psnr_min
+        psnr_norm = (psnr - self.psnr_min) / psnr_range
+
+        # Clamp to [0, 1] to handle outliers
+        psnr_norm = torch.clamp(psnr_norm, 0.0, 1.0)
+
+        # SSIM and LPIPS are already in [0, 1], no normalization needed
+        # Note: SSIM can be negative in rare cases, but typically in [0, 1]
 
         # Combined score: higher is better
-        # PSNR: ~20-40 dB
-        # SSIM: ~0-1
-        # LPIPS: ~0-1 (subtract)
+        # PSNR and SSIM: higher is better (add)
+        # LPIPS: lower is better (subtract)
         combined = (
-            self.psnr_weight * psnr_value
-            + self.ssim_weight * ssim_value
-            - self.lpips_weight * lpips_value
+            self.psnr_weight * psnr_norm
+            + self.ssim_weight * ssim
+            - self.lpips_weight * lpips
         )
 
-        return {
-            "combined": combined,
-            "psnr": psnr_value,
-            "ssim": ssim_value,
-            "lpips": lpips_value,
-        }
+        return combined

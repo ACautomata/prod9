@@ -197,19 +197,24 @@ class _PreEncodedDataset(Dataset):
 
     Returns:
         Dict with keys:
-            - 'source_latent': [B, C, H, W, D]
-            - 'target_latent': [B, C, H, W, D]
-            - 'target_indices': [B, H*W*D]
-            - 'target_modality_idx': int (0-3)
-            - 'source_modality_idx': int (0-3)
+            - 'cond_latent': [C, H, W, D] - conditioning modality latent (zeros for unconditional)
+            - 'target_latent': [C, H, W, D] - target modality latent
+            - 'target_indices': [H*W*D] - target token indices
+            - 'target_modality_idx': int - target modality index (0-3)
     """
 
-    def __init__(self, encoded_data: List[Dict]) -> None:
+    def __init__(
+        self,
+        encoded_data: List[Dict],
+        unconditional_prob: float = 0.1,
+    ) -> None:
         """
         Args:
             encoded_data: List of pre-encoded dictionaries with all modalities
+            unconditional_prob: Probability of unconditional generation (default: 0.1)
         """
         self.encoded_data = encoded_data
+        self.unconditional_prob = unconditional_prob
 
     def __len__(self) -> int:
         return len(self.encoded_data)
@@ -218,23 +223,30 @@ class _PreEncodedDataset(Dataset):
         """Get pre-encoded data for a random modality pair."""
         data = self.encoded_data[idx]
 
-        # Randomly sample source and target modality
-        source_idx = random.randint(0, 3)
-        target_idx = random.randint(0, 3)
+        # Decide conditional vs unconditional
+        is_unconditional = random.random() < self.unconditional_prob
 
-        source_modality = MODALITY_KEYS[source_idx]
+        # Randomly sample target modality
+        target_idx = random.randint(0, 3)
         target_modality = MODALITY_KEYS[target_idx]
 
-        source_latent: torch.Tensor = data[f"{source_modality}_latent"]
-        target_latent: torch.Tensor = data[f"{target_modality}_latent"]
-        target_indices: torch.Tensor = data[f"{target_modality}_indices"]
+        target_latent: torch.Tensor = data[f"{target_modality}_latent"]  # [C, H, W, D]
+        target_indices: torch.Tensor = data[f"{target_modality}_indices"]  # [H*W*D]
+
+        # For conditional: randomly sample conditioning modality
+        # For unconditional: use zero tensor with same shape as target_latent
+        if is_unconditional:
+            cond_latent = torch.zeros_like(target_latent)
+        else:
+            cond_idx = random.randint(0, 3)
+            cond_modality = MODALITY_KEYS[cond_idx]
+            cond_latent = data[f"{cond_modality}_latent"]  # [C, H, W, D]
 
         return {
-            "source_latent": source_latent,
+            "cond_latent": cond_latent,
             "target_latent": target_latent,
             "target_indices": target_indices,
             "target_modality_idx": target_idx,
-            "source_modality_idx": source_idx,
         }
 
 
@@ -559,6 +571,8 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         intensity_b_min: float = 0.0,
         intensity_b_max: float = 1.0,
         clip: bool = True,
+        # Conditional generation
+        unconditional_prob: float = 0.1,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -585,6 +599,9 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.intensity_b_min = intensity_b_min
         self.intensity_b_max = intensity_b_max
         self.clip = clip
+
+        # Conditional generation
+        self.unconditional_prob = unconditional_prob
 
         self.train_dataset: Optional[_PreEncodedDataset] = None
         self.val_dataset: Optional[_PreEncodedDataset] = None
@@ -656,8 +673,8 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             train_encoded = self._pre_encode_data(split="train")
             val_encoded = self._pre_encode_data(split="val")
 
-            self.train_dataset = _PreEncodedDataset(train_encoded)
-            self.val_dataset = _PreEncodedDataset(val_encoded)
+            self.train_dataset = _PreEncodedDataset(train_encoded, self.unconditional_prob)
+            self.val_dataset = _PreEncodedDataset(val_encoded, self.unconditional_prob)
 
     def _pre_encode_data(self, split: str) -> List[Dict]:
         """
@@ -772,7 +789,6 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -786,16 +802,4 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn,
         )
-
-    @staticmethod
-    def _collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Collate function for pre-encoded data."""
-        return {
-            "source_latent": torch.stack([b["source_latent"] for b in batch]),
-            "target_latent": torch.stack([b["target_latent"] for b in batch]),
-            "target_indices": torch.stack([b["target_indices"] for b in batch]),
-            "target_modality_idx": torch.tensor([b["target_modality_idx"] for b in batch]),
-            "source_modality_idx": torch.tensor([b["source_modality_idx"] for b in batch]),
-        }

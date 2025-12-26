@@ -215,3 +215,17 @@ sliding_window:
   overlap: 0.5  # 0-1, higher = smoother but slower
   sw_batch_size: 1  # Increase if GPU memory allows
   mode: "gaussian"  # gaussian, constant, mean
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+metrics:
+  combination:
+    # Metric weights for model selection
+    weights:
+      psnr: 1.0  # PSNR weight (after normalization to [0,1])
+      ssim: 1.0  # SSIM weight
+      lpips: 1.0  # LPIPS weight
+
+    # PSNR range for normalization (dB)
+    psnr_range: [20, 40]  # Typical range for medical image reconstruction
