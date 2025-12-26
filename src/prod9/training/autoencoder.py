@@ -1,0 +1,452 @@
+"""
+Autoencoder Lightning module for Stage 1 training.
+
+This module implements VQGAN-style training with:
+- Reconstruction loss (L1)
+- Perceptual loss
+- Adversarial loss (multi-scale discriminator)
+- Commitment loss (FSQ codebook)
+"""
+
+from typing import Dict, Optional
+
+import torch
+import pytorch_lightning as pl
+from pytorch_lightning.utilities.types import STEP_OUTPUT
+
+from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.training.losses import VAEGANLoss
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+
+
+class AutoencoderLightning(pl.LightningModule):
+    """
+    Lightning module for Stage 1 autoencoder training.
+
+    Training loop:
+        1. Dataset handles random modality sampling
+        2. Encode -> Quantize -> Decode
+        3. Compute all losses (recon, perceptual, adversarial, commitment)
+        4. Update generator and discriminator alternately
+
+    The adversarial loss weight is computed adaptively based on gradient norms,
+    following the VQGAN paper implementation.
+
+    Validation:
+        - Uses random modality sampling from dataset (same as training)
+        - Batch may contain mixed modalities
+        - Computes PSNR, SSIM, LPIPS metrics
+        - Saves best checkpoint based on combined metric
+
+    Batch format (from dataset):
+        - 'image': Tensor[B,1,H,W,D] - mixed modalities, each independently sampled
+        - 'modality': List[str] - modality names for each sample
+
+    Args:
+        autoencoder: AutoencoderFSQ model
+        discriminator: MultiScaleDiscriminator for adversarial training
+        lr_g: Learning rate for generator (default: 1e-4)
+        lr_d: Learning rate for discriminator (default: 4e-4)
+        b1: Adam beta1 (default: 0.5)
+        b2: Adam beta2 (default: 0.999)
+        recon_weight: Weight for reconstruction loss (default: 1.0)
+        perceptual_weight: Weight for perceptual loss (default: 0.5)
+        adv_weight: Base weight for adversarial loss (default: 0.1)
+        commitment_weight: Weight for commitment loss (default: 0.25)
+        sample_every_n_steps: Log samples every N steps (default: 100)
+        discriminator_iter_start: Step to start discriminator training (default: 0)
+        use_sliding_window: Use sliding window for validation (default: False)
+        sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
+        sw_overlap: Sliding window overlap (default: 0.5)
+        sw_batch_size: Sliding window batch size (default: 1)
+    """
+
+    def __init__(
+        self,
+        autoencoder: AutoencoderFSQ,
+        discriminator: MultiScalePatchDiscriminator,
+        lr_g: float = 1e-4,
+        lr_d: float = 4e-4,
+        b1: float = 0.5,
+        b2: float = 0.999,
+        recon_weight: float = 1.0,
+        perceptual_weight: float = 0.5,
+        adv_weight: float = 0.1,
+        commitment_weight: float = 0.25,
+        sample_every_n_steps: int = 100,
+        discriminator_iter_start: int = 0,
+        use_sliding_window: bool = False,
+        sw_roi_size: tuple[int, int, int] = (64, 64, 64),
+        sw_overlap: float = 0.5,
+        sw_batch_size: int = 1,
+    ):
+        super().__init__()
+
+        # Enable manual optimization for GAN training
+        self.automatic_optimization = False
+
+        self.save_hyperparameters(ignore=["autoencoder", "discriminator"])
+
+        self.autoencoder = autoencoder
+        self.discriminator = discriminator
+
+        # Store reference to last layer for adaptive weight calculation
+        self.last_layer: torch.Tensor = self.autoencoder.get_last_layer()
+
+        # Loss functions
+        self.vaegan_loss = VAEGANLoss(
+            recon_weight=recon_weight,
+            perceptual_weight=perceptual_weight,
+            adv_weight=adv_weight,
+            commitment_weight=commitment_weight,
+            spatial_dims=3,
+            perceptual_network=None,
+            adv_criterion="least_squares",
+            discriminator_iter_start=discriminator_iter_start,
+        )
+
+        # Metrics for validation
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.psnr = PSNRMetric()
+        self.ssim = SSIMMetric()
+        self.lpips = LPIPSMetric().to(device)
+        self.metric_combiner: MetricCombiner | None = None
+
+        # Sliding window config (for validation only)
+        self.use_sliding_window = use_sliding_window
+        self.sw_roi_size = sw_roi_size
+        self.sw_overlap = sw_overlap
+        self.sw_batch_size = sw_batch_size
+        self._inference_wrapper: Optional[AutoencoderInferenceWrapper] = None
+
+        # Logging config
+        self.sample_every_n_steps = sample_every_n_steps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through autoencoder.
+
+        Args:
+            x: Input tensor [B, 1, H, W, D]
+
+        Returns:
+            Reconstructed tensor [B, 1, H, W, D]
+        """
+        z_mu, _ = self.autoencoder.encode(x)
+        z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
+        z_embedded = self.autoencoder.embed(z_quantized)
+        reconstructed = self.autoencoder.decode(z_embedded)
+        return reconstructed
+
+    def _get_inference_wrapper(self) -> Optional[AutoencoderInferenceWrapper]:
+        """
+        Lazy-create inference wrapper only when needed (validation/inference).
+
+        Training uses direct autoencoder calls for efficiency.
+        Returns None if sliding window is disabled.
+        """
+        if not self.use_sliding_window:
+            return None
+
+        if self._inference_wrapper is None:
+            sw_config = SlidingWindowConfig(
+                roi_size=self.sw_roi_size,
+                overlap=self.sw_overlap,
+                sw_batch_size=self.sw_batch_size,
+            )
+            self._inference_wrapper = AutoencoderInferenceWrapper(
+                self.autoencoder, sw_config
+            )
+
+        return self._inference_wrapper
+
+    def training_step(
+        self, batch: Dict[str, torch.Tensor], batch_idx: int
+    ) -> STEP_OUTPUT:
+        """
+        Training step for single-modality reconstruction.
+
+        Batch contains mixed modalities (each sample independently sampled).
+
+        Args:
+            batch: Dictionary with keys:
+                - 'image': Tensor[B,1,H,W,D] (mixed modalities)
+                - 'modality': List[str] of modality names
+            batch_idx: Batch index
+
+        Returns:
+            Loss dictionary for logging
+        """
+        # Get optimizers
+        optimizers = self.optimizers()
+        opt_g, opt_d = optimizers  # type: ignore[misc]
+
+        # Get images
+        images = batch["image"]
+        modalities: list = batch["modality"]  # type: ignore[index]
+
+        # Train discriminator
+        disc_loss = self._train_discriminator(images, opt_d)
+
+        # Train generator
+        gen_losses = self._train_generator(images, opt_g)
+
+        # Log all losses
+        self.log("train/disc_loss", disc_loss, prog_bar=True)
+        self.log("train/gen_total", gen_losses["total"], prog_bar=True)
+        self.log("train/gen_recon", gen_losses["recon"])
+        self.log("train/gen_perceptual", gen_losses["perceptual"])
+        self.log("train/gen_adv", gen_losses["generator_adv"])
+        self.log("train/gen_commitment", gen_losses["commitment"])
+        self.log("train/adv_weight", gen_losses.get("adv_weight", 0.0))
+
+        # Log per-modality count
+        for modality in set(modalities):  # type: ignore[arg-type]
+            count = modalities.count(modality)
+            self.log(f"train/{modality}_count", float(count))
+
+        # Log samples periodically
+        if batch_idx % self.sample_every_n_steps == 0:
+            first_modality = modalities[0] if modalities else "unknown"  # type: ignore[index]
+            self._log_samples(images[0:1], first_modality)
+
+        return {"loss": gen_losses["total"], "modalities": modalities}
+
+    def _train_discriminator(self, real_images: torch.Tensor, opt_d) -> torch.Tensor:
+        """
+        Train discriminator with real and fake images.
+
+        Args:
+            real_images: Real images from the batch
+            opt_d: Discriminator optimizer
+
+        Returns:
+            Discriminator loss
+        """
+        # Generate fake images
+        with torch.no_grad():
+            z_mu, _ = self.autoencoder.encode(real_images)
+            z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
+            z_embedded = self.autoencoder.embed(z_quantized)
+            fake_images = self.autoencoder.decode(z_embedded)
+
+        # Discriminator outputs
+        real_outputs, _ = self.discriminator(real_images)
+        fake_outputs, _ = self.discriminator(fake_images.detach())
+
+        # Compute discriminator loss
+        disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
+
+        # Apply warmup
+        if self.global_step < self.vaegan_loss.discriminator_iter_start:
+            disc_loss = disc_loss * 0.0
+
+        # Backward and optimize
+        self.manual_backward(disc_loss)
+        self._optimizer_step(opt_d)
+        self._optimizer_zero_grad(opt_d)
+
+        return disc_loss
+
+    def _train_generator(
+        self, real_images: torch.Tensor, opt_g
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Train generator (autoencoder) with adaptive adversarial weight.
+
+        Args:
+            real_images: Real images from the batch
+            opt_g: Generator optimizer
+
+        Returns:
+            Dictionary of losses for logging
+        """
+        # Encode and decode
+        z_mu, _ = self.autoencoder.encode(real_images)
+        z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
+        z_embedded = self.autoencoder.embed(z_quantized)
+        fake_images = self.autoencoder.decode(z_embedded)
+
+        # Discriminator outputs
+        fake_outputs, _ = self.discriminator(fake_images)
+
+        # Compute VAEGAN loss with adaptive weight
+        losses = self.vaegan_loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            encoder_output=z_mu,
+            quantized_output=z_embedded,
+            discriminator_output=fake_outputs,
+            global_step=self.global_step,
+            last_layer=self.last_layer,
+        )
+
+        # Backward and optimize
+        self.manual_backward(losses["total"])
+        self._optimizer_step(opt_g)
+        self._optimizer_zero_grad(opt_g)
+
+        return losses
+
+    def _optimizer_step(self, optimizer) -> None:
+        """Helper to step optimizer, handling both LightningOptimizer and raw optimizers."""
+        if hasattr(optimizer, 'optimizer'):
+            optimizer.optimizer.step()
+        else:
+            optimizer.step()
+
+    def _optimizer_zero_grad(self, optimizer) -> None:
+        """Helper to zero grad, handling both LightningOptimizer and raw optimizers."""
+        if hasattr(optimizer, 'optimizer'):
+            optimizer.optimizer.zero_grad()
+        else:
+            optimizer.zero_grad()
+
+    def validation_step(
+        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
+    ) -> Optional[STEP_OUTPUT]:
+        """
+        Validation step for single-modality reconstruction.
+
+        Uses random modality sampling from dataset (same as training).
+
+        Args:
+            batch: Dictionary with keys:
+                - 'image': Tensor[B,1,H,W,D] (mixed modalities)
+                - 'modality': List[str]
+            batch_idx: Batch index (unused)
+
+        Returns:
+            Metrics dictionary
+        """
+        images = batch["image"]
+        modalities: list = batch["modality"]  # type: ignore[index]
+
+        # Reconstruct - use SW if enabled
+        wrapper = self._get_inference_wrapper()
+        if wrapper is not None:
+            from prod9.autoencoder.padding import (
+                compute_scale_factor,
+                pad_for_sliding_window,
+                unpad_from_sliding_window,
+            )
+
+            scale_factor = compute_scale_factor(self.autoencoder)
+
+            # Pad input for sliding window
+            images_padded, padding_info = pad_for_sliding_window(
+                images,
+                scale_factor=scale_factor,
+                overlap=self.sw_overlap,
+                roi_size=self.sw_roi_size,
+            )
+
+            # Encode/Decode with SW
+            reconstructed = wrapper.forward(images_padded)
+
+            # Unpad output
+            reconstructed = unpad_from_sliding_window(reconstructed, padding_info)
+        else:
+            reconstructed = self.forward(images)
+
+        # Compute individual metrics
+        psnr_value = self.psnr(reconstructed, images)
+        ssim_value = self.ssim(reconstructed, images)
+        lpips_value = self.lpips(reconstructed, images)
+
+        # Log individually
+        self.log("val/psnr", psnr_value, prog_bar=False)
+        self.log("val/ssim", ssim_value, prog_bar=False)
+        self.log("val/lpips", lpips_value, prog_bar=False)
+
+        # Combine for checkpointing
+        if self.metric_combiner is not None:
+            combined = self.metric_combiner(
+                psnr=psnr_value,
+                ssim=ssim_value,
+                lpips=lpips_value,
+            )
+            self.log("val/combined_metric", combined, prog_bar=True)
+            return {
+                "combined": combined,
+                "psnr": psnr_value,
+                "ssim": ssim_value,
+                "lpips": lpips_value,
+            }
+        else:
+            return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
+
+    def _log_samples(self, images: torch.Tensor, modality: str) -> None:
+        """Log sample reconstructions to tensorboard."""
+        if not self.logger:
+            return
+
+        experiment = getattr(self.logger, 'experiment', None)
+        if experiment is None:
+            return
+
+        with torch.no_grad():
+            reconstructed = self.forward(images)
+
+        # Log first sample from batch
+        if experiment and hasattr(experiment, 'add_image'):
+            experiment.add_image(
+                f"val/{modality}_real",
+                images[0, 0].unsqueeze(-1),
+                self.global_step,
+            )
+            experiment.add_image(
+                f"val/{modality}_recon",
+                reconstructed[0, 0].unsqueeze(-1),
+                self.global_step,
+            )
+
+    def configure_optimizers(self):
+        """Configure separate optimizers for generator and discriminator."""
+        lr_g = float(getattr(self.hparams, 'lr_g', 1e-4))
+        lr_d = float(getattr(self.hparams, 'lr_d', 4e-4))
+        b1 = float(getattr(self.hparams, 'b1', 0.5))
+        b2 = float(getattr(self.hparams, 'b2', 0.999))
+
+        opt_g = torch.optim.Adam(
+            self.autoencoder.parameters(),
+            lr=lr_g,
+            betas=(b1, b2),
+        )
+        opt_d = torch.optim.Adam(
+            self.discriminator.parameters(),
+            lr=lr_d,
+            betas=(b1, b2),
+        )
+
+        return [opt_g, opt_d]
+
+    def export_autoencoder(self, output_path: str) -> None:
+        """
+        Export trained autoencoder weights for Stage 2.
+
+        Args:
+            output_path: Path to save autoencoder state dict
+        """
+        import os
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        torch.save(
+            {
+                "state_dict": self.autoencoder.state_dict(),
+                "hparams": self.autoencoder.__dict__,
+            },
+            output_path,
+        )
+
+        print(f"Autoencoder exported to {output_path}")
+
+    def on_validation_end(self) -> None:
+        """Called at the end of validation."""
+        if self.trainer.checkpoint_callback:
+            best_model_path = getattr(self.trainer.checkpoint_callback, 'best_model_path', '')
+            if best_model_path:
+                self.print(f"Best model: {best_model_path}")

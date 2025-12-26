@@ -138,7 +138,10 @@ class TestEndToEnd:
         assert ae_model.autoencoder is not None
         assert ae_model.discriminator is not None
         assert ae_model.vaegan_loss is not None
-        assert ae_model.metrics is not None
+        # Verify individual metrics exist
+        assert ae_model.psnr is not None
+        assert ae_model.ssim is not None
+        assert ae_model.lpips is not None
         assert ae_model.last_layer is not None  # For adaptive weight
 
         # Verify manual optimization is enabled for GAN training

@@ -121,8 +121,8 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
             # Test that transformer can process the input
             output = transformer(z, condition)
 
-            # Verify output shape
-            expected_shape = (batch_size, latent_channels, 3, 3, 3)
+            # Verify output shape - transformer outputs logits [B, codebook_size, H, W, D]
+            expected_shape = (batch_size, transformer.out_proj.out_channels, 3, 3, 3)
             self.assertEqual(
                 output.shape, expected_shape,
                 f"Output shape {output.shape} should match {expected_shape}"
