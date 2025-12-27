@@ -88,6 +88,18 @@ def create_trainer(
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
+    # Autoencoder checkpoint callback (only for Stage 1)
+    if stage_name == "autoencoder":
+        from prod9.training.callbacks import AutoencoderCheckpoint
+
+        ae_checkpoint = AutoencoderCheckpoint(
+            monitor=checkpoint_config.get("monitor", "val/combined_metric"),
+            mode=checkpoint_config.get("mode", "max"),
+            save_dir=os.path.join(output_dir, "checkpoints"),
+            filename="best_autoencoder.pth",
+        )
+        callbacks.append(ae_checkpoint)
+
     # TensorBoard logger
     logger = TensorBoardLogger(
         save_dir=output_dir,

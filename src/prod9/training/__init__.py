@@ -12,9 +12,9 @@ from prod9.training.metrics import (
     PSNRMetric,
     SSIMMetric,
     LPIPSMetric,
-    MetricCombiner as CombinedMetric,
+    MetricCombiner,
 )
-from prod9.training.data import (
+from prod9.training.brats_data import (
     BraTSDataModuleStage1,
     BraTSDataModuleStage2,
     MODALITY_KEYS,
@@ -47,7 +47,7 @@ __all__ = [
     "PSNRMetric",
     "SSIMMetric",
     "LPIPSMetric",
-    "CombinedMetric",
+    "MetricCombiner",
     # Data
     "BraTSDataModuleStage1",
     "BraTSDataModuleStage2",

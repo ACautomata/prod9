@@ -21,7 +21,7 @@ import pytorch_lightning as pl
 from medmnist import INFO
 from torch.utils.data import DataLoader, Dataset as TorchDataset
 
-import prod9.training.data as brats_data
+import prod9.training.brats_data as brats_data
 from prod9.training.config import load_config
 
 
@@ -56,6 +56,9 @@ class _MedMNIST3DStage1Dataset(TorchDataset):
 
         # img is numpy array in [0, 1], shape=(1, D, H, W) or (3, D, H, W)
         img_tensor = torch.from_numpy(img).float()
+
+        # Normalize to [-1, 1] for GAN training
+        img_tensor = img_tensor * 2.0 - 1.0
 
         # Ensure single channel (convert RGB to grayscale if needed)
         if img_tensor.shape[0] == 3:
@@ -463,6 +466,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             for img, label in subset:
                 # img: numpy array, shape=(1, D, H, W) or (3, D, H, W)
                 img_tensor = torch.from_numpy(img).float()
+
+                # Normalize to [-1, 1] for GAN training
+                img_tensor = img_tensor * 2.0 - 1.0
 
                 # Ensure single channel
                 if img_tensor.shape[0] == 3:

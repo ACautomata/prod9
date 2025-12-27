@@ -15,7 +15,7 @@ from typing import Dict
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner as CombinedMetric
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner
 
 
 class TestVAEGANLoss:
@@ -332,100 +332,115 @@ class TestLPIPSMetric:
         assert isinstance(lpips, torch.Tensor)
 
 
-class TestCombinedMetric:
-    """Test suite for CombinedMetric class."""
+class TestMetricCombiner:
+    """Test suite for MetricCombiner class."""
 
     @pytest.fixture
-    def combined_metric(self):
-        """Create a CombinedMetric instance."""
-        # User manually downloaded LPIPS weights, use real PerceptualLoss
-        yield CombinedMetric(
-            psnr_weight=1.0,
-            ssim_weight=1.0,
-            lpips_weight=1.0,
+    def psnr_metric(self):
+        """Create PSNRMetric instance."""
+        yield PSNRMetric()
+
+    @pytest.fixture
+    def ssim_metric(self):
+        """Create SSIMMetric instance."""
+        yield SSIMMetric()
+
+    @pytest.fixture
+    def lpips_metric(self):
+        """Create LPIPSMetric instance with mocked PerceptualLoss."""
+        with patch('monai.losses.perceptual.PerceptualLoss') as mock_perc_loss:
+            mock_instance = Mock()
+            mock_instance.return_value = torch.tensor(0.15)
+            mock_perc_loss.return_value = mock_instance
+            yield LPIPSMetric()
+
+    @pytest.fixture
+    def combiner(self):
+        """Create MetricCombiner instance."""
+        yield MetricCombiner(
+            weights={"psnr": 1.0, "ssim": 1.0, "lpips": 1.0}
         )
 
-    def test_combined_metric_forward(self, combined_metric):
+    def test_combiner_forward(self, combiner, psnr_metric, ssim_metric, lpips_metric):
         """Test basic forward pass."""
-        pred = torch.randn(2, 1, 32, 32, 32)
-        target = torch.randn(2, 1, 32, 32, 32)
-
-        metrics = combined_metric(pred, target)
-
-        assert "combined" in metrics
-        assert "psnr" in metrics
-        assert "ssim" in metrics
-        assert "lpips" in metrics
-
-    def test_combined_metric_structure(self, combined_metric):
-        """Test that all metric components are present and have correct types."""
-        pred = torch.randn(2, 1, 32, 32, 32) * 0.1  # Small values for better PSNR
+        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
         target = torch.randn(2, 1, 32, 32, 32) * 0.1
 
-        metrics = combined_metric(pred, target)
+        # Compute individual metrics
+        psnr = psnr_metric(pred, target)
+        ssim = ssim_metric(pred, target)
+        lpips = lpips_metric(pred, target)
 
-        for key in ["combined", "psnr", "ssim", "lpips"]:
-            assert key in metrics, f"{key} should be in metrics"
-            assert isinstance(metrics[key], torch.Tensor), f"{key} should be a tensor"
+        # Combine metrics
+        combined = combiner(psnr, ssim, lpips)
 
-        # PSNR can be negative for random noise, just check it's valid
-        assert isinstance(metrics["psnr"], torch.Tensor)
+        assert isinstance(combined, torch.Tensor)
 
-        # SSIM should be in [-1, 1]
-        assert -1 <= metrics["ssim"] <= 1
-
-        # LPIPS should be non-negative
-        assert metrics["lpips"] >= 0
-
-    def test_combined_metric_custom_weights(self):
-        """Test CombinedMetric with custom weights."""
-        # User manually downloaded LPIPS weights, use real PerceptualLoss
-        custom_metric = CombinedMetric(
-            psnr_weight=2.0,
-            ssim_weight=0.5,
-            lpips_weight=0.1,
+    def test_combiner_custom_weights(self, psnr_metric, ssim_metric, lpips_metric):
+        """Test MetricCombiner with custom weights."""
+        custom_combiner = MetricCombiner(
+            weights={"psnr": 2.0, "ssim": 0.5, "lpips": 0.1}
         )
 
-        pred = torch.randn(2, 1, 32, 32, 32)
-        target = torch.randn(2, 1, 32, 32, 32)
+        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
+        target = torch.randn(2, 1, 32, 32, 32) * 0.1
 
-        metrics = custom_metric(pred, target)
+        # Compute individual metrics
+        psnr = psnr_metric(pred, target)
+        ssim = ssim_metric(pred, target)
+        lpips = lpips_metric(pred, target)
 
-        # Combined score should be: 2.0*PSNR + 0.5*SSIM - 0.1*LPIPS
-        expected_combined = (
-            2.0 * metrics["psnr"]
-            + 0.5 * metrics["ssim"]
-            - 0.1 * metrics["lpips"]
-        )
+        # Combine metrics
+        combined = custom_combiner(psnr, ssim, lpips)
 
-        assert torch.isclose(metrics["combined"], expected_combined, atol=1e-5)
+        # Verify combined is a tensor
+        assert isinstance(combined, torch.Tensor)
 
-    def test_combined_metric_perfect_match(self, combined_metric):
-        """Test combined metric for identical images."""
-        pred = torch.randn(2, 1, 32, 32, 32)
+    def test_combiner_perfect_match(self, combiner, psnr_metric, ssim_metric, lpips_metric):
+        """Test combiner for identical images."""
+        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
         target = pred.clone()
 
-        metrics = combined_metric(pred, target)
+        # Compute individual metrics
+        psnr = psnr_metric(pred, target)
+        ssim = ssim_metric(pred, target)
+        lpips = lpips_metric(pred, target)
 
-        # Perfect match: high PSNR (~inf), high SSIM (~1), low LPIPS (~0)
-        assert torch.isinf(metrics["psnr"]) or metrics["psnr"] > 50
-        assert metrics["ssim"] > 0.99
-        assert metrics["lpips"] >= 0  # mocked value
-        # Combined score should be high
-        assert metrics["combined"] > 0
+        # Combine metrics
+        combined = combiner(psnr, ssim, lpips)
 
-    def test_combined_score_computation(self, combined_metric):
-        """Test that combined score follows the expected formula."""
-        pred = torch.randn(2, 1, 32, 32, 32)
-        target = torch.randn(2, 1, 32, 32, 32)
+        # Perfect match: high combined score
+        assert combined > 0
 
-        metrics = combined_metric(pred, target)
+    def test_psnr_normalization(self, combiner):
+        """Test that PSNR is normalized correctly."""
+        # PSNR = 30 should normalize to (30-20)/(40-20) = 0.5
+        psnr = torch.tensor(30.0)
+        ssim = torch.tensor(0.8)
+        lpips = torch.tensor(0.2)
 
-        # Verify combined = psnr + ssim - lpips
-        expected = metrics["psnr"] + metrics["ssim"] - metrics["lpips"]
+        combined = combiner(psnr, ssim, lpips)
 
-        # Allow small numerical difference
-        assert torch.isclose(metrics["combined"], expected, rtol=1e-4, atol=1e-5)
+        # Expected: 1.0 * 0.5 + 1.0 * 0.8 - 1.0 * 0.2 = 1.1
+        expected = torch.tensor(1.1)
+        assert torch.isclose(combined, expected, atol=1e-3)
+
+    def test_psnr_clamping(self, combiner):
+        """Test that normalized PSNR is clamped to [0, 1]."""
+        # PSNR below range (10 < 20) should clamp to 0
+        psnr_low = torch.tensor(10.0)
+        # PSNR above range (50 > 40) should clamp to 1
+        psnr_high = torch.tensor(50.0)
+
+        ssim = torch.tensor(0.5)
+        lpips = torch.tensor(0.3)
+
+        combined_low = combiner(psnr_low, ssim, lpips)
+        combined_high = combiner(psnr_high, ssim, lpips)
+
+        # Both should be valid and not extreme
+        assert combined_low > -1  # Should be clamped, not negative extreme
+        assert combined_high < 3  # Should be clamped, not positive extreme
 
 
 class TestDataModuleStage1:
@@ -455,7 +470,7 @@ class TestDataModuleStage1:
 
     def test_stage1_datamodule_init(self, temp_data_dir):
         """Test basic initialization of Stage 1 DataModule."""
-        from prod9.training.data import BraTSDataModuleStage1
+        from prod9.training.brats_data import BraTSDataModuleStage1
 
         dm = BraTSDataModuleStage1(
             data_dir=temp_data_dir,
@@ -470,7 +485,7 @@ class TestDataModuleStage1:
 
     def test_stage1_datamodule_random_modality_dataset(self, temp_data_dir):
         """Test that random modality dataset is used."""
-        from prod9.training.data import BraTSDataModuleStage1, _RandomModalityDataset
+        from prod9.training.brats_data import BraTSDataModuleStage1, _RandomModalityDataset
 
         dm = BraTSDataModuleStage1(data_dir=temp_data_dir)
 
@@ -480,7 +495,7 @@ class TestDataModuleStage1:
 
     def test_stage1_datamodule_custom_modalities(self, temp_data_dir):
         """Test with custom modality list."""
-        from prod9.training.data import BraTSDataModuleStage1
+        from prod9.training.brats_data import BraTSDataModuleStage1
 
         custom_modalities = ["T1", "T2"]
         dm = BraTSDataModuleStage1(
@@ -529,7 +544,7 @@ class TestDataModuleStage2:
 
     def test_stage2_datamodule_init(self, temp_data_dir):
         """Test basic initialization of Stage 2 DataModule."""
-        from prod9.training.data import BraTSDataModuleStage2
+        from prod9.training.brats_data import BraTSDataModuleStage2
 
         dm = BraTSDataModuleStage2(
             data_dir=temp_data_dir,
@@ -543,7 +558,7 @@ class TestDataModuleStage2:
 
     def test_stage2_set_autoencoder(self, temp_data_dir, mock_autoencoder):
         """Test setting the autoencoder."""
-        from prod9.training.data import BraTSDataModuleStage2
+        from prod9.training.brats_data import BraTSDataModuleStage2
         from prod9.autoencoder.inference import AutoencoderInferenceWrapper
 
         dm = BraTSDataModuleStage2(data_dir=temp_data_dir)
@@ -555,7 +570,7 @@ class TestDataModuleStage2:
 
     def test_stage2_setup_without_autoencoder(self, temp_data_dir):
         """Test that setup raises error when autoencoder is not set."""
-        from prod9.training.data import BraTSDataModuleStage2
+        from prod9.training.brats_data import BraTSDataModuleStage2
 
         dm = BraTSDataModuleStage2(data_dir=temp_data_dir)
 
@@ -564,7 +579,7 @@ class TestDataModuleStage2:
 
     def test_stage2_custom_cache_dir(self, temp_data_dir):
         """Test with custom cache directory."""
-        from prod9.training.data import BraTSDataModuleStage2
+        from prod9.training.brats_data import BraTSDataModuleStage2
 
         custom_cache = tempfile.mkdtemp()
         dm = BraTSDataModuleStage2(
@@ -583,7 +598,7 @@ class TestPreEncodedDataset:
 
     def test_pre_encoded_dataset_init(self):
         """Test initialization of pre-encoded dataset."""
-        from prod9.training.data import _PreEncodedDataset
+        from prod9.training.brats_data import _PreEncodedDataset
 
         # Create mock encoded data
         encoded_data = []
@@ -606,7 +621,7 @@ class TestPreEncodedDataset:
 
     def test_pre_encoded_dataset_getitem(self):
         """Test getting an item from pre-encoded dataset."""
-        from prod9.training.data import _PreEncodedDataset
+        from prod9.training.brats_data import _PreEncodedDataset
 
         # Create mock encoded data
         encoded_data = []

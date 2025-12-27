@@ -15,19 +15,21 @@ import torch
 import numpy as np
 
 if TYPE_CHECKING:
-    from prod9.training.data import (
+    from prod9.training.brats_data import (
         BraTSDataModuleStage1,
         BraTSDataModuleStage2,
         _RandomModalityDataset,
         _PreEncodedDataset,
+        PreEncodedSample,
     )  # type: ignore[attr-defined]
 else:
     try:
-        from prod9.training.data import (
+        from prod9.training.brats_data import (
             BraTSDataModuleStage1,
             BraTSDataModuleStage2,
             _RandomModalityDataset,
             _PreEncodedDataset,
+            PreEncodedSample,
         )
     except ImportError:
         # Data module not implemented yet - skip tests
@@ -146,7 +148,7 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
         data_module.train_dataset = mock_dataset
 
         # Patch DataLoader in the data module where it's imported
-        with patch('prod9.training.data.DataLoader') as mock_dataloader:
+        with patch('prod9.training.brats_data.DataLoader') as mock_dataloader:
             mock_loader_instance = Mock()
             mock_dataloader.return_value = mock_loader_instance
 
@@ -173,7 +175,7 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
         data_module.val_dataset = mock_dataset
 
         # Patch DataLoader in the data module where it's imported
-        with patch('prod9.training.data.DataLoader') as mock_dataloader:
+        with patch('prod9.training.brats_data.DataLoader') as mock_dataloader:
             mock_loader_instance = Mock()
             mock_dataloader.return_value = mock_loader_instance
 
@@ -404,7 +406,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
 
         # Sample multiple times to verify behavior
         for _ in range(10):
-            sample = dataset[0]
+            sample: PreEncodedSample = dataset[0]
 
             # cond_latent should NOT be all zeros (conditional)
             self.assertFalse(torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"])))
@@ -430,7 +432,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
 
         # Sample multiple times to verify behavior
         for _ in range(10):
-            sample = dataset[0]
+            sample: PreEncodedSample = dataset[0]
 
             # cond_latent should be all zeros (unconditional)
             self.assertTrue(torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"])))
@@ -454,7 +456,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
         unconditional_count = 0
 
         for _ in range(num_samples):
-            sample = dataset[0]
+            sample: PreEncodedSample = dataset[0]
             is_uncond = torch.allclose(sample["cond_latent"], torch.zeros_like(sample["cond_latent"]))
             if is_uncond:
                 unconditional_count += 1
@@ -471,7 +473,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
             unconditional_prob=1.0,  # Force unconditional
         )
 
-        sample = dataset[0]
+        sample: PreEncodedSample = dataset[0]
 
         # cond_latent should be exactly zeros
         expected_zeros = torch.zeros_like(sample["cond_latent"])
@@ -487,7 +489,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
             unconditional_prob=0.0,  # Force conditional
         )
 
-        sample = dataset[0]
+        sample: PreEncodedSample = dataset[0]
 
         # cond_latent should be one of the source modality latents
         # Get all source latents
@@ -513,7 +515,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
         )
 
         for i in range(5):
-            sample = dataset[i]
+            sample: PreEncodedSample = dataset[i]
 
             # Check keys
             self.assertIn("cond_latent", sample)
@@ -548,7 +550,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
             unconditional_prob=0.0,
         )
 
-        sample = dataset[0]
+        sample: PreEncodedSample = dataset[0]
         target_idx = sample["target_modality_idx"]
         modality_keys = ["T1", "T1ce", "T2", "FLAIR"]
         target_modality = modality_keys[target_idx]
@@ -568,8 +570,8 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
             unconditional_prob=0.0,
         )
 
-        sample_0 = dataset[0]
-        sample_1 = dataset[1]
+        sample_0: PreEncodedSample = dataset[0]
+        sample_1: PreEncodedSample = dataset[1]
 
         # target_latent should be different (different patients)
         self.assertFalse(torch.allclose(sample_0["target_latent"], sample_1["target_latent"]))
@@ -613,7 +615,7 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
 
         self.assertEqual(len(dataset), 1)
 
-        sample = dataset[0]
+        sample: PreEncodedSample = dataset[0]
         self.assertIn("cond_latent", sample)
         self.assertIn("target_latent", sample)
 

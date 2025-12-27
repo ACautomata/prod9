@@ -11,7 +11,7 @@ from prod9.training.lightning_module import (
     AutoencoderLightning,
     AutoencoderLightningConfig,
 )
-from prod9.training.data import BraTSDataModuleStage1
+from prod9.training.brats_data import BraTSDataModuleStage1
 from prod9.cli.shared import setup_environment, get_device, create_trainer
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 

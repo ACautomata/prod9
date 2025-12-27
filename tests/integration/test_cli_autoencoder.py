@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock, patch
 
 import torch
@@ -151,6 +152,66 @@ class TestAutoencoderCLI(unittest.TestCase):
         # Test without flag (should be None)
         args = parser.parse_args(["infer"])
         self.assertIsNone(args.roi_size)
+
+    def test_autoencoder_checkpoint_callback_added(self):
+        """Test that AutoencoderCheckpoint callback is added for autoencoder stage."""
+        from prod9.cli.shared import create_trainer
+        from prod9.training.callbacks import AutoencoderCheckpoint
+        from pytorch_lightning.callbacks import Callback
+
+        config_path = os.path.join(self.temp_dir, "config.yaml")
+        self._create_minimal_config(config_path)
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        # Create trainer for autoencoder stage
+        output_dir = os.path.join(self.temp_dir, "outputs")
+        trainer = create_trainer(config, output_dir, "autoencoder")
+
+        # Check that AutoencoderCheckpoint is in callbacks
+        # Use getattr to work around pyright type checking limitations
+        callbacks = cast(list[Callback], getattr(trainer, "callbacks", []))
+        has_ae_checkpoint = False
+        for callback in callbacks:
+            if isinstance(callback, AutoencoderCheckpoint):
+                has_ae_checkpoint = True
+                # Verify callback configuration
+                self.assertEqual(callback.monitor, "val/combined_metric")
+                self.assertEqual(callback.mode, "max")
+                self.assertEqual(callback.filename, "best_autoencoder.pth")
+                break
+
+        self.assertTrue(
+            has_ae_checkpoint,
+            "AutoencoderCheckpoint callback should be added for autoencoder stage"
+        )
+
+    def test_autoencoder_checkpoint_not_added_for_transformer(self):
+        """Test that AutoencoderCheckpoint callback is NOT added for transformer stage."""
+        from prod9.cli.shared import create_trainer
+        from prod9.training.callbacks import AutoencoderCheckpoint
+        from pytorch_lightning.callbacks import Callback
+
+        config_path = os.path.join(self.temp_dir, "config.yaml")
+        self._create_minimal_config(config_path)
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        # Create trainer for transformer stage
+        output_dir = os.path.join(self.temp_dir, "outputs")
+        trainer = create_trainer(config, output_dir, "transformer")
+
+        # Check that AutoencoderCheckpoint is NOT in callbacks
+        # Use getattr to work around pyright type checking limitations
+        callbacks = cast(list[Callback], getattr(trainer, "callbacks", []))
+        for callback in callbacks:
+            self.assertNotIsInstance(
+                callback,
+                AutoencoderCheckpoint,
+                "AutoencoderCheckpoint callback should NOT be added for transformer stage"
+            )
 
 
 if __name__ == "__main__":

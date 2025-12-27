@@ -9,8 +9,7 @@ from typing import Dict, Any
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
 from prod9.training.metrics import MetricCombiner
-# from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
-from prod9.training.discriminator import AdaptiveMultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
 class AutoencoderLightningConfig:
@@ -118,14 +117,14 @@ class AutoencoderLightningConfig:
     @staticmethod
     def _create_discriminator(
         config: Dict[str, Any]
-    ) -> AdaptiveMultiScalePatchDiscriminator:
+    ) -> MultiScalePatchDiscriminator:
         """Create MultiScalePatchDiscriminator from config."""
         # Extract activation tuple if provided
         activation = config.get("activation", ("LEAKYRELU", {"negative_slope": 0.2}))
         if isinstance(activation, list):
             activation = tuple(activation)
 
-        return AdaptiveMultiScalePatchDiscriminator(
+        return MultiScalePatchDiscriminator(
             in_channels=config.get("in_channels", 1),
             num_d=config.get("num_d", 3),
             channels=config.get("channels", 64),

@@ -90,7 +90,7 @@ data:
     orientation: "RAS"  # NIfTI orientation
     intensity_a_min: 0.0  # ScaleIntensityRanged
     intensity_a_max: 500.0
-    intensity_b_min: 0.0
+    intensity_b_min: -1.0
     intensity_b_max: 1.0
     clip: true
 

@@ -11,7 +11,7 @@ from prod9.training.lightning_module import (
     TransformerLightning,
     TransformerLightningConfig,
 )
-from prod9.training.data import BraTSDataModuleStage2
+from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.cli.shared import setup_environment, create_trainer
 from prod9.generator.maskgit import MaskGiTSampler
 

@@ -8,7 +8,7 @@ This module provides PyTorch Lightning DataModules for the two-stage training pi
 
 import os
 import random
-from typing import Dict, List, Tuple, Optional, Union, Any
+from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -28,6 +28,14 @@ from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWind
 
 # Modality names for BraTS dataset
 MODALITY_KEYS: List[str] = ["T1", "T1ce", "T2", "FLAIR"]
+
+
+class PreEncodedSample(TypedDict):
+    """Type definition for pre-encoded data sample."""
+    cond_latent: torch.Tensor
+    target_latent: torch.Tensor
+    target_indices: torch.Tensor
+    target_modality_idx: int
 
 
 def _get_brats_files(data_dir: str, patient: str) -> Dict[str, str]:
@@ -219,7 +227,7 @@ class _PreEncodedDataset(Dataset):
     def __len__(self) -> int:
         return len(self.encoded_data)
 
-    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, int]]:
+    def __getitem__(self, idx: int) -> PreEncodedSample:
         """Get pre-encoded data for a random modality pair."""
         data = self.encoded_data[idx]
 
@@ -302,7 +310,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         orientation: str = "RAS",
         intensity_a_min: float = 0.0,
         intensity_a_max: float = 500.0,
-        intensity_b_min: float = 0.0,
+        intensity_b_min: float = -1.0,
         intensity_b_max: float = 1.0,
         clip: bool = True,
         # Augmentation parameters
@@ -568,7 +576,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         orientation: str = "RAS",
         intensity_a_min: float = 0.0,
         intensity_a_max: float = 500.0,
-        intensity_b_min: float = 0.0,
+        intensity_b_min: float = -1.0,
         intensity_b_max: float = 1.0,
         clip: bool = True,
         # Conditional generation
