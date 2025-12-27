@@ -39,3 +39,6 @@ path = "src/prod9/__init__.py"
 [tool.hatch.build]
 include = ["src/prod9/configs/*.yaml"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/prod9"]
+

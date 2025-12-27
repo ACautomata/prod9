@@ -1,4 +1,4 @@
-from typing import override, Tuple, List, Sequence, cast
+from typing import override, Sequence, cast
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
@@ -8,7 +8,7 @@ from monai.apps.generation.maisi.networks.autoencoderkl_maisi import Autoencoder
 class FiniteScalarQuantizer(nn.Module):
     _levels_tensor: torch.Tensor
     _basis: torch.Tensor
-    def __init__(self, spatial_dims: int, levels: List[int]):
+    def __init__(self, spatial_dims: int, levels: Sequence[int]):
         super().__init__()
         # 使用PyTorch张量替代NumPy数组
         self.register_buffer(
@@ -73,7 +73,7 @@ class FiniteScalarQuantizer(nn.Module):
         return (torch.round(z) - z).detach() + z
 
 class AutoencoderFSQ(AutoencoderKlMaisi):
-    def __init__(self, spatial_dims: int, levels: list[int], **kwargs):
+    def __init__(self, spatial_dims: int, levels: Sequence[int], **kwargs):
         """
         Initialize AutoencoderFSQ with Finite Scalar Quantization.
 

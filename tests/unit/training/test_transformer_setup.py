@@ -4,10 +4,11 @@ Tests the autoencoder loading logic from checkpoint hparams.
 """
 
 import tempfile
-from typing import Dict, Any
+from typing import Dict, Any, Iterator, Generator, cast
 
 import pytest
 import torch
+import torch.nn as nn
 
 from prod9.training.transformer import TransformerLightning
 from prod9.training.autoencoder import AutoencoderLightning
@@ -41,7 +42,7 @@ class TestTransformerSetup:
         }
 
     @pytest.fixture
-    def temp_checkpoint_path(self, fake_checkpoint: Dict[str, Any]) -> str:
+    def temp_checkpoint_path(self, fake_checkpoint: Dict[str, Any]) -> Generator[str, None, None]:
         """Create a temporary checkpoint file."""
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
             torch.save(fake_checkpoint, f.name)
@@ -73,7 +74,7 @@ class TestTransformerSetup:
         assert model.transformer is not None
         assert isinstance(model.transformer, TransformerDecoder)
         # codebook_size should be 4*4*4 = 64
-        assert model.transformer.out_proj.out_channels == 64
+        assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 64
 
     def test_setup_only_loads_once(self, temp_checkpoint_path: str) -> None:
         """Test that setup() only loads autoencoder once."""
@@ -129,7 +130,7 @@ class TestTransformerSetup:
 
         # levels = [4, 4, 4], so codebook_size = 64
         expected_codebook_size = 4 * 4 * 4
-        actual_codebook_size = model.transformer.out_proj.out_channels
+        actual_codebook_size = cast(nn.Conv3d, model.transformer.out_proj).out_channels
 
         assert actual_codebook_size == expected_codebook_size
 
@@ -199,7 +200,7 @@ class TestTransformerSetup:
 
         # Should use the provided transformer, not create a new one
         assert model.transformer is custom_transformer
-        assert model.transformer.out_proj.out_channels == 999
+        assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 999
 
 
 class TestExportLoadIntegration:
@@ -253,4 +254,4 @@ class TestExportLoadIntegration:
 
             # Verify transformer has correct codebook_size
             assert model.transformer is not None
-            assert model.transformer.out_proj.out_channels == 512  # 8*8*8
+            assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 512  # 8*8*8

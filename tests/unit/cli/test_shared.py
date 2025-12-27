@@ -88,11 +88,11 @@ class TestResolveConfigPath:
             import prod9
             package_root = Path(prod9.__file__).parent
             configs_dir = package_root / "configs"
+            original_content = None
 
             # If configs directory exists, create a file there too
             if configs_dir.exists():
                 package_file = configs_dir / "test_config.yaml"
-                original_content = None
                 if package_file.exists():
                     # Backup original file
                     original_content = package_file.read_text()
