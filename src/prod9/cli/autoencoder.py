@@ -12,7 +12,7 @@ from prod9.training.lightning_module import (
     AutoencoderLightningConfig,
 )
 from prod9.training.brats_data import BraTSDataModuleStage1
-from prod9.cli.shared import setup_environment, get_device, create_trainer
+from prod9.cli.shared import setup_environment, get_device, create_trainer, resolve_config_path
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
@@ -36,7 +36,8 @@ def train_autoencoder(config: str) -> None:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="autoencoder")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="autoencoder")
 
     # Create lightning module from config
     model = AutoencoderLightningConfig.from_config(cfg)
@@ -81,7 +82,8 @@ def validate_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="autoencoder")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="autoencoder")
 
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
@@ -122,7 +124,8 @@ def test_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="autoencoder")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="autoencoder")
 
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
@@ -177,7 +180,8 @@ def infer_autoencoder(
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="autoencoder")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="autoencoder")
 
     # Create model from config and load checkpoint
     model = AutoencoderLightningConfig.from_config(cfg)

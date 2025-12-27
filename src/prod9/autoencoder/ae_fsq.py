@@ -73,14 +73,38 @@ class FiniteScalarQuantizer(nn.Module):
         return (torch.round(z) - z).detach() + z
 
 class AutoencoderFSQ(AutoencoderKlMaisi):
-    def __init__(self, spatial_dims, levels, *args,  **kwargs):
-        super().__init__(spatial_dims, latent_channels=len(levels), *args, **kwargs)
+    def __init__(self, spatial_dims: int, levels: list[int], **kwargs):
+        """
+        Initialize AutoencoderFSQ with Finite Scalar Quantization.
+
+        Args:
+            spatial_dims: Number of spatial dimensions (1, 2, or 3)
+            levels: FSQ quantization levels per latent dimension
+                Product of levels = codebook size (e.g., [8,8,8] → 512 codes)
+            **kwargs: All other arguments passed to AutoencoderKlMaisi:
+                - in_channels (default: 1)
+                - out_channels (default: 1)
+                - num_channels (default: [32,64,128,256,512])
+                - attention_levels (default: [False,False,True,True,True])
+                - num_res_blocks (default: [1,1,1,1,1])
+                - norm_num_groups (default: 32)
+                - num_splits (default: 16)
+                - etc.
+        """
+        # Save all init parameters for export
+        self._init_config = {
+            "spatial_dims": spatial_dims,
+            "levels": levels,
+            **kwargs,
+        }
+
+        super().__init__(spatial_dims, latent_channels=len(levels), **kwargs)
         self.quantizer = FiniteScalarQuantizer(
             spatial_dims=spatial_dims,
-            levels=levels 
+            levels=levels
         )
         self.quant_conv_log_sigma = None
-       
+
     
     @override
     def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:

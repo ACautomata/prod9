@@ -12,7 +12,7 @@ from prod9.training.lightning_module import (
     TransformerLightningConfig,
 )
 from prod9.training.brats_data import BraTSDataModuleStage2
-from prod9.cli.shared import setup_environment, create_trainer
+from prod9.cli.shared import setup_environment, create_trainer, resolve_config_path
 from prod9.generator.maskgit import MaskGiTSampler
 
 
@@ -36,7 +36,8 @@ def train_transformer(config: str) -> None:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="transformer")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="transformer")
 
     # Create lightning module from config
     model = TransformerLightningConfig.from_config(cfg)
@@ -79,7 +80,8 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
-    cfg = load_validated_config(config, stage="transformer")
+    config_path = resolve_config_path(config)
+    cfg = load_validated_config(config_path, stage="transformer")
 
     # Create model from config
     model = TransformerLightningConfig.from_config(cfg)
@@ -123,7 +125,8 @@ def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     setup_environment()
 
     # Load configuration
-    cfg = load_config(config)
+    config_path = resolve_config_path(config)
+    cfg = load_config(config_path)
 
     # Create model from config
     model = TransformerLightningConfig.from_config(cfg)
@@ -188,7 +191,8 @@ def generate(
     setup_environment()
 
     # Load configuration
-    cfg = load_config(config)
+    config_path = resolve_config_path(config)
+    cfg = load_config(config_path)
 
     # Create output directory
     os.makedirs(output, exist_ok=True)

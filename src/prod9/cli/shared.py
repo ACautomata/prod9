@@ -1,6 +1,8 @@
 """Shared utilities for CLI modules."""
 
 import os
+import sys
+from pathlib import Path
 from typing import Dict, Any
 
 import torch
@@ -30,6 +32,88 @@ def get_device() -> torch.device:
         return torch.device("mps")
     else:
         return torch.device("cpu")
+
+
+def resolve_config_path(config_path: str) -> str:
+    """
+    Resolve configuration file path to an absolute path.
+
+    Search order:
+    1. Absolute path: returned as-is
+    2. Relative path:
+       a. Current working directory (for custom configs)
+       b. Package's configs/ directory (for default configs)
+
+    Args:
+        config_path: Path to configuration file (can be relative or absolute)
+
+    Returns:
+        Absolute path to the configuration file
+
+    Raises:
+        FileNotFoundError: If config file cannot be found in any location
+
+    Example:
+        >>> # When working directory is not the repository root
+        >>> resolve_config_path("configs/brats_autoencoder.yaml")
+        '/usr/local/lib/python3.11/site-packages/prod9/configs/brats_autoencoder.yaml'
+
+        >>> # Absolute paths are returned unchanged
+        >>> resolve_config_path("/full/path/to/config.yaml")
+        '/full/path/to/config.yaml'
+    """
+    path = Path(config_path)
+
+    # Case 1: Absolute path
+    if path.is_absolute():
+        if not path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        return str(path)
+
+    # Case 2: Relative path - search in order
+
+    # 2a. Current working directory (for custom configs)
+    cwd_path = Path.cwd() / config_path
+    if cwd_path.exists():
+        return str(cwd_path.resolve())
+
+    # 2b. Package's configs/ directory
+    # Get the package directory where prod9 is installed
+    try:
+        import prod9
+        package_root = Path(prod9.__file__).parent
+    except ImportError:
+        # Fallback: use the directory containing this module (shared.py)
+        package_root = Path(__file__).parent.parent.parent
+
+    # Look for configs/ directory within package
+    # Try the exact relative path under package root (e.g., "configs/brats_autoencoder.yaml")
+    package_configs_path = package_root / config_path
+    if package_configs_path.exists():
+        return str(package_configs_path.resolve())
+
+    # Fallback: also try under configs/ directory with just the filename
+    # (for compatibility with older usage like "brats_autoencoder.yaml")
+    fallback_path = package_root / "configs" / Path(config_path).name
+    if fallback_path.exists():
+        return str(fallback_path.resolve())
+
+    # If not found, provide helpful error message
+    searched = [
+        str(cwd_path),
+        str(package_configs_path),
+        str(fallback_path)
+    ]
+    # Remove duplicates while preserving order
+    unique_searched = []
+    for p in searched:
+        if p not in unique_searched:
+            unique_searched.append(p)
+    raise FileNotFoundError(
+        f"Config file not found: {config_path}\n"
+        f"Searched in the following locations:\n" +
+        "\n".join(f"  - {p}" for p in unique_searched)
+    )
 
 
 def create_trainer(

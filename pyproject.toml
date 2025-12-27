@@ -36,3 +36,6 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "src/prod9/__init__.py"
 
+[tool.hatch.build]
+include = ["src/prod9/configs/*.yaml"]
+

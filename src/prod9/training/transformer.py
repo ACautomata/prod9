@@ -42,8 +42,6 @@ class TransformerLightning(pl.LightningModule):
     Args:
         autoencoder_path: Path to trained Stage 1 autoencoder checkpoint
         transformer: TransformerDecoder model
-        spatial_dims: Number of spatial dimensions (default: 3)
-        levels: FSQ levels (default: (8, 8, 8))
         latent_channels: Number of latent channels (default: 4)
         cond_channels: Number of condition channels (default: 4)
         patch_size: Patch size for transformer (default: 2)
@@ -62,15 +60,16 @@ class TransformerLightning(pl.LightningModule):
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
         sw_batch_size: Sliding window batch size (default: 1)
+
+    Note:
+        spatial_dims and levels are loaded from the autoencoder checkpoint,
+        not specified in the config.
     """
 
     def __init__(
         self,
         autoencoder_path: str,
         transformer: Optional[nn.Module] = None,
-        # Autoencoder config
-        spatial_dims: int = 3,
-        levels: tuple[int, ...] = (8, 8, 8),
         # Transformer config
         latent_channels: int = 4,
         cond_channels: int = 4,
@@ -94,29 +93,22 @@ class TransformerLightning(pl.LightningModule):
     ):
         super().__init__()
 
-        # Create transformer if not provided
-        if transformer is None:
-            from prod9.generator.transformer import TransformerDecoder
-            transformer = TransformerDecoder(
-                d_model=latent_channels,
-                c_model=cond_channels,
-                patch_size=patch_size,
-                num_blocks=num_blocks,
-                hidden_dim=hidden_dim,
-                cond_dim=cond_dim,
-                num_heads=num_heads,
-                codebook_size=int(__import__("numpy").prod(levels)),
-            )
-
         self.save_hyperparameters(ignore=["autoencoder", "transformer"])
 
         self.autoencoder_path = autoencoder_path
         self.autoencoder: Optional[AutoencoderInferenceWrapper] = None
-        self.transformer: nn.Module = transformer  # type: ignore[assignment]
 
-        # Autoencoder config (needed for loading checkpoint)
-        self.spatial_dims = spatial_dims
-        self.levels = levels
+        # Store transformer if provided, otherwise will create in setup()
+        self.transformer: nn.Module = transformer  # type: ignore[assignment]
+        self._transformer_config = {
+            "latent_channels": latent_channels,
+            "cond_channels": cond_channels,
+            "patch_size": patch_size,
+            "num_blocks": num_blocks,
+            "hidden_dim": hidden_dim,
+            "cond_dim": cond_dim,
+            "num_heads": num_heads,
+        }
 
         self.latent_channels = latent_channels
         self.cond_channels = cond_channels
@@ -156,33 +148,58 @@ class TransformerLightning(pl.LightningModule):
 
     def setup(self, stage: str) -> None:
         """Load frozen autoencoder from checkpoint and wrap with SW."""
-        if stage == "fit":
-            # Load checkpoint weights
-            checkpoint = torch.load(self.autoencoder_path, map_location='cpu')
-            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-                state_dict = checkpoint['state_dict']
-            else:
-                state_dict = checkpoint
+        # Only load once
+        if self.autoencoder is not None:
+            return
 
-            # Create autoencoder with stored config
-            autoencoder = AutoencoderFSQ(
-                spatial_dims=self.spatial_dims,
-                levels=self.levels,
+        # Load checkpoint weights
+        # weights_only=False because we need to load custom classes (MONAI)
+        checkpoint = torch.load(self.autoencoder_path, map_location='cpu', weights_only=False)
+
+        # Check for config
+        if "config" not in checkpoint:
+            raise ValueError(
+                f"Checkpoint '{self.autoencoder_path}' missing 'config'. "
+                "Please re-export the autoencoder from Stage 1."
             )
-            autoencoder.load_state_dict(state_dict)
-            autoencoder.eval()
 
-            # Freeze autoencoder parameters
-            for param in autoencoder.parameters():
-                param.requires_grad = False
+        config = checkpoint["config"]
+        state_dict = checkpoint.get("state_dict", checkpoint)
 
-            # Wrap with inference wrapper (REQUIRED for transformer)
-            sw_config = SlidingWindowConfig(
-                roi_size=self.sw_roi_size,
-                overlap=self.sw_overlap,
-                sw_batch_size=self.sw_batch_size,
+        # Calculate codebook_size from levels
+        import numpy as np
+        codebook_size = int(np.prod(config["levels"]))
+
+        # Create transformer if not provided
+        if self.transformer is None:
+            from prod9.generator.transformer import TransformerDecoder
+            self.transformer = TransformerDecoder(
+                d_model=self._transformer_config["latent_channels"],
+                c_model=self._transformer_config["cond_channels"],
+                patch_size=self._transformer_config["patch_size"],
+                num_blocks=self._transformer_config["num_blocks"],
+                hidden_dim=self._transformer_config["hidden_dim"],
+                cond_dim=self._transformer_config["cond_dim"],
+                num_heads=self._transformer_config["num_heads"],
+                codebook_size=codebook_size,  # Use actual codebook_size from levels
             )
-            self.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
+
+        # Create autoencoder with saved config (exact same as __init__ call)
+        autoencoder = AutoencoderFSQ(**config)
+        autoencoder.load_state_dict(state_dict)
+        autoencoder.eval()
+
+        # Freeze autoencoder parameters
+        for param in autoencoder.parameters():
+            param.requires_grad = False
+
+        # Wrap with inference wrapper (REQUIRED for transformer)
+        sw_config = SlidingWindowConfig(
+            roi_size=self.sw_roi_size,
+            overlap=self.sw_overlap,
+            sw_batch_size=self.sw_batch_size,
+        )
+        self.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
 
     def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

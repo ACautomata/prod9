@@ -438,10 +438,11 @@ class AutoencoderLightning(pl.LightningModule):
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+        # Use the saved _init_config (contains all init parameters)
         torch.save(
             {
                 "state_dict": self.autoencoder.state_dict(),
-                "hparams": self.autoencoder.__dict__,
+                "config": self.autoencoder._init_config,
             },
             output_path,
         )
