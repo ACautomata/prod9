@@ -134,10 +134,7 @@ class AutoencoderLightning(pl.LightningModule):
         Returns:
             Reconstructed tensor [B, 1, H, W, D]
         """
-        z_mu, _ = self.autoencoder.encode(x)
-        z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
-        z_embedded = self.autoencoder.embed(z_quantized)
-        reconstructed = self.autoencoder.decode(z_embedded)
+        reconstructed, _, _ = self.autoencoder(x)
         return reconstructed
 
     def _get_inference_wrapper(self) -> Optional[AutoencoderInferenceWrapper]:
@@ -227,10 +224,7 @@ class AutoencoderLightning(pl.LightningModule):
         """
         # Generate fake images
         with torch.no_grad():
-            z_mu, _ = self.autoencoder.encode(real_images)
-            z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
-            z_embedded = self.autoencoder.embed(z_quantized)
-            fake_images = self.autoencoder.decode(z_embedded)
+            fake_images, _, _ = self.autoencoder(real_images)
 
         # Discriminator outputs
         real_outputs, _ = self.discriminator(real_images)
@@ -265,9 +259,7 @@ class AutoencoderLightning(pl.LightningModule):
         """
         # Encode and decode
         z_mu, _ = self.autoencoder.encode(real_images)
-        z_quantized = self.autoencoder.quantize_stage_2_inputs(z_mu)
-        z_embedded = self.autoencoder.embed(z_quantized)
-        fake_images = self.autoencoder.decode(z_embedded)
+        fake_images = self.autoencoder.decode(z_mu)
 
         # Discriminator outputs
         fake_outputs, _ = self.discriminator(fake_images)
@@ -277,7 +269,7 @@ class AutoencoderLightning(pl.LightningModule):
             real_images=real_images,
             fake_images=fake_images,
             encoder_output=z_mu,
-            quantized_output=z_embedded,
+            quantized_output=z_mu,
             discriminator_output=fake_outputs,
             global_step=self.global_step,
             last_layer=self.last_layer,
@@ -344,12 +336,13 @@ class AutoencoderLightning(pl.LightningModule):
             )
 
             # Encode/Decode with SW
-            reconstructed = wrapper.forward(images_padded)
+            reconstructed, _, _ = wrapper.forward(images_padded)
+            reconstructed = reconstructed
 
             # Unpad output
             reconstructed = unpad_from_sliding_window(reconstructed, padding_info)
         else:
-            reconstructed = self.forward(images)
+            reconstructed, _, _ = self.autoencoder(images)
 
         # Compute individual metrics
         psnr_value = self.psnr(reconstructed, images)
@@ -390,17 +383,28 @@ class AutoencoderLightning(pl.LightningModule):
         with torch.no_grad():
             reconstructed = self.forward(images)
 
-        # Log first sample from batch
+        # Log first sample from batch - take middle slice for 3D visualization
         if experiment and hasattr(experiment, 'add_image'):
+            # Get middle slice for 3D images (D dimension)
+            d_mid = images.shape[4] // 2  # Shape: [B, C, H, W, D]
+            real_2d = images[0, 0, :, :, d_mid]  # Shape: [H, W]
+            recon_2d = reconstructed[0, 0, :, :, d_mid]  # Shape: [H, W]
+
+            # Add channel dimension for tensorboard (HWC format)
+            real_2d = real_2d.unsqueeze(-1)  # Shape: [H, W, 1]
+            recon_2d = recon_2d.unsqueeze(-1)  # Shape: [H, W, 1]
+
             experiment.add_image(
                 f"val/{modality}_real",
-                images[0, 0].unsqueeze(-1),
+                real_2d,
                 self.global_step,
+                dataformats="HWC"
             )
             experiment.add_image(
                 f"val/{modality}_recon",
-                reconstructed[0, 0].unsqueeze(-1),
+                recon_2d,
                 self.global_step,
+                dataformats="HWC"
             )
 
     def configure_optimizers(self):

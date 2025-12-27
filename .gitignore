@@ -3,3 +3,6 @@
 .vscode
 CLAUDE.md
 .coverage
+.medmnist
+.output
+.pytest_cache

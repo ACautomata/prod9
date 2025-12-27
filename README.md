@@ -49,8 +49,10 @@ Or specify in config files using the `${BRATS_DATA_DIR:data/BraTS}` syntax.
 ```
 prod9/
 ├── configs/
-│   ├── autoencoder.yaml    # Stage 1 configuration
-│   └── transformer.yaml    # Stage 2 configuration
+│   ├── brats_autoencoder.yaml    # BraTS dataset Stage 1 configuration
+│   ├── brats_transformer.yaml    # BraTS dataset Stage 2 configuration
+│   ├── medmnist3d_autoencoder.yaml    # MedMNIST 3D dataset Stage 1 configuration
+│   └── medmnist3d_transformer.yaml    # MedMNIST 3D dataset Stage 2 configuration
 ├── src/prod9/
 │   ├── autoencoder/
 │   │   ├── ae_fsq.py       # AutoencoderFSQ, FiniteScalarQuantizer
@@ -76,32 +78,21 @@ prod9/
 
 ### 1. Train Stage 1 Autoencoder
 
-Train with default configuration (recommended for beginners):
+
+Train with configuration file:
 ```bash
-prod9-train-autoencoder train
+prod9-train-autoencoder train --config configs/brats_autoencoder.yaml
 ```
 
-Or use a custom configuration file:
-```bash
-prod9-train-autoencoder train --config my_config.yaml
-```
-
-**Note**: The `--config` parameter is optional. If not specified, default configs are used:
-- Autoencoder: `configs/autoencoder.yaml`
-- Transformer: `configs/transformer.yaml`
 
 This trains the autoencoder and exports the final model to `outputs/autoencoder_final.pt`.
 
 ### 2. Train Stage 2 Transformer
 
-Train with default configuration:
-```bash
-prod9-train-transformer train
-```
 
-Or use a custom configuration:
+Train with configuration file:
 ```bash
-prod9-train-transformer train --config my_transformer_config.yaml
+prod9-train-transformer train --config configs/brats_transformer.yaml
 ```
 
 This requires the trained autoencoder from Stage 1.
@@ -110,7 +101,7 @@ This requires the trained autoencoder from Stage 1.
 
 ```bash
 prod9-train-transformer generate \
-    --config configs/transformer.yaml \
+    --config configs/brats_transformer.yaml \
     --checkpoint outputs/stage2/best.ckpt \
     --output outputs/generated \
     --num-samples 10
@@ -120,31 +111,28 @@ prod9-train-transformer generate \
 
 ### Configuration File
 
-All CLI commands have an optional `--config` parameter:
-- **Not specified**: Uses built-in default configuration
-  - Autoencoder: `configs/autoencoder.yaml`
-  - Transformer: `configs/transformer.yaml`
-- **Specified**: Uses your custom configuration file
+All CLI commands require the `--config` parameter to specify a configuration file.
+There are no built-in default configurations. You must provide a configuration file path.
 
 ### Autoencoder CLI (`prod9-train-autoencoder`)
 
 ```bash
-# Train with default config
-prod9-train-autoencoder train
-
-# Train with custom config
-prod9-train-autoencoder train --config my_autoencoder_config.yaml
+# Train with configuration file
+prod9-train-autoencoder train --config configs/brats_autoencoder.yaml
 
 # Validate
 prod9-train-autoencoder validate \
+    --config configs/brats_autoencoder.yaml \
     --checkpoint outputs/stage1/best.ckpt
 
 # Test
 prod9-train-autoencoder test \
+    --config configs/brats_autoencoder.yaml \
     --checkpoint outputs/stage1/best.ckpt
 
 # Inference (with sliding window)
 prod9-train-autoencoder infer \
+    --config configs/brats_autoencoder.yaml \
     --checkpoint outputs/stage1/best.ckpt \
     --input data/patient1_t1.nii.gz \
     --output outputs/patient1_recon.nii.gz \
@@ -180,7 +168,7 @@ prod9-train-transformer generate \
 
 ## Configuration
 
-### Autoencoder Configuration (`configs/autoencoder.yaml`)
+### Autoencoder Configuration (`configs/brats_autoencoder.yaml`)
 
 Key sections:
 - `model`: Autoencoder architecture (latent_channels, fsq_levels, fmaps)
@@ -192,7 +180,7 @@ Key sections:
 - `callbacks`: Checkpointing, early stopping, LR monitoring
 - `trainer`: Accelerator (gpu/cpu/mps), precision, devices
 
-### Transformer Configuration (`configs/transformer.yaml`)
+### Transformer Configuration (`configs/brats_transformer.yaml`)
 
 Key sections:
 - `autoencoder_path`: Path to trained Stage 1 model
@@ -239,7 +227,7 @@ sliding_window:
 
 ```bash
 prod9-train-autoencoder infer \
-    --config configs/autoencoder.yaml \
+    --config configs/brats_autoencoder.yaml \
     --checkpoint outputs/stage1/best.ckpt \
     --input large_volume.nii.gz \
     --output reconstructed.nii.gz \
@@ -247,6 +235,38 @@ prod9-train-autoencoder infer \
     --overlap 0.25 \
     --sw-batch-size 2
 ```
+
+### Configuration Files
+
+prod9 supports multiple datasets, each with its own configuration files:
+
+1. **BraTS dataset**:
+   - `configs/brats_autoencoder.yaml`: Stage 1 autoencoder configuration
+   - `configs/brats_transformer.yaml`: Stage 2 transformer configuration
+
+2. **MedMNIST 3D dataset**:
+   - `configs/medmnist3d_autoencoder.yaml`: Stage 1 autoencoder configuration
+   - `configs/medmnist3d_transformer.yaml`: Stage 2 transformer configuration
+
+#### Creating Custom Configurations
+
+You can create custom configurations based on existing ones:
+
+```bash
+# Copy BraTS configurations as a starting point
+cp configs/brats_autoencoder.yaml configs/my_custom_autoencoder.yaml
+cp configs/brats_transformer.yaml configs/my_custom_transformer.yaml
+
+# Edit your custom configuration
+vim configs/my_custom_autoencoder.yaml
+
+# Train with custom configuration
+prod9-train-autoencoder train --config configs/my_custom_autoencoder.yaml
+```
+
+#### Required Parameter
+
+Starting from version 9.0.0, the `--config` parameter is required. There are no default configuration files. This ensures explicit configuration selection and avoids confusion.
 
 ## Development
 

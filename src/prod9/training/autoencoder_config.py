@@ -9,7 +9,8 @@ from typing import Dict, Any
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
 from prod9.training.metrics import MetricCombiner
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+# from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+from prod9.training.discriminator import AdaptiveMultiScalePatchDiscriminator
 
 
 class AutoencoderLightningConfig:
@@ -52,7 +53,6 @@ class AutoencoderLightningConfig:
         training_config = config.get("training", {})
         optimizer_config = training_config.get("optimizer", {})
         loop_config = training_config.get("loop", {})
-        warmup_config = training_config.get("warmup", {})
 
         # Get loss configuration
         loss_config = config.get("loss", {})
@@ -60,6 +60,7 @@ class AutoencoderLightningConfig:
         perceptual_config = loss_config.get("perceptual", {})
         adv_config = loss_config.get("adversarial", {})
         commitment_config = loss_config.get("commitment", {})
+        discriminator_iter_start = loss_config.get("discriminator_iter_start", 0)
 
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
@@ -87,7 +88,7 @@ class AutoencoderLightningConfig:
             adv_weight=adv_config.get("weight", 0.1),
             commitment_weight=commitment_config.get("weight", 0.25),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
-            discriminator_iter_start=warmup_config.get("disc_iter_start", 0),
+            discriminator_iter_start=discriminator_iter_start,
             # Sliding window config
             use_sliding_window=sw_config.get("enabled", False),
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
@@ -111,19 +112,20 @@ class AutoencoderLightningConfig:
             attention_levels=config.get("attention_levels", [False, False, True, True, True]),
             num_res_blocks=config.get("num_res_blocks", [1, 1, 1, 1, 1]),
             norm_num_groups=config.get("norm_num_groups", 32),
+            num_splits=config.get("num_splits", 16),  # Add num_splits parameter
         )
 
     @staticmethod
     def _create_discriminator(
         config: Dict[str, Any]
-    ) -> MultiScalePatchDiscriminator:
+    ) -> AdaptiveMultiScalePatchDiscriminator:
         """Create MultiScalePatchDiscriminator from config."""
         # Extract activation tuple if provided
         activation = config.get("activation", ("LEAKYRELU", {"negative_slope": 0.2}))
         if isinstance(activation, list):
             activation = tuple(activation)
 
-        return MultiScalePatchDiscriminator(
+        return AdaptiveMultiScalePatchDiscriminator(
             in_channels=config.get("in_channels", 1),
             num_d=config.get("num_d", 3),
             channels=config.get("channels", 64),

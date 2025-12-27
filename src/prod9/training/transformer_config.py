@@ -62,7 +62,7 @@ class TransformerLightningConfig:
             hidden_dim=transformer_config.get("hidden_dim", 512),
             cond_dim=transformer_config.get("cond_dim", 512),
             num_heads=transformer_config.get("num_heads", 8),
-            num_modalities=model_config.get("num_modalities", 4),
+            num_classes=model_config.get("num_classes", 4),  # Unified: 4 for BraTS, variable for MedMNIST 3D
             contrast_embed_dim=model_config.get("contrast_embed_dim", 64),
             scheduler_type=sampler_config.get("scheduler_type", "log"),
             num_steps=sampler_config.get("steps", 12),

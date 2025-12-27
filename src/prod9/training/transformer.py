@@ -51,8 +51,8 @@ class TransformerLightning(pl.LightningModule):
         hidden_dim: Hidden dimension (default: 512)
         cond_dim: Condition dimension (default: 512)
         num_heads: Number of attention heads (default: 8)
-        num_modalities: Number of MRI modalities (default: 4)
-        contrast_embed_dim: Learnable embedding size for modalities (default: 64)
+        num_classes: Number of classes (default: 4). For BraTS: 4 modalities. For MedMNIST 3D: dataset-specific (e.g., 11 for OrganMNIST3D)
+        contrast_embed_dim: Learnable embedding size for classes/conditions (default: 64)
         scheduler_type: Scheduler type - 'log2', 'linear', 'sqrt' (default: 'log2')
         num_steps: Number of sampling steps (default: 12)
         mask_value: Mask token value (default: -100)
@@ -79,7 +79,7 @@ class TransformerLightning(pl.LightningModule):
         hidden_dim: int = 512,
         cond_dim: int = 512,
         num_heads: int = 8,
-        num_modalities: int = 4,
+        num_classes: int = 4,
         contrast_embed_dim: int = 64,
         scheduler_type: str = "log2",
         num_steps: int = 12,
@@ -120,7 +120,7 @@ class TransformerLightning(pl.LightningModule):
 
         self.latent_channels = latent_channels
         self.cond_channels = cond_channels
-        self.num_modalities = num_modalities
+        self.num_classes = num_classes  # Unified: BraTS modalities or MedMNIST 3D classes
         self.contrast_embed_dim = contrast_embed_dim
         self.unconditional_prob = unconditional_prob
         self.scheduler_type = scheduler_type
@@ -134,8 +134,9 @@ class TransformerLightning(pl.LightningModule):
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
 
-        # Learnable contrast embeddings for each modality
-        self.contrast_embeddings = nn.Embedding(num_modalities, contrast_embed_dim)
+        # Unified class/condition embeddings (works for both BraTS and MedMNIST 3D)
+        self.label_embeddings = nn.Embedding(num_classes, contrast_embed_dim)
+        self.contrast_embeddings = None  # Deprecated, use label_embeddings
 
         # MaskGiTScheduler for training data augmentation
         from prod9.generator.maskgit import MaskGiTScheduler
@@ -222,7 +223,7 @@ class TransformerLightning(pl.LightningModule):
         batch_size = source_latent.shape[0]
 
         # Get contrast embedding for target modality
-        contrast_embed = self.contrast_embeddings(target_modality_idx)  # [B, contrast_embed_dim]
+        contrast_embed = self.label_embeddings(target_modality_idx)  # [B, contrast_embed_dim]
 
         # Spatially broadcast to match latent spatial dimensions
         contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
@@ -238,28 +239,59 @@ class TransformerLightning(pl.LightningModule):
         """
         Training step with conditional generation.
 
+        Supports both:
+        - Multi-modal generation (BraTS): uses modality embeddings
+        - Classification datasets (MedMNIST 3D): uses label embeddings
+
         Args:
             batch: Dictionary with:
+                BraTS format:
                 - 'cond_latent': [B, C, H, W, D] - conditioning modality latent
                 - 'target_latent': [B, C, H, W, D] - target modality latent
                 - 'target_indices': [B, H*W*D] - target token indices
                 - 'target_modality_idx': [B] - target modality indices
+
+                MedMNIST 3D format:
+                - 'cond_latent': [B, cond_dim] - condition embeddings (or zero for unconditional)
+                - 'target_latent': [B, C, H, W, D] - target modality latent
+                - 'target_indices': [B, H*W*D] - target token indices
+                - 'label': [B] - class labels
+
             batch_idx: Batch index (unused)
 
         Returns:
             Loss dictionary for logging
         """
-        cond_latent = batch["cond_latent"]
-        target_latent = batch["target_latent"]
-        target_indices = batch["target_indices"]
-        target_modality_idx = batch["target_modality_idx"]
+        # Detect batch format (BraTS vs MedMNIST 3D)
+        is_classification_dataset = "target_modality_idx" not in batch
 
-        # Prepare condition: concat cond_latent with contrast embedding
-        batch_size = cond_latent.shape[0]
-        contrast_embed = self.contrast_embeddings(target_modality_idx)
-        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
-        contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
-        cond = torch.cat([cond_latent, contrast_embed], dim=1)
+        if is_classification_dataset:
+            # MedMNIST 3D format - cond_latent is already the condition embedding
+            cond_latent = batch["cond_latent"]
+            target_latent = batch["target_latent"]
+            target_indices = batch["target_indices"]
+
+            # cond_latent may be zero tensor (unconditional) or label embedding (conditional)
+            # Need to expand it to spatial dimensions
+            batch_size = cond_latent.shape[0]
+            if cond_latent.dim() == 1:  # [B, cond_dim]
+                # Spatially broadcast to match latent spatial dimensions
+                cond_latent = cond_latent.view(batch_size, -1, 1, 1, 1)
+                cond_latent = cond_latent.expand(batch_size, -1, *target_latent.shape[2:])
+            cond = cond_latent
+        else:
+            # BraTS format - need to create condition from source_latent + modality embedding
+            cond_latent = batch["cond_latent"]
+            target_latent = batch["target_latent"]
+            target_indices = batch["target_indices"]
+            target_modality_idx = batch["target_modality_idx"]
+
+            # Prepare condition: concat cond_latent with contrast embedding
+            batch_size = cond_latent.shape[0]
+            contrast_embed = self.label_embeddings(target_modality_idx)
+            contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
+            contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
+            cond = torch.cat([cond_latent, contrast_embed], dim=1)
 
         # Generate masked pairs via MaskGiTScheduler
         step = random.randint(1, self.num_steps)
@@ -296,12 +328,22 @@ class TransformerLightning(pl.LightningModule):
         """
         Validation step with full sampling steps.
 
+        Supports both BraTS and MedMNIST 3D formats.
+
         Args:
             batch: Dictionary with:
+                BraTS format:
                 - 'cond_latent': [B, C, H, W, D] - conditioning modality latent
                 - 'target_latent': [B, C, H, W, D] - target modality latent
                 - 'target_indices': [B, H*W*D] - target token indices
                 - 'target_modality_idx': [B] - target modality indices
+
+                MedMNIST 3D format:
+                - 'cond_latent': [B, cond_dim] - condition embeddings
+                - 'target_latent': [B, C, H, W, D] - target modality latent
+                - 'target_indices': [B, H*W*D] - target token indices
+                - 'label': [B] - class labels
+
             batch_idx: Batch index (unused)
 
         Returns:
@@ -310,16 +352,33 @@ class TransformerLightning(pl.LightningModule):
         metrics = {}
         autoencoder = self._get_autoencoder()
 
-        cond_latent = batch["cond_latent"]
-        target_latent = batch["target_latent"]
-        target_modality_idx = batch["target_modality_idx"]
+        # Detect batch format
+        is_classification_dataset = "target_modality_idx" not in batch
 
-        # Prepare condition
-        batch_size = cond_latent.shape[0]
-        contrast_embed = self.contrast_embeddings(target_modality_idx)
-        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
-        contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
-        cond = torch.cat([cond_latent, contrast_embed], dim=1)
+        if is_classification_dataset:
+            # MedMNIST 3D format
+            cond_latent = batch["cond_latent"]
+            target_latent = batch["target_latent"]
+            target_indices = batch["target_indices"]
+
+            # Expand cond_latent to spatial dimensions if needed
+            batch_size = cond_latent.shape[0]
+            if cond_latent.dim() == 1:  # [B, cond_dim]
+                cond_latent = cond_latent.view(batch_size, -1, 1, 1, 1)
+                cond_latent = cond_latent.expand(batch_size, -1, *target_latent.shape[2:])
+            cond = cond_latent
+        else:
+            # BraTS format
+            cond_latent = batch["cond_latent"]
+            target_latent = batch["target_latent"]
+            target_modality_idx = batch["target_modality_idx"]
+
+            # Prepare condition
+            batch_size = cond_latent.shape[0]
+            contrast_embed = self.label_embeddings(target_modality_idx)
+            contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
+            contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
+            cond = torch.cat([cond_latent, contrast_embed], dim=1)
 
         # Use MaskGiTSampler for generation
         from prod9.generator.maskgit import MaskGiTSampler

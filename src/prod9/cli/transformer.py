@@ -16,7 +16,7 @@ from prod9.cli.shared import setup_environment, create_trainer
 from prod9.generator.maskgit import MaskGiTSampler
 
 
-def train_transformer(config: str = "configs/transformer.yaml") -> None:
+def train_transformer(config: str) -> None:
     """
     Train Stage 2: Transformer for cross-modality generation.
 
@@ -30,7 +30,7 @@ def train_transformer(config: str = "configs/transformer.yaml") -> None:
         config: Path to transformer configuration file
 
     Example:
-        >>> train_transformer("configs/transformer.yaml")
+        >>> train_transformer("configs/brats_transformer.yaml")
     """
     setup_environment()
 
@@ -41,9 +41,16 @@ def train_transformer(config: str = "configs/transformer.yaml") -> None:
     # Create lightning module from config
     model = TransformerLightningConfig.from_config(cfg)
 
-    # Create data module from config
-    data_module = BraTSDataModuleStage2.from_config(cfg)
-    data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+    # Create data module from config (detect BraTS vs MedMNIST 3D)
+    if "dataset_name" in cfg.get("data", {}):
+        # MedMNIST 3D dataset
+        from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
+        data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
+        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+    else:
+        # BraTS dataset (default)
+        data_module = BraTSDataModuleStage2.from_config(cfg)
+        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
 
     # Create trainer
     output_dir = cfg.get("output_dir", "outputs/stage2")
@@ -65,7 +72,7 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         Dictionary with validation metrics
 
     Example:
-        >>> metrics = validate_transformer("configs/transformer.yaml", "outputs/stage2/last.ckpt")
+        >>> metrics = validate_transformer("configs/brats_transformer.yaml", "outputs/stage2/last.ckpt")
         >>> print(f"Validation PSNR: {metrics['val/combined_metric']}")
     """
     setup_environment()
@@ -77,9 +84,16 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     # Create model from config
     model = TransformerLightningConfig.from_config(cfg)
 
-    # Create data module from config
-    data_module = BraTSDataModuleStage2.from_config(cfg)
-    data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+    # Create data module from config (detect BraTS vs MedMNIST 3D)
+    if "dataset_name" in cfg.get("data", {}):
+        # MedMNIST 3D dataset
+        from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
+        data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
+        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+    else:
+        # BraTS dataset (default)
+        data_module = BraTSDataModuleStage2.from_config(cfg)
+        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
 
     # Create trainer for validation
     output_dir = cfg.get("output_dir", "outputs/validation")
@@ -103,7 +117,7 @@ def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         Dictionary with test metrics
 
     Example:
-        >>> metrics = test_transformer("configs/transformer.yaml", "outputs/stage2/best.ckpt")
+        >>> metrics = test_transformer("configs/brats_transformer.yaml", "outputs/stage2/best.ckpt")
         >>> print(f"Test PSNR: {metrics['test/combined_metric']}")
     """
     setup_environment()
@@ -165,7 +179,7 @@ def generate(
 
     Example:
         >>> generate(
-        ...     "configs/transformer.yaml",
+        ...     "configs/brats_transformer.yaml",
         ...     "outputs/stage2/best.ckpt",
         ...     "outputs/generated",
         ...     num_samples=10
@@ -245,10 +259,10 @@ def main() -> None:
     Main CLI entry point for transformer commands.
 
     Usage:
-        prod9-train-transformer train --config configs/transformer.yaml
-        prod9-train-transformer validate --config configs/transformer.yaml --checkpoint outputs/stage2/best.ckpt
-        prod9-train-transformer test --config configs/transformer.yaml --checkpoint outputs/stage2/best.ckpt
-        prod9-train-transformer generate --config configs/transformer.yaml --checkpoint outputs/stage2/best.ckpt \\
+        prod9-train-transformer train --config configs/brats_transformer.yaml
+        prod9-train-transformer validate --config configs/brats_transformer.yaml --checkpoint outputs/stage2/best.ckpt
+        prod9-train-transformer test --config configs/brats_transformer.yaml --checkpoint outputs/stage2/best.ckpt
+        prod9-train-transformer generate --config configs/brats_transformer.yaml --checkpoint outputs/stage2/best.ckpt \\
             --output outputs/generated --num-samples 10
     """
     parser = argparse.ArgumentParser(
@@ -263,8 +277,8 @@ def main() -> None:
     train_parser.add_argument(
         "--config",
         type=str,
-        default="configs/transformer.yaml",
-        help="Path to transformer configuration file",
+        required=True,
+        help="Path to transformer configuration file (required)",
     )
 
     # Validation
@@ -272,8 +286,8 @@ def main() -> None:
     validate_parser.add_argument(
         "--config",
         type=str,
-        default="configs/transformer.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     validate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -284,8 +298,8 @@ def main() -> None:
     test_parser.add_argument(
         "--config",
         type=str,
-        default="configs/transformer.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     test_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -296,8 +310,8 @@ def main() -> None:
     generate_parser.add_argument(
         "--config",
         type=str,
-        default="configs/transformer.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     generate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to transformer checkpoint"

@@ -24,8 +24,8 @@ model:
     mlp_ratio: 4.0
     dropout: 0.1
 
-  # Contrast embeddings for modalities
-  num_modalities: 4  # T1, T1ce, T2, FLAIR
+  # Class/condition embeddings for BraTS modalities
+  num_classes: 4  # 4 BraTS modalities: T1, T1ce, T2, FLAIR
   contrast_embed_dim: 64
 
 # =============================================================================
@@ -49,17 +49,11 @@ training:
 
   # Training loop
   loop:
-    gradient_clip_val: 1.0
-    gradient_clip_algorithm: "norm"
-    accumulation_batches: 1
-    sample_every_n_steps: 100
+    sample_every_n_steps: 100  # How often to generate samples during training
 
   # Unconditional generation probability
   unconditional:
     unconditional_prob: 0.1
-
-  # Number of training epochs
-  max_epochs: 50
 
 # =============================================================================
 # MaskGiT Sampler Configuration

@@ -1,11 +1,11 @@
 # =============================================================================
-# prod9 Autoencoder Stage 1 Configuration
+# prod9 MedMNIST 3D Stage 1 Configuration
 # Complete configuration for VQGAN-style autoencoder training with FSQ
 # =============================================================================
 
 # Output paths
-output_dir: "outputs/stage1"
-autoencoder_export_path: "outputs/autoencoder_final.pt"
+output_dir: ".output/medmnist3d_stage1"
+autoencoder_export_path: ".output/medmnist3d_autoencoder.pt"
 
 # =============================================================================
 # Model Architecture
@@ -17,27 +17,28 @@ model:
     in_channels: 1
     out_channels: 1
     levels: [8, 8, 8]  # 8^3 = 512 codebook size
-    num_channels: [32, 64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
-    attention_levels: [False, False, True, True, True]
-    num_res_blocks: [1, 1, 1, 1, 1]
+    num_channels: [32, 64, 128, 256]  # Reduced channel sizes for memory efficiency (4 layers for 64^3 input)
+    attention_levels: [False, False, False, True]  # Attention only in deepest layer
+    num_res_blocks: [1, 1, 1, 1]  # Residual blocks per layer (4 layers)
     norm_num_groups: 32  # Group normalization groups
+    num_splits: 1  # No splitting for small 64^3 inputs (default is 16)
 
   # MultiScalePatchDiscriminator configuration
   discriminator:
     spatial_dims: 3
     in_channels: 1
     out_channels: 1
-    num_d: 2  # Number of discriminators (multi-scale) - reduced to avoid error
-    channels: 64  # Base channel count
-    num_layers_d: 3  # Layers per discriminator
-    kernel_size: 4
+    num_d: 1  # Single discriminator to reduce memory usage
+    channels: 32  # Reduced base channel count for memory efficiency
+    num_layers_d: 2  # Layers per discriminator (reduced for 64^3 input)
+    kernel_size: 3  # Smaller kernel for small inputs
     activation: ["LEAKYRELU", {"negative_slope": 0.2}]
     norm: "BATCH"
     minimum_size_im: 64
 
-  # Modality configuration
-  num_modalities: 4  # T1, T1ce, T2, FLAIR
-  contrast_embed_dim: 64
+  # MedMNIST 3D doesn't need modality embeddings (single modality)
+  num_modalities: 1
+  contrast_embed_dim: null  # Stage 1 doesn't need contrast embeddings
 
 # =============================================================================
 # Training Configuration
@@ -61,61 +62,33 @@ training:
 
   # Training loop settings
   loop:
-    gradient_clip_val: 1.0
-    gradient_clip_algorithm: "norm"  # norm or value
-    accumulation_batches: 1  # Gradient accumulation steps
-    sample_every_n_steps: 100
-
-  # Discriminator warmup
-  warmup:
-    disc_iter_start: 0  # Step to start discriminator training
-
-  # Number of training epochs
-  max_epochs: 100
+    sample_every_n_steps: 100  # How often to generate samples during training
 
 # =============================================================================
 # Data Configuration
 # =============================================================================
 data:
-  # Data paths
-  data_dir: "${BRATS_DATA_DIR:data/BraTS}"
-
-  # Modalities to use
-  modalities: ["T1", "T1ce", "T2", "FLAIR"]
+  # MedMNIST 3D dataset configuration
+  dataset_name: "organmnist3d"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d
+  size: 64  # Image size: 28 or 64
+  root: "./.medmnist"
+  download: true
 
   # Data loader settings
   batch_size: 2
   num_workers: 4
-  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
-  pin_memory: true
-  train_val_split: 0.8
+  train_val_split: 0.9
 
-  # Training crop size
-  roi_size: [64, 64, 64]
-
-  # Preprocessing transforms
-  preprocessing:
-    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions
-    spacing_mode: "bilinear"
-    orientation: "RAS"  # NIfTI orientation
-    intensity_a_min: 0.0  # ScaleIntensityRanged
-    intensity_a_max: 500.0
-    intensity_b_min: 0.0
-    intensity_b_max: 1.0
-    clip: true
-
-  # Data augmentation
+  # Data augmentation (recommended for MedMNIST 3D due to small sample size)
   augmentation:
-    # Random flip
+    enabled: true
     flip_prob: 0.5
     flip_axes: [0, 1, 2]  # Axial, coronal, sagittal
-
-    # Random rotation
     rotate_prob: 0.5
-    rotate_max_k: 3  # 0-3 (90-degree multiples)
-    rotate_axes: [0, 1]  # Rotate in axial plane
-
-    # Random intensity shift
+    rotate_range: 0.26  # 15 degrees (in radians)
+    zoom_prob: 0.5
+    zoom_min: 0.9
+    zoom_max: 1.1
     shift_intensity_prob: 0.5
     shift_intensity_offset: 0.1  # +/- 10% shift
 
@@ -177,7 +150,7 @@ callbacks:
 # =============================================================================
 trainer:
   # Training settings
-  max_epochs: 100
+  max_epochs: 10
 
   # Hardware
   hardware:
@@ -193,9 +166,8 @@ trainer:
     limit_val_batches: 5
     logger_version: null  # null = auto-increment
 
-  # Gradient handling
-  gradient_clip_val: 1.0
-  gradient_clip_algorithm: "norm"
+  # Gradient handling (disabled for manual optimization)
+  gradient_clip_val: null
   accumulate_grad_batches: 1
 
   # Debugging/profiling
@@ -207,7 +179,7 @@ trainer:
 # Sliding Window Inference
 # =============================================================================
 sliding_window:
-  # Enable SW for validation (training always uses direct calls)
+  # Disable SW for Stage 1 (training uses direct calls)
   enabled: false
 
   # Window configuration

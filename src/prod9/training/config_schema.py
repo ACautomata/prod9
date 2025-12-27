@@ -5,7 +5,7 @@ This module provides type-safe configuration validation with Pydantic models.
 All configuration values are validated at load time, catching errors early.
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -33,6 +33,10 @@ class AutoencoderModelConfig(BaseModel):
 
     # Normalization parameter (can have default)
     norm_num_groups: int = Field(default=32, ge=1)
+
+    # Splitting parameters (optional)
+    num_splits: int = Field(default=16, ge=1, description="Number of splits for attention heads")
+    dim_split: int = Field(default=0, ge=0, description="Dimension splitting parameter")
 
     @field_validator("levels")
     @classmethod
@@ -98,8 +102,8 @@ class ModelConfig(BaseModel):
     autoencoder: Optional[AutoencoderModelConfig] = None
     discriminator: Optional[DiscriminatorConfig] = None
     transformer: Optional[TransformerModelConfig] = None
-    num_modalities: int = Field(default=4, ge=1)
-    contrast_embed_dim: int = Field(default=64, ge=1)
+    num_classes: int = Field(default=4, ge=1, description="Number of classes (4 for BraTS modalities, variable for MedMNIST 3D)")
+    contrast_embed_dim: Optional[int] = Field(default=64, ge=1)  # Allow None for Stage 1
 
 
 # =============================================================================
@@ -128,18 +132,9 @@ class LearningRateSchedulerConfig(BaseModel):
 
 
 class TrainingLoopConfig(BaseModel):
-    """Training loop configuration."""
+    """Training loop configuration for Lightning module settings."""
 
-    gradient_clip_val: float = Field(default=1.0, ge=0)
-    gradient_clip_algorithm: str = Field(default="norm")
-    accumulation_batches: int = Field(default=1, ge=1)
     sample_every_n_steps: int = Field(default=100, ge=1)
-
-
-class WarmupConfig(BaseModel):
-    """Discriminator warmup configuration."""
-
-    disc_iter_start: int = Field(default=0, ge=0)
 
 
 class UnconditionalConfig(BaseModel):
@@ -156,8 +151,6 @@ class TrainingConfig(BaseModel):
         default_factory=LearningRateSchedulerConfig
     )
     loop: TrainingLoopConfig = Field(default_factory=TrainingLoopConfig)
-    warmup: WarmupConfig = Field(default_factory=WarmupConfig)
-    max_epochs: int = Field(default=100, ge=1)
     # For transformer
     unconditional: Optional[UnconditionalConfig] = None
 
@@ -192,18 +185,29 @@ class AugmentationConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
-    """Combined data configuration."""
+    """Combined data configuration.
 
-    data_dir: str
-    modalities: List[str] = Field(default=["T1", "T1ce", "T2", "FLAIR"])
+    Supports both BraTS and custom datasets (e.g., MedMNIST 3D).
+    Additional fields can be added without validation errors.
+    """
+
+    # Common fields (optional for custom datasets)
+    data_dir: Optional[str] = Field(default=None)
     batch_size: int = Field(default=2, ge=1)
     num_workers: int = Field(default=4, ge=0)
+    train_val_split: float = Field(default=0.8, gt=0, lt=1)
+
+    # BraTS-specific fields (optional)
+    modalities: List[str] = Field(default=["T1", "T1ce", "T2", "FLAIR"])
     cache_rate: float = Field(default=0.5, ge=0, le=1)
     pin_memory: bool = Field(default=True)
-    train_val_split: float = Field(default=0.8, gt=0, lt=1)
     roi_size: List[int] = Field(default=[64, 64, 64])
-    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
-    augmentation: AugmentationConfig = Field(default_factory=AugmentationConfig)
+    preprocessing: Optional[PreprocessingConfig] = Field(default=None)
+    augmentation: Optional[AugmentationConfig] = Field(default=None)
+
+    # Allow extra fields for custom datasets
+    class Config:
+        extra = "allow"
 
 
 # =============================================================================
@@ -427,6 +431,99 @@ class TransformerFullConfig(BaseModel):
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     sampler: SamplerConfig = Field(default_factory=SamplerConfig)
     data: DataConfig
+    loss: LossConfig = Field(default_factory=LossConfig)
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    sliding_window: SlidingWindowConfig = Field(
+        default_factory=lambda: SlidingWindowConfig(enabled=True)
+    )
+
+
+# =============================================================================
+# MedMNIST 3D Configuration
+# =============================================================================
+
+
+class MedMNIST3DDataAugmentation(BaseModel):
+    """MedMNIST 3D data augmentation configuration."""
+
+    enabled: bool = Field(default=False)
+    flip_prob: float = Field(default=0.5, ge=0, le=1)
+    flip_axes: Optional[List[int]] = Field(default=None)
+    rotate_prob: float = Field(default=0.5, ge=0, le=1)
+    rotate_range: float = Field(default=0.26, ge=0)  # 15 degrees in radians
+    zoom_prob: float = Field(default=0.5, ge=0, le=1)
+    zoom_min: float = Field(default=0.9, ge=0)
+    zoom_max: float = Field(default=1.1, ge=0)
+    shift_intensity_prob: float = Field(default=0.5, ge=0, le=1)
+    shift_intensity_offset: float = Field(default=0.1, ge=0)
+
+
+class MedMNIST3DDataConfig(BaseModel):
+    """MedMNIST 3D dataset configuration."""
+
+    dataset_name: Literal[
+        "organmnist3d",
+        "nodulemnist3d",
+        "adrenalmnist3d",
+        "fracturemnist3d",
+        "vesselmnist3d",
+        "synapsemnist3d",
+    ] = Field(default="organmnist3d", description="MedMNIST 3D dataset name")
+
+    size: Literal[28, 64] = Field(default=64, description="Image size (28 or 64)")
+
+    root: str = Field(
+        default="./.medmnist",
+        description="Root directory for MedMNIST data storage",
+    )
+
+    download: bool = Field(default=True, description="Download data if not present")
+
+    batch_size: int = Field(default=8, ge=1)
+    num_workers: int = Field(default=4, ge=0)
+    train_val_split: float = Field(default=0.9, gt=0, lt=1)
+
+    # Optional augmentation
+    augmentation: Optional[MedMNIST3DDataAugmentation] = Field(default=None)
+
+    # Stage 2 specific
+    cond_emb_dim: Optional[int] = Field(
+        default=128, ge=1, description="Condition embedding dimension (Stage 2)"
+    )
+    unconditional_prob: Optional[float] = Field(
+        default=0.1, ge=0, le=1, description="Unconditional generation probability (Stage 2)"
+    )
+    cache_dir: Optional[str] = Field(
+        default="outputs/medmnist3d_encoded",
+        description="Pre-encoded data cache directory (Stage 2)",
+    )
+
+
+class MedMNIST3DAutoencoderFullConfig(BaseModel):
+    """Complete configuration for MedMNIST 3D Stage 1 autoencoder training."""
+
+    output_dir: str
+    autoencoder_export_path: Optional[str] = Field(default=None)
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    data: MedMNIST3DDataConfig
+    loss: LossConfig = Field(default_factory=LossConfig)
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+
+
+class MedMNIST3DTransformerFullConfig(BaseModel):
+    """Complete configuration for MedMNIST 3D Stage 2 transformer training."""
+
+    output_dir: str
+    autoencoder_path: str
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    sampler: SamplerConfig = Field(default_factory=SamplerConfig)
+    data: MedMNIST3DDataConfig
     loss: LossConfig = Field(default_factory=LossConfig)
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)

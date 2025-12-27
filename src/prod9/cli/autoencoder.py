@@ -16,7 +16,7 @@ from prod9.cli.shared import setup_environment, get_device, create_trainer
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
-def train_autoencoder(config: str = "configs/autoencoder.yaml") -> None:
+def train_autoencoder(config: str) -> None:
     """
     Train Stage 1: Autoencoder with FSQ.
 
@@ -30,7 +30,7 @@ def train_autoencoder(config: str = "configs/autoencoder.yaml") -> None:
         config: Path to autoencoder configuration file
 
     Example:
-        >>> train_autoencoder("configs/autoencoder.yaml")
+        >>> train_autoencoder("configs/brats_autoencoder.yaml")
     """
     setup_environment()
 
@@ -41,8 +41,14 @@ def train_autoencoder(config: str = "configs/autoencoder.yaml") -> None:
     # Create lightning module from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module from config
-    data_module = BraTSDataModuleStage1.from_config(cfg)
+    # Create data module from config (detect BraTS vs MedMNIST 3D)
+    if "dataset_name" in cfg.get("data", {}):
+        # MedMNIST 3D dataset
+        from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage1
+        data_module = MedMNIST3DDataModuleStage1.from_config(cfg)
+    else:
+        # BraTS dataset (default)
+        data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer
     output_dir = cfg.get("output_dir", "outputs/stage1")
@@ -68,7 +74,7 @@ def validate_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
         Dictionary with validation metrics
 
     Example:
-        >>> metrics = validate_autoencoder("configs/autoencoder.yaml", "outputs/stage1/last.ckpt")
+        >>> metrics = validate_autoencoder("configs/brats_autoencoder.yaml", "outputs/stage1/last.ckpt")
         >>> print(f"PSNR: {metrics['val/combined_metric']}")
     """
     setup_environment()
@@ -80,8 +86,12 @@ def validate_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module from config
-    data_module = BraTSDataModuleStage1.from_config(cfg)
+    # Create data module from config (detect BraTS vs MedMNIST 3D)
+    if "dataset_name" in cfg.get("data", {}):
+        from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage1
+        data_module = MedMNIST3DDataModuleStage1.from_config(cfg)
+    else:
+        data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer for validation
     output_dir = cfg.get("output_dir", "outputs/validation")
@@ -105,7 +115,7 @@ def test_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
         Dictionary with test metrics
 
     Example:
-        >>> metrics = test_autoencoder("configs/autoencoder.yaml", "outputs/stage1/best.ckpt")
+        >>> metrics = test_autoencoder("configs/brats_autoencoder.yaml", "outputs/stage1/best.ckpt")
         >>> print(f"Test PSNR: {metrics['test/combined_metric']}")
     """
     setup_environment()
@@ -117,8 +127,12 @@ def test_autoencoder(config: str, checkpoint: str) -> Mapping[str, float]:
     # Create model from config
     model = AutoencoderLightningConfig.from_config(cfg)
 
-    # Create data module from config
-    data_module = BraTSDataModuleStage1.from_config(cfg)
+    # Create data module from config (detect BraTS vs MedMNIST 3D)
+    if "dataset_name" in cfg.get("data", {}):
+        from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage1
+        data_module = MedMNIST3DDataModuleStage1.from_config(cfg)
+    else:
+        data_module = BraTSDataModuleStage1.from_config(cfg)
 
     # Create trainer for testing
     output_dir = cfg.get("output_dir", "outputs/test")
@@ -153,7 +167,7 @@ def infer_autoencoder(
 
     Example:
         >>> infer_autoencoder(
-        ...     "configs/autoencoder.yaml",
+        ...     "configs/brats_autoencoder.yaml",
         ...     "outputs/stage1/best.ckpt",
         ...     "data/patient1_t1.nii.gz",
         ...     "outputs/patient1_recon.nii.gz"
@@ -259,10 +273,10 @@ def main() -> None:
     Main CLI entry point for autoencoder commands.
 
     Usage:
-        prod9-train-autoencoder train --config configs/autoencoder.yaml
-        prod9-train-autoencoder validate --config configs/autoencoder.yaml --checkpoint outputs/stage1/best.ckpt
-        prod9-train-autoencoder test --config configs/autoencoder.yaml --checkpoint outputs/stage1/best.ckpt
-        prod9-train-autoencoder infer --config configs/autoencoder.yaml --checkpoint outputs/stage1/best.ckpt \\
+        prod9-train-autoencoder train --config configs/brats_autoencoder.yaml
+        prod9-train-autoencoder validate --config configs/brats_autoencoder.yaml --checkpoint outputs/stage1/best.ckpt
+        prod9-train-autoencoder test --config configs/brats_autoencoder.yaml --checkpoint outputs/stage1/best.ckpt
+        prod9-train-autoencoder infer --config configs/brats_autoencoder.yaml --checkpoint outputs/stage1/best.ckpt \\
             --input data/patient1_t1.nii.gz --output outputs/patient1_recon.nii.gz
     """
     parser = argparse.ArgumentParser(
@@ -277,8 +291,8 @@ def main() -> None:
     train_parser.add_argument(
         "--config",
         type=str,
-        default="configs/autoencoder.yaml",
-        help="Path to autoencoder configuration file",
+        required=True,
+        help="Path to autoencoder configuration file (required)",
     )
 
     # Validation
@@ -286,8 +300,8 @@ def main() -> None:
     validate_parser.add_argument(
         "--config",
         type=str,
-        default="configs/autoencoder.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     validate_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -298,8 +312,8 @@ def main() -> None:
     test_parser.add_argument(
         "--config",
         type=str,
-        default="configs/autoencoder.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     test_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
@@ -310,8 +324,8 @@ def main() -> None:
     infer_parser.add_argument(
         "--config",
         type=str,
-        default="configs/autoencoder.yaml",
-        help="Path to configuration file",
+        required=True,
+        help="Path to configuration file (required)",
     )
     infer_parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
