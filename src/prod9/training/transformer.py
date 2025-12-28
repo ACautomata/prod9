@@ -445,6 +445,10 @@ class TransformerLightning(pl.LightningModule):
 
             metrics["modality_metrics"] = modality_metrics
 
+            # Log sample images to TensorBoard (only for first batch)
+            if batch_idx == 0 and self.logger is not None:
+                self._log_samples(generated_images=reconstructed_image, modality="generated")
+
         return metrics
 
     def configure_optimizers(self):
@@ -507,3 +511,36 @@ class TransformerLightning(pl.LightningModule):
 
         self.train()
         return generated_image
+
+    def _log_samples(
+        self,
+        generated_images: torch.Tensor,
+        modality: str,
+    ) -> None:
+        """
+        Log samples to TensorBoard.
+
+        Args:
+            generated_images: Generated images [B, 1, H, W, D]
+            modality: Modality name for logging
+        """
+        if self.logger is None:
+            return
+
+        experiment = getattr(self.logger, 'experiment', None)
+        if experiment is None:
+            return
+
+        # Log middle slice for each sample
+        for i in range(generated_images.shape[0]):
+            # Get middle slice along depth dimension
+            mid_slice = generated_images.shape[-1] // 2
+
+            # Generated image
+            generated_slice = generated_images[i, 0, :, :, mid_slice]  # [H, W]
+            if experiment and hasattr(experiment, 'add_image'):
+                experiment.add_image(
+                    f"val/samples/{modality}_{i}",
+                    generated_slice.unsqueeze(0),  # Add channel dim
+                    global_step=self.global_step,
+                )

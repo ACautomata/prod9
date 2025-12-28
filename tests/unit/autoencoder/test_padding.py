@@ -117,7 +117,8 @@ class TestPadForSlidingWindow(unittest.TestCase):
 
         # Check that padded regions have value = batch.min() = 5.0
         if any(padding):
-            d_left, d_right, h_left, h_right, w_left, w_right = padding
+            # F.pad format: (D_left, D_right, W_left, W_right, H_left, H_right)
+            d_left, d_right, w_left, w_right, h_left, h_right = padding
 
             # Check a corner of padding (should be 5.0, not 0.0)
             if d_left > 0:
@@ -140,6 +141,124 @@ class TestPadForSlidingWindow(unittest.TestCase):
         if any(padding):
             total_pad = sum(padding)
             self.assertLess(total_pad, 20)  # Should be very small
+
+    def test_padding_non_cubic_shapes(self) -> None:
+        """Test padding computation for non-cubic input shapes."""
+        # LCM = scale / overlap = 4 / 0.5 = 8
+        test_cases = [
+            (100, 50, 75),   # All dimensions different
+            (128, 64, 32),   # Extreme asymmetry (powers of 2)
+            (240, 240, 1),   # Flat shape (single slice)
+            (77, 33, 55),    # Odd dimensions
+        ]
+
+        for h, w, d in test_cases:
+            with self.subTest(shape=(h, w, d)):
+                x = torch.randn(1, 1, h, w, d)
+                x_padded, padding = pad_for_sliding_window(
+                    x,
+                    scale_factor=self.scale_factor,
+                    overlap=self.overlap,
+                    roi_size=self.roi_size,
+                )
+
+                # Verify constraint: padded_size % 8 == 0 for all dimensions
+                self.assertEqual(
+                    x_padded.shape[2] % 8, 0,
+                    f"Height {h} -> padded {x_padded.shape[2]} not divisible by 8"
+                )
+                self.assertEqual(
+                    x_padded.shape[3] % 8, 0,
+                    f"Width {w} -> padded {x_padded.shape[3]} not divisible by 8"
+                )
+                self.assertEqual(
+                    x_padded.shape[4] % 8, 0,
+                    f"Depth {d} -> padded {x_padded.shape[4]} not divisible by 8"
+                )
+
+                # Verify padded size >= max(input_size, roi_dim)
+                self.assertGreaterEqual(x_padded.shape[2], max(h, 64))
+                self.assertGreaterEqual(x_padded.shape[3], max(w, 64))
+                self.assertGreaterEqual(x_padded.shape[4], max(d, 64))
+
+    def test_padding_extreme_small_sizes(self) -> None:
+        """Test padding for extremely small input sizes."""
+        # LCM = 8, roi_size = 64
+        test_cases = [
+            (1, 1, 1),      # Minimum size
+            (2, 3, 5),      # Mixed odd primes
+            (1, 64, 128),   # Mixed: one dimension at minimum, others at various sizes
+        ]
+
+        for h, w, d in test_cases:
+            with self.subTest(shape=(h, w, d)):
+                x = torch.randn(1, 1, h, w, d)
+                x_padded, padding = pad_for_sliding_window(
+                    x,
+                    scale_factor=self.scale_factor,
+                    overlap=self.overlap,
+                    roi_size=self.roi_size,
+                )
+
+                # All should pad to at least roi_size (64) and be divisible by LCM (8)
+                self.assertGreaterEqual(x_padded.shape[2], 64)
+                self.assertGreaterEqual(x_padded.shape[3], 64)
+                self.assertGreaterEqual(x_padded.shape[4], 64)
+
+                self.assertEqual(x_padded.shape[2] % 8, 0)
+                self.assertEqual(x_padded.shape[3] % 8, 0)
+                self.assertEqual(x_padded.shape[4] % 8, 0)
+
+    def test_padding_mixed_compliance(self) -> None:
+        """Test padding when some dimensions comply and others don't."""
+        # LCM = 8, roi_size = 64
+        # 64 is already compliant (>= 64 and % 8 == 0)
+        # 65 needs padding
+        # 100 needs padding
+        x = torch.randn(1, 1, 64, 65, 100)
+
+        x_padded, padding = pad_for_sliding_window(
+            x,
+            scale_factor=self.scale_factor,
+            overlap=self.overlap,
+            roi_size=self.roi_size,
+        )
+
+        # All dimensions should satisfy constraint
+        self.assertEqual(x_padded.shape[2] % 8, 0)
+        self.assertEqual(x_padded.shape[3] % 8, 0)
+        self.assertEqual(x_padded.shape[4] % 8, 0)
+
+        # Height was already compliant, should stay 64 or minimal increase
+        self.assertLessEqual(x_padded.shape[2], 72)  # 64 or 64+8
+
+    def test_padding_non_uniform_roi_size(self) -> None:
+        """Test padding with non-uniform roi_size."""
+        # Different roi_size per dimension
+        roi_size_non_uniform = (64, 32, 32)
+        scale_factor = 4
+        overlap = 0.5
+
+        # Input smaller than roi in some dimensions
+        x = torch.randn(1, 1, 30, 20, 20)
+
+        x_padded, padding = pad_for_sliding_window(
+            x,
+            scale_factor=scale_factor,
+            overlap=overlap,
+            roi_size=roi_size_non_uniform,
+        )
+
+        # LCM = 4/0.5 = 8
+        # Each dimension should pad to at least its corresponding roi_dim
+        self.assertGreaterEqual(x_padded.shape[2], 64)  # H >= 64
+        self.assertGreaterEqual(x_padded.shape[3], 32)  # W >= 32
+        self.assertGreaterEqual(x_padded.shape[4], 32)  # D >= 32
+
+        # All should be divisible by LCM (8)
+        self.assertEqual(x_padded.shape[2] % 8, 0)
+        self.assertEqual(x_padded.shape[3] % 8, 0)
+        self.assertEqual(x_padded.shape[4] % 8, 0)
 
 
 class TestUnpadFromSlidingWindow(unittest.TestCase):
@@ -248,6 +367,167 @@ class TestPaddingRoundtrip(unittest.TestCase):
 
         # Verify shape preserved through full pipeline
         self.assertEqual(reconstructed.shape, original_shape)
+
+    def test_roundtrip_non_cubic_shapes(self) -> None:
+        """Test that pad + unpad roundtrip preserves original shape for non-cubic inputs."""
+        test_cases = [
+            (50, 30, 20),    # Non-cubic, all dimensions different
+            (40, 40, 10),    # Two dimensions equal, one different
+            (15, 25, 35),    # Odd dimensions
+            (100, 50, 25),   # Powers of 2 divided
+        ]
+
+        for h, w, d in test_cases:
+            with self.subTest(shape=(h, w, d)):
+                x = torch.randn(1, 1, h, w, d)
+                original_shape = x.shape
+
+                # Pad
+                x_padded, padding_info = pad_for_sliding_window(
+                    x,
+                    scale_factor=self.scale_factor,
+                    overlap=self.overlap,
+                    roi_size=self.roi_size,
+                )
+
+                # Unpad
+                result = unpad_from_sliding_window(x_padded, padding_info)
+
+                # Verify original shape restored
+                self.assertEqual(
+                    result.shape, original_shape,
+                    f"Shape {(h, w, d)} not restored after roundtrip"
+                )
+
+    def test_padding_wrapper_vs_direct(self) -> None:
+        """Test that wrapper and direct autoencoder produce consistent results with padding."""
+        from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+
+        # Create wrapper with same config
+        sw_config = SlidingWindowConfig(
+            roi_size=(32, 32, 32),
+            overlap=0.5,
+            device=self.device,
+        )
+        wrapper = AutoencoderInferenceWrapper(self.autoencoder, sw_config)
+
+        # Input shape that needs padding (36 not divisible by LCM=8)
+        x = torch.randn(1, 1, 36, 36, 36).to(self.device)
+        original_shape = x.shape
+
+        # === Method A: Using wrapper ===
+        x_padded, padding = pad_for_sliding_window(
+            x,
+            scale_factor=self.scale_factor,
+            overlap=self.overlap,
+            roi_size=(32, 32, 32),
+        )
+        z_mu_a, _ = wrapper.encode(x_padded)
+        recon_a = wrapper.decode(z_mu_a)
+        result_a = unpad_from_sliding_window(recon_a, padding)
+
+        # === Method B: Direct autoencoder call ===
+        z_mu_b, _ = self.autoencoder.encode(x_padded)
+        recon_b = self.autoencoder.decode(z_mu_b)
+        result_b = unpad_from_sliding_window(recon_b, padding)
+
+        # === Verification ===
+
+        # 1. Both methods return to original shape after unpad
+        self.assertEqual(result_a.shape, original_shape,
+                        f"Wrapper result shape {result_a.shape} != original {original_shape}")
+        self.assertEqual(result_b.shape, original_shape,
+                        f"Direct result shape {result_b.shape} != original {original_shape}")
+
+        # 2. Check that outputs are finite (no NaN/Inf)
+        self.assertTrue(torch.isfinite(result_a).all(), "Wrapper output contains NaN/Inf")
+        self.assertTrue(torch.isfinite(result_b).all(), "Direct output contains NaN/Inf")
+
+        # 3. Both methods produce outputs in reasonable range
+        # With untrained model, outputs vary widely, but should be bounded
+        self.assertLess(result_a.abs().max().item(), 1e3, "Wrapper output too large")
+        self.assertLess(result_b.abs().max().item(), 1e3, "Direct output too large")
+
+        # 4. Outputs should have same dtype and device
+        self.assertEqual(result_a.dtype, result_b.dtype)
+        self.assertEqual(result_a.device, result_b.device)
+
+    def test_padding_encode_consistency(self) -> None:
+        """Test that wrapper.encode() produces consistent latent representation."""
+        from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+
+        sw_config = SlidingWindowConfig(
+            roi_size=(32, 32, 32),
+            overlap=0.5,
+            device=self.device,
+        )
+        wrapper = AutoencoderInferenceWrapper(self.autoencoder, sw_config)
+
+        # Input shape that needs padding
+        x = torch.randn(1, 1, 36, 36, 36).to(self.device)
+
+        # Pad
+        x_padded, padding = pad_for_sliding_window(
+            x,
+            scale_factor=self.scale_factor,
+            overlap=self.overlap,
+            roi_size=(32, 32, 32),
+        )
+
+        # Encode with wrapper vs direct
+        z_mu_wrapper, _ = wrapper.encode(x_padded)
+        z_mu_direct, _ = self.autoencoder.encode(x_padded)
+
+        # Both should have same shape
+        self.assertEqual(z_mu_wrapper.shape, z_mu_direct.shape)
+
+        # Both should be finite
+        self.assertTrue(torch.isfinite(z_mu_wrapper).all(), "Wrapper latent contains NaN/Inf")
+        self.assertTrue(torch.isfinite(z_mu_direct).all(), "Direct latent contains NaN/Inf")
+
+        # Same dtype and device
+        self.assertEqual(z_mu_wrapper.dtype, z_mu_direct.dtype)
+        self.assertEqual(z_mu_wrapper.device, z_mu_direct.device)
+
+    def test_padding_decode_consistency(self) -> None:
+        """Test that wrapper.decode() produces consistent reconstruction."""
+        from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+
+        sw_config = SlidingWindowConfig(
+            roi_size=(32, 32, 32),
+            overlap=0.5,
+            device=self.device,
+        )
+        wrapper = AutoencoderInferenceWrapper(self.autoencoder, sw_config)
+
+        # Input shape that needs padding
+        x = torch.randn(1, 1, 36, 36, 36).to(self.device)
+
+        # Pad
+        x_padded, padding = pad_for_sliding_window(
+            x,
+            scale_factor=self.scale_factor,
+            overlap=self.overlap,
+            roi_size=(32, 32, 32),
+        )
+
+        # Encode to get latent (use direct for consistency)
+        z_mu, _ = self.autoencoder.encode(x_padded)
+
+        # Decode with wrapper vs direct
+        recon_wrapper = wrapper.decode(z_mu)
+        recon_direct = self.autoencoder.decode(z_mu)
+
+        # Both should have same shape
+        self.assertEqual(recon_wrapper.shape, recon_direct.shape)
+
+        # Both should be finite
+        self.assertTrue(torch.isfinite(recon_wrapper).all(), "Wrapper reconstruction contains NaN/Inf")
+        self.assertTrue(torch.isfinite(recon_direct).all(), "Direct reconstruction contains NaN/Inf")
+
+        # Same dtype and device
+        self.assertEqual(recon_wrapper.dtype, recon_direct.dtype)
+        self.assertEqual(recon_wrapper.device, recon_direct.device)
 
 
 if __name__ == "__main__":

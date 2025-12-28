@@ -8,7 +8,6 @@ from typing import Dict, Any
 
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
-from prod9.training.metrics import MetricCombiner
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
@@ -64,16 +63,6 @@ class AutoencoderLightningConfig:
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
 
-        # Get metrics config
-        metrics_config = config.get("metrics", {})
-        combination_config = metrics_config.get("combination", {})
-
-        # Create MetricCombiner
-        metric_combiner = MetricCombiner(
-            weights=combination_config.get("weights"),
-            psnr_range=tuple(combination_config.get("psnr_range", (20.0, 40.0))),
-        )
-
         # Create Lightning module
         module = AutoencoderLightning(
             autoencoder=autoencoder,
@@ -95,8 +84,6 @@ class AutoencoderLightningConfig:
             sw_batch_size=sw_config.get("sw_batch_size", 1),
         )
 
-        # Set metric_combiner after creation
-        module.metric_combiner = metric_combiner
         return module
 
     @staticmethod

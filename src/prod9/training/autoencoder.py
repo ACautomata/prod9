@@ -17,7 +17,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from prod9.autoencoder.ae_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
@@ -112,7 +112,6 @@ class AutoencoderLightning(pl.LightningModule):
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
         self.lpips = LPIPSMetric().to(device)
-        self.metric_combiner: MetricCombiner | None = None
 
         # Sliding window config (for validation only)
         self.use_sliding_window = use_sliding_window
@@ -352,24 +351,10 @@ class AutoencoderLightning(pl.LightningModule):
         # Log individually
         self.log("val/psnr", psnr_value, prog_bar=False)
         self.log("val/ssim", ssim_value, prog_bar=False)
-        self.log("val/lpips", lpips_value, prog_bar=False)
+        self.log("val/lpips", lpips_value, prog_bar=True)
 
-        # Combine for checkpointing
-        if self.metric_combiner is not None:
-            combined = self.metric_combiner(
-                psnr=psnr_value,
-                ssim=ssim_value,
-                lpips=lpips_value,
-            )
-            self.log("val/combined_metric", combined, prog_bar=True)
-            return {
-                "combined": combined,
-                "psnr": psnr_value,
-                "ssim": ssim_value,
-                "lpips": lpips_value,
-            }
-        else:
-            return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
+        # Return metrics dictionary (no combined metric)
+        return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
 
     def _log_samples(self, images: torch.Tensor, modality: str) -> None:
         """Log sample reconstructions to tensorboard."""

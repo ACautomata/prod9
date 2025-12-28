@@ -146,12 +146,13 @@ def create_trainer(
     # Checkpoint callback
     checkpoint_callback = ModelCheckpoint(
         dirpath=output_dir,
-        filename=f"{stage_name}-{{epoch:02d}}-{{{checkpoint_config.get('monitor', 'val/combined_metric')}:.4f}}",
-        monitor=checkpoint_config.get("monitor", "val/combined_metric"),
-        mode=checkpoint_config.get("mode", "max"),
+        filename=f"{stage_name}-{{epoch:02d}}-{{{checkpoint_config.get('monitor', 'val/lpips')}:.4f}}",
+        monitor=checkpoint_config.get("monitor", "val/lpips"),
+        mode=checkpoint_config.get("mode", "min"),
         save_top_k=checkpoint_config.get("save_top_k", 3),
         save_last=checkpoint_config.get("save_last", True),
-        every_n_epochs=checkpoint_config.get("every_n_epochs"),
+        every_n_epochs=checkpoint_config.get("every_n_epochs", 1),
+        verbose=True,
     )
 
     # Callbacks list
@@ -160,9 +161,9 @@ def create_trainer(
     # Early stopping callback
     if early_stop_config.get("enabled", True):
         early_stop = EarlyStopping(
-            monitor=early_stop_config.get("monitor", "val/combined_metric"),
+            monitor=early_stop_config.get("monitor", "val/lpips"),
             patience=early_stop_config.get("patience", 10),
-            mode=early_stop_config.get("mode", "max"),
+            mode=early_stop_config.get("mode", "min"),
             min_delta=early_stop_config.get("min_delta", 0.0),
         )
         callbacks.append(early_stop)
@@ -171,18 +172,6 @@ def create_trainer(
     if callback_config.get("lr_monitor", True):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
-
-    # Autoencoder checkpoint callback (only for Stage 1)
-    if stage_name == "autoencoder":
-        from prod9.training.callbacks import AutoencoderCheckpoint
-
-        ae_checkpoint = AutoencoderCheckpoint(
-            monitor=checkpoint_config.get("monitor", "val/combined_metric"),
-            mode=checkpoint_config.get("mode", "max"),
-            save_dir=os.path.join(output_dir, "checkpoints"),
-            filename="best_autoencoder.pth",
-        )
-        callbacks.append(ae_checkpoint)
 
     # TensorBoard logger
     logger = TensorBoardLogger(

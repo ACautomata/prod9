@@ -20,7 +20,7 @@ model:
     cond_dim: 512
     num_heads: 8
     num_blocks: 12
-    codebook_size: 512  # FSQ codebook size (8*8*8 for levels=[8,8,8])
+    codebook_size: 1080  # FSQ codebook size (6*6*6*5 for levels=[6,6,6,5])
     mlp_ratio: 4.0
     dropout: 0.1
 
@@ -140,9 +140,9 @@ trainer:
   max_epochs: 50
 
   hardware:
-    accelerator: "mps"
+    accelerator: "gpu"
     devices: 1
-    precision: 32
+    precision: "bf16-mixed"
 
   logging:
     log_every_n_steps: 10

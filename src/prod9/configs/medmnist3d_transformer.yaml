@@ -121,9 +121,9 @@ trainer:
   max_epochs: 50
 
   hardware:
-    accelerator: "mps"
+    accelerator: "gpu"
     devices: 1
-    precision: 32
+    precision: "bf16-mixed"
 
   logging:
     log_every_n_steps: 10

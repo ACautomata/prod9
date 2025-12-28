@@ -15,7 +15,7 @@ from typing import Dict
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric, MetricCombiner
+from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 
 
 class TestVAEGANLoss:
@@ -330,117 +330,6 @@ class TestLPIPSMetric:
             lpips = lpips_metric(pred, target)
 
         assert isinstance(lpips, torch.Tensor)
-
-
-class TestMetricCombiner:
-    """Test suite for MetricCombiner class."""
-
-    @pytest.fixture
-    def psnr_metric(self):
-        """Create PSNRMetric instance."""
-        yield PSNRMetric()
-
-    @pytest.fixture
-    def ssim_metric(self):
-        """Create SSIMMetric instance."""
-        yield SSIMMetric()
-
-    @pytest.fixture
-    def lpips_metric(self):
-        """Create LPIPSMetric instance with mocked PerceptualLoss."""
-        with patch('monai.losses.perceptual.PerceptualLoss') as mock_perc_loss:
-            mock_instance = Mock()
-            mock_instance.return_value = torch.tensor(0.15)
-            mock_perc_loss.return_value = mock_instance
-            yield LPIPSMetric()
-
-    @pytest.fixture
-    def combiner(self):
-        """Create MetricCombiner instance."""
-        yield MetricCombiner(
-            weights={"psnr": 1.0, "ssim": 1.0, "lpips": 1.0}
-        )
-
-    def test_combiner_forward(self, combiner, psnr_metric, ssim_metric, lpips_metric):
-        """Test basic forward pass."""
-        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
-        target = torch.randn(2, 1, 32, 32, 32) * 0.1
-
-        # Compute individual metrics
-        psnr = psnr_metric(pred, target)
-        ssim = ssim_metric(pred, target)
-        lpips = lpips_metric(pred, target)
-
-        # Combine metrics
-        combined = combiner(psnr, ssim, lpips)
-
-        assert isinstance(combined, torch.Tensor)
-
-    def test_combiner_custom_weights(self, psnr_metric, ssim_metric, lpips_metric):
-        """Test MetricCombiner with custom weights."""
-        custom_combiner = MetricCombiner(
-            weights={"psnr": 2.0, "ssim": 0.5, "lpips": 0.1}
-        )
-
-        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
-        target = torch.randn(2, 1, 32, 32, 32) * 0.1
-
-        # Compute individual metrics
-        psnr = psnr_metric(pred, target)
-        ssim = ssim_metric(pred, target)
-        lpips = lpips_metric(pred, target)
-
-        # Combine metrics
-        combined = custom_combiner(psnr, ssim, lpips)
-
-        # Verify combined is a tensor
-        assert isinstance(combined, torch.Tensor)
-
-    def test_combiner_perfect_match(self, combiner, psnr_metric, ssim_metric, lpips_metric):
-        """Test combiner for identical images."""
-        pred = torch.randn(2, 1, 32, 32, 32) * 0.1
-        target = pred.clone()
-
-        # Compute individual metrics
-        psnr = psnr_metric(pred, target)
-        ssim = ssim_metric(pred, target)
-        lpips = lpips_metric(pred, target)
-
-        # Combine metrics
-        combined = combiner(psnr, ssim, lpips)
-
-        # Perfect match: high combined score
-        assert combined > 0
-
-    def test_psnr_normalization(self, combiner):
-        """Test that PSNR is normalized correctly."""
-        # PSNR = 30 should normalize to (30-20)/(40-20) = 0.5
-        psnr = torch.tensor(30.0)
-        ssim = torch.tensor(0.8)
-        lpips = torch.tensor(0.2)
-
-        combined = combiner(psnr, ssim, lpips)
-
-        # Expected: 1.0 * 0.5 + 1.0 * 0.8 - 1.0 * 0.2 = 1.1
-        expected = torch.tensor(1.1)
-        assert torch.isclose(combined, expected, atol=1e-3)
-
-    def test_psnr_clamping(self, combiner):
-        """Test that normalized PSNR is clamped to [0, 1]."""
-        # PSNR below range (10 < 20) should clamp to 0
-        psnr_low = torch.tensor(10.0)
-        # PSNR above range (50 > 40) should clamp to 1
-        psnr_high = torch.tensor(50.0)
-
-        ssim = torch.tensor(0.5)
-        lpips = torch.tensor(0.3)
-
-        combined_low = combiner(psnr_low, ssim, lpips)
-        combined_high = combiner(psnr_high, ssim, lpips)
-
-        # Both should be valid and not extreme
-        assert combined_low > -1  # Should be clamped, not negative extreme
-        assert combined_high < 3  # Should be clamped, not positive extreme
 
 
 class TestDataModuleStage1:

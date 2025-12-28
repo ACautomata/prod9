@@ -12,17 +12,13 @@ from prod9.training.metrics import (
     PSNRMetric,
     SSIMMetric,
     LPIPSMetric,
-    MetricCombiner,
 )
 from prod9.training.brats_data import (
     BraTSDataModuleStage1,
     BraTSDataModuleStage2,
     MODALITY_KEYS,
 )
-from prod9.training.callbacks import (
-    AutoencoderCheckpoint,
-    GenerateSampleCallback,
-)
+# Callbacks are now handled by standard PyTorch Lightning callbacks
 
 # Lightning modules (optional, may not be available in all contexts)
 try:
@@ -47,14 +43,11 @@ __all__ = [
     "PSNRMetric",
     "SSIMMetric",
     "LPIPSMetric",
-    "MetricCombiner",
     # Data
     "BraTSDataModuleStage1",
     "BraTSDataModuleStage2",
     "MODALITY_KEYS",
-    # Callbacks
-    "AutoencoderCheckpoint",
-    "GenerateSampleCallback",
+    # Callbacks - using standard PyTorch Lightning callbacks only
     # Lightning modules
     "AutoencoderLightning",
     "AutoencoderLightningConfig",

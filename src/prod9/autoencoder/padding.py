@@ -201,7 +201,8 @@ def unpad_from_sliding_window(
 
     Args:
         x: Padded tensor [B, C, H, W, D]
-        padding_config: Padding config from pad_for_sliding_window
+        padding_config: Padding config from pad_for_sliding_window.
+                       Format matches F.pad: (D_left, D_right, W_left, W_right, H_left, H_right)
 
     Returns:
         Cropped tensor with padding removed
@@ -209,8 +210,9 @@ def unpad_from_sliding_window(
     if not any(padding_config):
         return x
 
-    # padding_config: (D_left, D_right, H_left, H_right, W_left, W_right)
-    d_left, d_right, h_left, h_right, w_left, w_right = padding_config
+    # padding_config from F.pad format for [B, C, H, W, D]:
+    # F.pad applies padding from last dimension first: (D_left, D_right, W_left, W_right, H_left, H_right)
+    d_left, d_right, w_left, w_right, h_left, h_right = padding_config
 
     # Crop: [B, C, H, W, D]
     h_end = x.shape[2] - h_right if h_right > 0 else None

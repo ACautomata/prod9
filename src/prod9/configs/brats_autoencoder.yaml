@@ -16,18 +16,19 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 1
-    levels: [8, 8, 8]  # 8^3 = 512 codebook size
-    num_channels: [32, 64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
-    attention_levels: [False, False, True, True, True]
-    num_res_blocks: [1, 1, 1, 1, 1]
+    levels: [6, 6, 6, 5]  # 6^3*5 = 1080 codebook size
+    num_channels: [64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
+    attention_levels: [False, True, True, True]
+    num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32  # Group normalization groups
+    num_splits: 2  # No splitting for small 64^3 inputs (default is 16)
 
   # MultiScalePatchDiscriminator configuration
   discriminator:
     spatial_dims: 3
     in_channels: 1
     out_channels: 1
-    num_d: 2  # Number of discriminators (multi-scale) - reduced to avoid error
+    num_d: 3  # Number of discriminators (multi-scale) - reduced to avoid error
     channels: 64  # Base channel count
     num_layers_d: 3  # Layers per discriminator
     kernel_size: 4
@@ -81,7 +82,7 @@ data:
   train_val_split: 0.8
 
   # Training crop size
-  roi_size: [64, 64, 64]
+  roi_size: [128, 128, 128]
 
   # Preprocessing transforms
   preprocessing:
@@ -113,7 +114,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 0  # Discriminator warmup
+  discriminator_iter_start: 15000  # Discriminator warmup
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -145,18 +146,18 @@ loss:
 callbacks:
   # Model checkpointing
   checkpoint:
-    monitor: "val/combined_metric"
-    mode: "max"
+    monitor: "val/lpips"
+    mode: "min"
     save_top_k: 3
     save_last: true
-    every_n_epochs: null  # null = check every epoch
+    every_n_epochs: 1  # check every epoch
 
   # Early stopping
   early_stop:
     enabled: true
-    monitor: "val/combined_metric"
+    monitor: "val/lpips"
     patience: 10
-    mode: "max"
+    mode: "min"
     min_delta: 0.0  # Minimum change to qualify as improvement
 
   # Learning rate monitoring
@@ -171,9 +172,9 @@ trainer:
 
   # Hardware
   hardware:
-    accelerator: "mps"  # gpu, cpu, mps (Apple Silicon)
+    accelerator: "gpu"  # gpu, cpu, mps (Apple Silicon)
     devices: 1
-    precision: 32  # 32, 16, bf16
+    precision: "bf16-mixed"  # 32, 16, bf16
 
   # Logging
   logging:
@@ -201,7 +202,7 @@ sliding_window:
   enabled: false
 
   # Window configuration
-  roi_size: [64, 64, 64]
+  roi_size: [128, 128, 128]
   overlap: 0.5  # 0-1, higher = smoother but slower
   sw_batch_size: 1  # Increase if GPU memory allows
   mode: "gaussian"  # gaussian, constant, mean
@@ -209,13 +210,4 @@ sliding_window:
 # =============================================================================
 # Metrics Configuration
 # =============================================================================
-metrics:
-  combination:
-    # Metric weights for model selection
-    weights:
-      psnr: 1.0  # PSNR weight (after normalization to [0,1])
-      ssim: 1.0  # SSIM weight
-      lpips: 1.0  # LPIPS weight
-
-    # PSNR range for normalization (dB)
-    psnr_range: [20, 40]  # Typical range for medical image reconstruction
+# metrics section removed - using LPIPS as primary metric for checkpointing
