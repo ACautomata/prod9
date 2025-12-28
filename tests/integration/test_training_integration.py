@@ -62,7 +62,7 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         """Test MaskGiT sampler iterative decoding."""
         from prod9.generator.maskgit import MaskGiTSampler
         from prod9.generator.transformer import TransformerDecoder
-        from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
         # Create small transformer
         latent_channels = 3  # For FSQ levels [4,4,4]

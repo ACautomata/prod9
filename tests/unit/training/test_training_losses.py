@@ -468,7 +468,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
 
         # Create a real autoencoder and discriminator to establish proper computational graph
         # Use configuration where num_channels matches len(levels)
-        from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
         ae = AutoencoderFSQ(

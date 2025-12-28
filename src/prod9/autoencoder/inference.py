@@ -14,7 +14,7 @@ from typing import Optional, Tuple
 import torch
 from monai.inferers.inferer import SlidingWindowInferer
 
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
 
 @dataclass

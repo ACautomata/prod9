@@ -3,7 +3,7 @@ import unittest
 import torch.nn.functional as F
 from monai.inferers.inferer import SlidingWindowInferer
 
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
 
 class TestAutoencoder(unittest.TestCase):

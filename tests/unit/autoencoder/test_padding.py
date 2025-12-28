@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.padding import (
     compute_scale_factor,
     validate_config,

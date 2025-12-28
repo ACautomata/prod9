@@ -79,7 +79,7 @@ class TestTransformerTraining:
         model = model.to(device)
 
         # Create fake autoencoder for testing (since we don't have a trained one)
-        from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         autoencoder = AutoencoderFSQ(
             spatial_dims=3,
             levels=(4, 4, 4),

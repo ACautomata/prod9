@@ -5,7 +5,7 @@ import unittest
 import torch
 from monai.inferers.inferer import SlidingWindowInferer
 
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ, FiniteScalarQuantizer
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ, FiniteScalarQuantizer
 from prod9.autoencoder.inference import (
     AutoencoderInferenceWrapper,
     SlidingWindowConfig,

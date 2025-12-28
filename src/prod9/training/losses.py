@@ -231,8 +231,6 @@ class VAEGANLoss(nn.Module):
         self, fake_images: torch.Tensor, real_images: torch.Tensor
     ) -> torch.Tensor:
         """Compute perceptual loss using pretrained network."""
-        # Simply call perceptual loss - device handling happens in PerceptualLoss itself
-        # via MONAI's internal device management
         return self.perceptual_loss(fake_images, real_images)
 
     def _compute_generator_adv_loss(

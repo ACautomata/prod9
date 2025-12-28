@@ -6,7 +6,7 @@ Helper class to create LightningModule from config dictionary.
 
 from typing import Dict, Any
 
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
