@@ -56,7 +56,6 @@ class TransformerLightningConfig:
             autoencoder_path=config.get("autoencoder_path", "outputs/autoencoder_final.pt"),
             transformer=transformer,
             latent_channels=transformer_config.get("latent_channels", 192),
-            cond_channels=transformer_config.get("cond_channels", 192),
             patch_size=transformer_config.get("patch_size", 2),
             num_blocks=transformer_config.get("num_blocks", 12),
             hidden_dim=transformer_config.get("hidden_dim", 512),
@@ -83,7 +82,6 @@ class TransformerLightningConfig:
 
         return TransformerDecoder(
             d_model=config.get("d_model", 192),
-            c_model=config.get("c_model", 192),
             patch_size=config.get("patch_size", 2),
             num_blocks=config.get("num_blocks", 12),
             hidden_dim=config.get("hidden_dim", 512),

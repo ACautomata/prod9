@@ -18,7 +18,6 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
 
         # Create small transformer
         latent_channels = 3  # For FSQ levels [4,4,4]
-        cond_channels = 1
         patch_size = 1
         num_blocks = 2
         hidden_dim = 32
@@ -27,7 +26,6 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
 
         transformer = TransformerDecoder(
             d_model=latent_channels,
-            c_model=cond_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,
@@ -42,7 +40,7 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         batch_size = 2
         seq_len = 27  # 3^3 latent grid
         latent = torch.randn(batch_size, latent_channels, 3, 3, 3).to(self.device)
-        condition = torch.randn(batch_size, cond_channels, 3, 3, 3).to(self.device)
+        condition = torch.randn(batch_size, latent_channels, 3, 3, 3).to(self.device)
 
         # Forward pass
         with torch.no_grad():
@@ -66,7 +64,6 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
 
         # Create small transformer
         latent_channels = 3  # For FSQ levels [4,4,4]
-        cond_channels = 1
         patch_size = 1
         num_blocks = 2
         hidden_dim = 32
@@ -75,7 +72,6 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
 
         transformer = TransformerDecoder(
             d_model=latent_channels,
-            c_model=cond_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,
@@ -108,7 +104,7 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         batch_size = 1
         # latent_channels = 3 for FSQ levels [4,4,4]
         shape = (batch_size, latent_channels, 3, 3, 3)  # (B, C, H, W, D)
-        condition = torch.randn(batch_size, cond_channels, 3, 3, 3).to(self.device)
+        condition = torch.randn(batch_size, latent_channels, 3, 3, 3).to(self.device)
 
         # Note: MaskGiTSampler.sample() has a device compatibility check issue
         # The sampler checks transformer.device which doesn't always exist on nn.Module

@@ -18,7 +18,6 @@ class TestTransformer:
         """Create transformer instance for testing."""
         transformer = TransformerDecoder(
             d_model=4,
-            c_model=4,
             patch_size=2,
             num_blocks=4,
             hidden_dim=256,
@@ -103,7 +102,6 @@ class TestTransformer:
         for patch_size in [1, 2, 4]:
             transformer = TransformerDecoder(
                 d_model=4,
-                c_model=4,
                 patch_size=patch_size,
                 num_blocks=2,
                 hidden_dim=128,
@@ -128,7 +126,6 @@ class TestTransformer:
         for num_blocks in [1, 2, 4, 6]:
             transformer = TransformerDecoder(
                 d_model=4,
-                c_model=4,
                 patch_size=2,
                 num_blocks=num_blocks,
                 hidden_dim=128,
@@ -151,7 +148,6 @@ class TestTransformer:
         for hidden_dim in [64, 128, 256, 512]:
             transformer = TransformerDecoder(
                 d_model=4,
-                c_model=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=hidden_dim,
@@ -174,7 +170,6 @@ class TestTransformer:
         for num_heads in [1, 2, 4, 8]:
             transformer = TransformerDecoder(
                 d_model=4,
-                c_model=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,
@@ -220,11 +215,10 @@ class TestTransformer:
         assert torch.allclose(output1, output2), "Output should be deterministic in eval mode"
 
     def test_different_latent_and_cond_channels(self, transformer: TransformerDecoder, device: torch.device) -> None:
-        """Test with different latent and cond channels"""
-        for latent_ch, cond_ch in [(1, 4), (2, 8), (4, 16)]:
+        """Test with different latent channels (both input and condition use same channels)"""
+        for latent_ch in [(1), (2), (4), (8)]:
             transformer = TransformerDecoder(
                 d_model=latent_ch,
-                c_model=cond_ch,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,
@@ -234,11 +228,11 @@ class TestTransformer:
             ).to(device)
 
             x = torch.randn((1, latent_ch, 8, 8, 8), device=device)
-            cond = torch.randn((1, cond_ch, 8, 8, 8), device=device)
+            cond = torch.randn((1, latent_ch, 8, 8, 8), device=device)
 
             output = transformer(x, cond)
             # Transformer outputs logits [B, codebook_size, H, W, D]
             expected_shape = (x.shape[0], transformer.out_proj.out_channels, x.shape[2], x.shape[3], x.shape[4])
             assert output.shape == expected_shape, \
-                f"channels={latent_ch},{cond_ch}: output shape {output.shape} != expected {expected_shape}"
+                f"channels={latent_ch}: output shape {output.shape} != expected {expected_shape}"
         
