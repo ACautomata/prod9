@@ -128,8 +128,8 @@ loss:
 callbacks:
   # Model checkpointing
   checkpoint:
-    monitor: "val/combined_metric"
-    mode: "max"
+    monitor: "val/lpips"
+    mode: "min"
     save_top_k: 3
     save_last: true
     every_n_epochs: null  # null = check every epoch
@@ -137,9 +137,9 @@ callbacks:
   # Early stopping
   early_stop:
     enabled: true
-    monitor: "val/combined_metric"
+    monitor: "val/lpips"
     patience: 10
-    mode: "max"
+    mode: "min"
     min_delta: 0.0  # Minimum change to qualify as improvement
 
   # Learning rate monitoring
