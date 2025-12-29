@@ -47,11 +47,17 @@ def train_transformer(config: str) -> None:
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
-        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        # Load and set autoencoder
+        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
-        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        # Load and set autoencoder
+        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        data_module.set_autoencoder(autoencoder)
 
     # Create trainer
     output_dir = cfg.get("output_dir", "outputs/stage2")
@@ -91,11 +97,17 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
-        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        # Load and set autoencoder
+        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
-        data_module.autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
+        # Load and set autoencoder
+        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        data_module.set_autoencoder(autoencoder)
 
     # Create trainer for validation
     output_dir = cfg.get("output_dir", "outputs/validation")
@@ -142,6 +154,9 @@ def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
         train_val_split=data_config.get("train_val_split", 0.8),
     )
+    # Load and set autoencoder
+    autoencoder = torch.load(cfg["autoencoder_path"], map_location="cpu")
+    data_module.set_autoencoder(autoencoder)
 
     # Create trainer for testing
     output_dir = cfg.get("output_dir", "outputs/test")

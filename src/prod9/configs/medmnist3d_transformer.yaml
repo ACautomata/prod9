@@ -14,7 +14,6 @@ model:
   # Transformer decoder configuration
   transformer:
     d_model: 3  # Latent token dimension (must equal len(levels) for FSQ)
-    c_model: 3  # Condition token dimension (same as d_model for single-channel latent)
     patch_size: 2  # 3D patch size
     hidden_dim: 256  # Reduced from 512 for smaller dataset
     cond_dim: 256  # Reduced from 512 for smaller dataset

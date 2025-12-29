@@ -14,7 +14,6 @@ model:
   # Transformer decoder configuration
   transformer:
     d_model: 192  # Latent token dimension (was latent_channels)
-    c_model: 192  # Condition token dimension (was cond_channels)
     patch_size: 2  # 3D patch size
     hidden_dim: 512
     cond_dim: 512
