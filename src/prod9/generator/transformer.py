@@ -8,7 +8,6 @@ class TransformerDecoder(nn.Module):
     def __init__(
         self,
         d_model,
-        c_model,
         patch_size,
         num_blocks,
         hidden_dim,
@@ -27,7 +26,7 @@ class TransformerDecoder(nn.Module):
             stride=patch_size
         )
         self.cond_patch_proj = nn.Conv3d(
-            c_model,
+            d_model,
             hidden_dim,
             kernel_size=patch_size,
             stride=patch_size

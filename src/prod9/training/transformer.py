@@ -72,7 +72,6 @@ class TransformerLightning(pl.LightningModule):
         transformer: Optional[nn.Module] = None,
         # Transformer config
         latent_channels: int = 4,
-        cond_channels: int = 4,
         patch_size: int = 2,
         num_blocks: int = 12,
         hidden_dim: int = 512,
@@ -102,7 +101,6 @@ class TransformerLightning(pl.LightningModule):
         self.transformer: nn.Module = transformer  # type: ignore[assignment]
         self._transformer_config = {
             "latent_channels": latent_channels,
-            "cond_channels": cond_channels,
             "patch_size": patch_size,
             "num_blocks": num_blocks,
             "hidden_dim": hidden_dim,
@@ -111,7 +109,6 @@ class TransformerLightning(pl.LightningModule):
         }
 
         self.latent_channels = latent_channels
-        self.cond_channels = cond_channels
         self.num_classes = num_classes  # Unified: BraTS modalities or MedMNIST 3D classes
         self.contrast_embed_dim = contrast_embed_dim
         self.unconditional_prob = unconditional_prob
@@ -129,6 +126,14 @@ class TransformerLightning(pl.LightningModule):
         # Unified class/condition embeddings (works for both BraTS and MedMNIST 3D)
         self.label_embeddings = nn.Embedding(num_classes, contrast_embed_dim)
         self.contrast_embeddings = None  # Deprecated, use label_embeddings
+
+        # MaskGiTConditionGenerator for classifier-free guidance training
+        # Note: uses latent_channels since we add embedding to the latent tensor
+        from prod9.generator.maskgit import MaskGiTConditionGenerator
+        self.condition_generator = MaskGiTConditionGenerator(
+            num_classes=num_classes,
+            latent_dim=latent_channels,
+        )
 
         # MaskGiTScheduler for training data augmentation
         from prod9.generator.maskgit import MaskGiTScheduler
@@ -175,7 +180,6 @@ class TransformerLightning(pl.LightningModule):
             from prod9.generator.transformer import TransformerDecoder
             self.transformer = TransformerDecoder(
                 d_model=self._transformer_config["latent_channels"],
-                c_model=self._transformer_config["cond_channels"],
                 patch_size=self._transformer_config["patch_size"],
                 num_blocks=self._transformer_config["num_blocks"],
                 hidden_dim=self._transformer_config["hidden_dim"],
@@ -254,61 +258,40 @@ class TransformerLightning(pl.LightningModule):
         self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
     ) -> STEP_OUTPUT:
         """
-        Training step with conditional generation.
+        Training step with conditional generation using classifier-free guidance.
 
-        Supports both:
-        - Multi-modal generation (BraTS): uses modality embeddings
-        - Classification datasets (MedMNIST 3D): uses label embeddings
+        Unified for both BraTS and MedMNIST 3D datasets using MaskGiTConditionGenerator.
 
         Args:
             batch: Dictionary with:
-                BraTS format:
-                - 'cond_latent': [B, C, H, W, D] - conditioning modality latent
+                - 'cond_latent': [B, C, H, W, D] - conditioning latent
+                  (BraTS: actual source latent, MedMNIST: zeros tensor)
+                - 'cond_idx': [B] - condition index
+                  (BraTS: modality 0-3, MedMNIST: class label)
                 - 'target_latent': [B, C, H, W, D] - target modality latent
                 - 'target_indices': [B, H*W*D] - target token indices
-                - 'target_modality_idx': [B] - target modality indices
-
-                MedMNIST 3D format:
-                - 'cond_latent': [B, cond_dim] - condition embeddings (or zero for unconditional)
-                - 'target_latent': [B, C, H, W, D] - target modality latent
-                - 'target_indices': [B, H*W*D] - target token indices
-                - 'label': [B] - class labels
+                - 'target_modality_idx': [B] - (BraTS only) target modality indices
 
             batch_idx: Batch index (unused)
 
         Returns:
             Loss dictionary for logging
         """
-        # Detect batch format (BraTS vs MedMNIST 3D)
-        is_classification_dataset = "target_modality_idx" not in batch
+        # Unified fields for both datasets
+        cond_latent = batch["cond_latent"]  # [B, C, H, W, D]
+        cond_idx = batch["cond_idx"]  # [B] - BraTS: modality, MedMNIST: label
+        target_latent = batch["target_latent"]
+        target_indices = batch["target_indices"]
 
-        if is_classification_dataset:
-            # MedMNIST 3D format - cond_latent is already the condition embedding
-            cond_latent = batch["cond_latent"]
-            target_latent = batch["target_latent"]
-            target_indices = batch["target_indices"]
+        # Generate both cond and uncond with contrast embeddings (unified!)
+        cond, uncond = self.condition_generator(cond_latent, cond_idx)
 
-            # cond_latent may be zero tensor (unconditional) or label embedding (conditional)
-            # Need to expand it to spatial dimensions
-            batch_size = cond_latent.shape[0]
-            if cond_latent.dim() == 1:  # [B, cond_dim]
-                # Spatially broadcast to match latent spatial dimensions
-                cond_latent = cond_latent.view(batch_size, -1, 1, 1, 1)
-                cond_latent = cond_latent.expand(batch_size, -1, *target_latent.shape[2:])
-            cond = cond_latent
-        else:
-            # BraTS format - need to create condition from source_latent + modality embedding
-            cond_latent = batch["cond_latent"]
-            target_latent = batch["target_latent"]
-            target_indices = batch["target_indices"]
-            target_modality_idx = batch["target_modality_idx"]
-
-            # Prepare condition: concat cond_latent with contrast embedding
-            batch_size = cond_latent.shape[0]
-            contrast_embed = self.label_embeddings(target_modality_idx)
-            contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
-            contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
-            cond = torch.cat([cond_latent, contrast_embed], dim=1)
+        # Probabilistic condition dropout for classifier-free guidance
+        batch_size = cond.shape[0]
+        drop_mask = torch.rand(batch_size, device=cond.device) < self.unconditional_prob
+        if drop_mask.any():
+            # Replace with unconditional for dropped samples
+            cond[drop_mask] = uncond[drop_mask]
 
         # Generate masked pairs via MaskGiTScheduler
         step = random.randint(1, self.num_steps)
@@ -345,21 +328,14 @@ class TransformerLightning(pl.LightningModule):
         """
         Validation step with full sampling steps.
 
-        Supports both BraTS and MedMNIST 3D formats.
+        Unified for both BraTS and MedMNIST 3D datasets using MaskGiTConditionGenerator.
 
         Args:
             batch: Dictionary with:
-                BraTS format:
-                - 'cond_latent': [B, C, H, W, D] - conditioning modality latent
+                - 'cond_latent': [B, C, H, W, D] - conditioning latent
+                - 'cond_idx': [B] - condition index (BraTS: modality, MedMNIST: label)
                 - 'target_latent': [B, C, H, W, D] - target modality latent
                 - 'target_indices': [B, H*W*D] - target token indices
-                - 'target_modality_idx': [B] - target modality indices
-
-                MedMNIST 3D format:
-                - 'cond_latent': [B, cond_dim] - condition embeddings
-                - 'target_latent': [B, C, H, W, D] - target modality latent
-                - 'target_indices': [B, H*W*D] - target token indices
-                - 'label': [B] - class labels
 
             batch_idx: Batch index (unused)
 
@@ -369,33 +345,13 @@ class TransformerLightning(pl.LightningModule):
         metrics = {}
         autoencoder = self._get_autoencoder()
 
-        # Detect batch format
-        is_classification_dataset = "target_modality_idx" not in batch
+        # Unified fields for both datasets
+        cond_latent = batch["cond_latent"]  # [B, C, H, W, D]
+        cond_idx = batch["cond_idx"]  # [B] - BraTS: modality, MedMNIST: label
+        target_latent = batch["target_latent"]
 
-        if is_classification_dataset:
-            # MedMNIST 3D format
-            cond_latent = batch["cond_latent"]
-            target_latent = batch["target_latent"]
-            target_indices = batch["target_indices"]
-
-            # Expand cond_latent to spatial dimensions if needed
-            batch_size = cond_latent.shape[0]
-            if cond_latent.dim() == 1:  # [B, cond_dim]
-                cond_latent = cond_latent.view(batch_size, -1, 1, 1, 1)
-                cond_latent = cond_latent.expand(batch_size, -1, *target_latent.shape[2:])
-            cond = cond_latent
-        else:
-            # BraTS format
-            cond_latent = batch["cond_latent"]
-            target_latent = batch["target_latent"]
-            target_modality_idx = batch["target_modality_idx"]
-
-            # Prepare condition
-            batch_size = cond_latent.shape[0]
-            contrast_embed = self.label_embeddings(target_modality_idx)
-            contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
-            contrast_embed = contrast_embed.expand(batch_size, -1, *cond_latent.shape[2:])
-            cond = torch.cat([cond_latent, contrast_embed], dim=1)
+        # Generate both cond and uncond with contrast embeddings (unified!)
+        cond, uncond = self.condition_generator(cond_latent, cond_idx)
 
         # Use MaskGiTSampler for generation
         from prod9.generator.maskgit import MaskGiTSampler
@@ -418,8 +374,8 @@ class TransformerLightning(pl.LightningModule):
             )
             last_indices = torch.arange(end=seq_len, device=target_latent.device)[None, :].repeat(batch_size, 1)
 
-            # Single sampling step
-            z, _ = sampler.step(0, self.transformer, autoencoder, z, cond, last_indices)
+            # Single sampling step with both cond and uncond for CFG
+            z, _ = sampler.step(0, self.transformer, autoencoder, z, cond, uncond, last_indices)
 
             # Reconstruct
             reconstructed_latent = z.view(batch_size, channels, h, w, d)
@@ -467,12 +423,12 @@ class TransformerLightning(pl.LightningModule):
         is_unconditional: bool = False,
     ) -> torch.Tensor:
         """
-        Generate target modality from source.
+        Generate target modality from source using classifier-free guidance.
 
         Args:
             source_image: Source image [B, 1, H, W, D]
             source_modality_idx: Source modality index
-            target_modality_idx: Target modality index
+            target_modality_idx: Target modality index (unused, for backward compatibility)
             is_unconditional: Generate unconditionally
 
         Returns:
@@ -485,16 +441,18 @@ class TransformerLightning(pl.LightningModule):
             # Encode source
             source_latent, _ = autoencoder.encode(source_image)
 
-            if is_unconditional:
-                cond = None
-            else:
-                # Prepare condition with target contrast embedding
-                target_modality_tensor = torch.tensor(
-                    [target_modality_idx], device=source_image.device, dtype=torch.long
-                )
-                cond = self.prepare_condition(source_latent, target_modality_tensor, False)
+            # Create source modality tensor
+            source_modality_tensor = torch.tensor(
+                [source_modality_idx], device=source_image.device, dtype=torch.long
+            )
 
-            # Sample using MaskGiTSampler
+            # Generate both cond and uncond with contrast embeddings
+            cond, uncond = self.condition_generator(source_latent, source_modality_tensor)
+
+            if is_unconditional:
+                cond = uncond
+
+            # Sample using MaskGiTSampler with CFG
             from prod9.generator.maskgit import MaskGiTSampler
             sampler = MaskGiTSampler(
                 steps=self.num_steps,
@@ -507,6 +465,7 @@ class TransformerLightning(pl.LightningModule):
                 autoencoder,
                 source_latent.shape,
                 cond,
+                uncond,
             )
 
         self.train()

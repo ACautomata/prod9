@@ -36,6 +36,7 @@ class PreEncodedSample(TypedDict):
     target_latent: torch.Tensor
     target_indices: torch.Tensor
     target_modality_idx: int
+    cond_idx: int  # Unified condition index (modality for BraTS, label for MedMNIST)
 
 
 def _get_brats_files(data_dir: str, patient: str) -> Dict[str, str]:
@@ -203,26 +204,30 @@ class _PreEncodedDataset(Dataset):
     """
     Dataset for Stage 2 training with pre-encoded latents/indices.
 
+    Always returns actual source latent (never zeros). Conditional/unconditional
+    decision is moved to the training stage via TransformerLightning.
+
     Returns:
         Dict with keys:
-            - 'cond_latent': [C, H, W, D] - conditioning modality latent (zeros for unconditional)
+            - 'cond_latent': [C, H, W, D] - conditioning modality latent (always actual)
             - 'target_latent': [C, H, W, D] - target modality latent
             - 'target_indices': [H*W*D] - target token indices
             - 'target_modality_idx': int - target modality index (0-3)
+            - 'cond_modality_idx': int - conditioning modality index (0-3)
     """
 
     def __init__(
         self,
         encoded_data: List[Dict],
-        unconditional_prob: float = 0.1,
+        unconditional_prob: float = 0.1,  # Unused, kept for backward compatibility
     ) -> None:
         """
         Args:
             encoded_data: List of pre-encoded dictionaries with all modalities
-            unconditional_prob: Probability of unconditional generation (default: 0.1)
+            unconditional_prob: Deprecated, kept for backward compatibility.
+                               Conditional/unconditional decision is now in training stage.
         """
         self.encoded_data = encoded_data
-        self.unconditional_prob = unconditional_prob
 
     def __len__(self) -> int:
         return len(self.encoded_data)
@@ -231,9 +236,6 @@ class _PreEncodedDataset(Dataset):
         """Get pre-encoded data for a random modality pair."""
         data = self.encoded_data[idx]
 
-        # Decide conditional vs unconditional
-        is_unconditional = random.random() < self.unconditional_prob
-
         # Randomly sample target modality
         target_idx = random.randint(0, 3)
         target_modality = MODALITY_KEYS[target_idx]
@@ -241,20 +243,17 @@ class _PreEncodedDataset(Dataset):
         target_latent: torch.Tensor = data[f"{target_modality}_latent"]  # [C, H, W, D]
         target_indices: torch.Tensor = data[f"{target_modality}_indices"]  # [H*W*D]
 
-        # For conditional: randomly sample conditioning modality
-        # For unconditional: use zero tensor with same shape as target_latent
-        if is_unconditional:
-            cond_latent = torch.zeros_like(target_latent)
-        else:
-            cond_idx = random.randint(0, 3)
-            cond_modality = MODALITY_KEYS[cond_idx]
-            cond_latent = data[f"{cond_modality}_latent"]  # [C, H, W, D]
+        # Randomly sample conditioning modality (always actual latent, never zeros)
+        cond_idx = random.randint(0, 3)
+        cond_modality = MODALITY_KEYS[cond_idx]
+        cond_latent: torch.Tensor = data[f"{cond_modality}_latent"]  # [C, H, W, D]
 
         return {
             "cond_latent": cond_latent,
             "target_latent": target_latent,
             "target_indices": target_indices,
             "target_modality_idx": target_idx,
+            "cond_idx": cond_idx,
         }
 
 

@@ -77,39 +77,31 @@ class _MedMNIST3DStage2Dataset(TorchDataset):
     Stage 2 dataset for conditional generation.
 
     Loads pre-encoded data from Stage 1 autoencoder.
+    Returns spatial latent tensors (like BraTS) for unified handling.
 
     Args:
         encoded_data: List of pre-encoded samples with latents and labels
-        cond_emb_dim: Dimension of condition embeddings
-        unconditional_prob: Probability of using zero embedding (unconditional)
     """
 
-    def __init__(self, encoded_data, cond_emb_dim: int, unconditional_prob: float = 0.1):
+    def __init__(self, encoded_data: list[dict[str, object]]) -> None:
         self.encoded_data = encoded_data
-        self.cond_emb_dim = cond_emb_dim
-        self.unconditional_prob = unconditional_prob
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.encoded_data)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, object]:
         sample = self.encoded_data[idx]
 
-        # Randomly use unconditional generation
-        use_unconditional = np.random.random() < self.unconditional_prob
-
-        if use_unconditional:
-            # Zero embedding for unconditional generation
-            cond_latent = torch.zeros(self.cond_emb_dim)
-        else:
-            # Label embedding for conditional generation
-            cond_latent = sample["label_emb"]
+        # For MedMNIST, use zeros as condition input (aligned with BraTS format)
+        # The actual condition information is passed via cond_idx
+        target_latent: torch.Tensor = sample["latent"]  # type: ignore[assignment]
+        cond_latent = torch.zeros_like(target_latent)  # Zeros for MaskGiTConditionGenerator
 
         return {
-            "cond_latent": cond_latent,
-            "target_latent": sample["latent"],
-            "target_indices": sample["indices"],
-            "label": sample["label"],
+            "cond_latent": cond_latent,  # [C, D, H, W] zeros tensor (aligned with BraTS)
+            "target_latent": target_latent,  # [C, D, H, W]
+            "target_indices": sample["indices"],  # type: ignore[assignment]
+            "cond_idx": torch.tensor(sample["label"], dtype=torch.long),  # Unified condition index
         }
 
 
@@ -359,8 +351,6 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         size: Literal[28, 64] = 64,
         root: str = "./.medmnist",
         autoencoder=None,
-        cond_emb_dim: int = 128,
-        unconditional_prob: float = 0.1,
         cache_dir: str = "outputs/medmnist3d_encoded",
         batch_size: int = 8,
         num_workers: int = 4,
@@ -375,8 +365,6 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         self.size = size
         self.root = root
         self.autoencoder = autoencoder
-        self.cond_emb_dim = cond_emb_dim
-        self.unconditional_prob = unconditional_prob
         self.cache_dir = cache_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -387,9 +375,6 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         class_name = info["python_class"]
         self.dataset_class = getattr(medmnist, class_name)
         self.num_classes = len(info["label"])
-
-        # Create label embedding layer
-        self.label_embedding = torch.nn.Embedding(self.num_classes, self.cond_emb_dim)
 
         self.train_dataset = None
         self.val_dataset = None
@@ -430,12 +415,8 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             print("Pre-encoding complete!")
 
         # Create datasets
-        self.train_dataset = _MedMNIST3DStage2Dataset(
-            train_encoded, self.cond_emb_dim, self.unconditional_prob
-        )
-        self.val_dataset = _MedMNIST3DStage2Dataset(
-            val_encoded, self.cond_emb_dim, self.unconditional_prob
-        )
+        self.train_dataset = _MedMNIST3DStage2Dataset(train_encoded)
+        self.val_dataset = _MedMNIST3DStage2Dataset(val_encoded)
 
     def _pre_encode_data(self, split: str, cache_file: str):
         """Pre-encode data using trained autoencoder."""
@@ -480,14 +461,11 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                 # Quantize to token indices
                 indices_tensor = self.autoencoder.quantize(latent)
 
-                # Generate label embedding
-                label_emb = self.label_embedding(torch.tensor(label))
-
+                # Store label index (not embedding) - embedding will be added by MaskGiTConditionGenerator
                 encoded_data.append(
                     {
                         "latent": latent.squeeze(0),  # Remove batch dimension
                         "indices": indices_tensor,
-                        "label_emb": label_emb,
                         "label": int(label),
                     }
                 )
@@ -536,8 +514,6 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             size=data_config.get("size", 64),
             root=data_config.get("root", "./.medmnist"),
             autoencoder=autoencoder,
-            cond_emb_dim=data_config.get("cond_emb_dim", 128),
-            unconditional_prob=data_config.get("unconditional_prob", 0.1),
             cache_dir=data_config.get("cache_dir", "outputs/medmnist3d_encoded"),
             batch_size=data_config.get("batch_size", 8),
             num_workers=data_config.get("num_workers", 4),

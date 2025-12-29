@@ -10,7 +10,157 @@ import torch
 import math
 from unittest.mock import Mock
 
-from prod9.generator.maskgit import MaskGiTSampler, MaskGiTScheduler
+from prod9.generator.maskgit import MaskGiTSampler, MaskGiTScheduler, MaskGiTConditionGenerator
+
+
+@pytest.fixture
+def condition_generator():
+    """Create a MaskGiTConditionGenerator for testing."""
+    return MaskGiTConditionGenerator(num_classes=4, latent_dim=64)
+
+
+def get_cond_uncond(condition_generator, source_latent, modality_idx, device='cpu'):
+    """Helper to get cond and uncond from condition generator."""
+    modality_tensor = torch.tensor([modality_idx], device=device, dtype=torch.long)
+    if source_latent.dim() == 5:  # [B, C, H, W, D]
+        # Expand modality_tensor to match batch size
+        batch_size = source_latent.shape[0]
+        modality_tensor = modality_tensor.expand(batch_size)
+    return condition_generator(source_latent, modality_tensor)
+
+
+class TestMaskGiTConditionGenerator:
+    """Test suite for MaskGiTConditionGenerator."""
+
+    def test_initialization(self, condition_generator):
+        """Test condition generator initialization."""
+        assert condition_generator.num_classes == 4
+        assert hasattr(condition_generator, 'contrast_embedding')
+        assert condition_generator.contrast_embedding.num_embeddings == 5  # num_classes + 1
+        assert condition_generator.contrast_embedding.embedding_dim == 64
+
+    def test_forward_returns_both_cond_and_uncond(self, condition_generator):
+        """Test that forward returns both conditional and unconditional tensors."""
+        batch_size = 2
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d)
+        cond_idx = torch.tensor([0, 1], dtype=torch.long)  # Different class indices
+
+        cond, uncond = condition_generator(source_latent, cond_idx)
+
+        # Check shapes match
+        assert cond.shape == source_latent.shape
+        assert uncond.shape == source_latent.shape
+
+        # Check that cond has contrast embedding added
+        assert not torch.allclose(cond, source_latent)
+
+        # Check that uncond is different from source (zeros + embedding)
+        assert not torch.allclose(uncond, source_latent)
+
+    def test_cond_has_contrast_embedding(self, condition_generator):
+        """Test that conditional tensor has contrast embedding added."""
+        batch_size = 1
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d)
+        cond_idx = torch.tensor([0], dtype=torch.long)
+
+        cond, _ = condition_generator(source_latent, cond_idx)
+
+        # Get the contrast embedding for verification
+        contrast_embed = condition_generator.contrast_embedding(cond_idx)
+        # Broadcast to spatial dimensions
+        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
+        contrast_embed = contrast_embed.expand(batch_size, -1, h, w, d)
+
+        # cond should be source_latent + contrast_embed
+        expected_cond = source_latent + contrast_embed
+        assert torch.allclose(cond, expected_cond)
+
+    def test_uncond_has_uncond_embedding(self, condition_generator):
+        """Test that unconditional tensor has uncond embedding (last index)."""
+        batch_size = 1
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d)
+        cond_idx = torch.tensor([0], dtype=torch.long)
+
+        _, uncond = condition_generator(source_latent, cond_idx)
+
+        # Get the unconditional contrast embedding (last index = num_classes)
+        uncond_contrast_embed = condition_generator.contrast_embedding(
+            torch.tensor([condition_generator.num_classes], dtype=torch.long)
+        )
+        # Broadcast to spatial dimensions
+        uncond_contrast_embed = uncond_contrast_embed.view(batch_size, -1, 1, 1, 1)
+        uncond_contrast_embed = uncond_contrast_embed.expand(batch_size, -1, h, w, d)
+
+        # uncond should be zeros + uncond_contrast_embed
+        expected_uncond = torch.zeros_like(source_latent) + uncond_contrast_embed
+        assert torch.allclose(uncond, expected_uncond)
+
+    def test_different_class_indices(self, condition_generator):
+        """Test that different class indices produce different cond tensors."""
+        batch_size = 1
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d)
+
+        cond_idx_0 = torch.tensor([0], dtype=torch.long)
+        cond_idx_1 = torch.tensor([1], dtype=torch.long)
+
+        cond_0, _ = condition_generator(source_latent, cond_idx_0)
+        cond_1, _ = condition_generator(source_latent, cond_idx_1)
+
+        # Different class indices should produce different conditional tensors
+        assert not torch.allclose(cond_0, cond_1)
+
+    def test_batch_processing(self, condition_generator):
+        """Test that condition generator handles batches correctly."""
+        batch_size = 4
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d)
+        cond_idx = torch.tensor([0, 1, 2, 3], dtype=torch.long)  # All 4 classes
+
+        cond, uncond = condition_generator(source_latent, cond_idx)
+
+        # Check batch dimension preserved
+        assert cond.shape[0] == batch_size
+        assert uncond.shape[0] == batch_size
+        assert cond.shape[1:] == source_latent.shape[1:]
+        assert uncond.shape[1:] == source_latent.shape[1:]
+
+    def test_device_consistency(self):
+        """Test that cond and uncond are on the same device as input."""
+        if not torch.backends.mps.is_available():
+            pytest.skip("MPS not available")
+            return
+
+        device = torch.device('mps')
+        batch_size = 1
+        latent_dim = 64  # Must match condition_generator's latent_dim
+        h, w, d = 4, 4, 4
+
+        # Create a fresh generator on MPS device
+        from prod9.generator.maskgit import MaskGiTConditionGenerator
+        condition_generator = MaskGiTConditionGenerator(num_classes=4, latent_dim=latent_dim).to(device)
+
+        source_latent = torch.randn(batch_size, latent_dim, h, w, d, device=device)
+        cond_idx = torch.tensor([0], dtype=torch.long, device=device)
+
+        cond, uncond = condition_generator(source_latent, cond_idx)
+
+        # Check device consistency (compare type, not exact device object)
+        assert cond.device.type == device.type
+        assert uncond.device.type == device.type
 
 
 class TestMaskGiTSampler:
@@ -91,7 +241,7 @@ class TestMaskGiTSampler:
         late_avg = sum(counts[-3:]) / 3
         assert early_avg <= late_avg
 
-    def test_schedule_truncation_error(self):
+    def test_schedule_truncation_error(self, condition_generator):
         """Test that schedule raises ValueError on truncation."""
         # Create a sampler with many steps and small sequence to cause truncation
         # With steps=100 and seq_len=4, the log schedule will eventually have count <= 0
@@ -117,13 +267,14 @@ class TestMaskGiTSampler:
         mock_vae.embed = mock_embed
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 2, 2, 1)  # Zero conditioning (2*2*1=4)
+        cond = torch.zeros(batch_size, embed_dim, 2, 2, 1)  # Zero conditioning (2*2*1=4)
+        uncond = torch.zeros_like(cond)  # Unconditional is also zeros
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Use a late step where truncation will occur
         # At step 99 with log schedule, the difference will be <= 0
         with pytest.raises(ValueError, match="Schedule truncation"):
-            sampler.step(99, mock_transformer, mock_vae, x, cond, last_indices)
+            sampler.step(99, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
     def test_step_updates_selected_positions(self, sampler_log):
         """Test that step updates only selected positions."""
@@ -153,11 +304,12 @@ class TestMaskGiTSampler:
 
         # Initial state
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 2, 2, 2)  # Zero conditioning (2*2*2=8)
+        cond = torch.zeros(batch_size, embed_dim, 2, 2, 2)  # Zero conditioning (2*2*2=8)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Execute step at middle step to ensure updates happen
-        new_x, _ = sampler.step(2, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(2, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Some positions should be updated (not equal to mask value)
         updated_mask = (new_x != -1.0).any(dim=-1)
@@ -182,11 +334,12 @@ class TestMaskGiTSampler:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 4, 2)  # Zero conditioning (4*4*2=32)
+        cond = torch.zeros(batch_size, embed_dim, 4, 4, 2)  # Zero conditioning (4*4*2=32)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         initial_count = last_indices.shape[1]
-        _, new_indices = sampler_log.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        _, new_indices = sampler_log.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # After step, should have fewer indices to update
         # new_indices may have fewer total elements across all batches
@@ -202,10 +355,11 @@ class TestMaskGiTSampler:
         mock_vae.device = torch.device('cuda')
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+        uncond = torch.zeros_like(cond)
 
         with pytest.raises(Exception, match='!=' or 'cuda'):
-            sampler_log.sample(mock_transformer, mock_vae, shape, cond)
+            sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
     def test_sample_initial_state(self, sampler_log):
         """Test that sample starts with fully masked tensor."""
@@ -230,9 +384,10 @@ class TestMaskGiTSampler:
 
         batch_size, channels, height, width, depth = 1, 4, 8, 8, 1
         shape = (batch_size, channels, height, width, depth)
-        cond = torch.zeros(batch_size, 1, height, width, depth)  # Zero conditioning
+        cond = torch.zeros(batch_size, channels, height, width, depth)  # Zero conditioning
+        uncond = torch.zeros_like(cond)
 
-        result = sampler_log.sample(mock_transformer, mock_vae, shape, cond)
+        result = sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         assert result.shape == (batch_size, channels, height, width, depth)
         assert torch.is_tensor(result)
@@ -254,7 +409,8 @@ class TestMaskGiTSampler:
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+        uncond = torch.zeros_like(cond)
 
         # Patch step to track calls
         original_step = sampler_log.step
@@ -266,7 +422,7 @@ class TestMaskGiTSampler:
 
         sampler_log.step = tracking_step
 
-        sampler_log.sample(mock_transformer, mock_vae, shape, cond)
+        sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         assert call_count[0] == sampler_log.steps
 
@@ -287,9 +443,10 @@ class TestMaskGiTSampler:
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.randn(1, 1, 16)
+        cond = torch.randn(1, 4, 8, 8, 1)
+        uncond = torch.zeros_like(cond)
 
-        result = sampler_log.sample(mock_transformer, mock_vae, shape, cond)
+        result = sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         # Verify transformer was called with condition
         assert torch.is_tensor(result)
@@ -454,8 +611,9 @@ class TestEdgeCases:
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning
-        result = sampler.sample(mock_transformer, mock_vae, shape, cond)
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+        uncond = torch.zeros_like(cond)
+        result = sampler.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         assert torch.is_tensor(result)
 
@@ -483,10 +641,11 @@ class TestEdgeCases:
         mock_vae.embed = mock_embed
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 8, 8, 16)  # Zero conditioning (8*8*16=1024)
+        cond = torch.zeros(batch_size, embed_dim, 8, 8, 16)  # Zero conditioning (8*8*16=1024)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         assert new_x.shape == (batch_size, seq_len, embed_dim)
 
@@ -529,10 +688,11 @@ class TestEdgeCases:
         mock_vae.embed = mock_embed
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # Zero conditioning (4*2*2=16)
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         assert new_x.shape[0] == 1
 
@@ -556,8 +716,9 @@ class TestEdgeCases:
             mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
             shape = (1, 4, 8, 8, 1)
-            cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning
-            result = sampler.sample(mock_transformer, mock_vae, shape, cond)
+            cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+            uncond = torch.zeros_like(cond)
+            result = sampler.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
             assert torch.is_tensor(result)
 
@@ -605,13 +766,14 @@ class TestUnconditionalGeneration:
 
         # Prepare inputs with zero conditioning (unconditional)
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # Zero conditioning for unconditional (5-D: B,C,H,W,D where H*W*D=16)
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning for uncond
+        uncond = torch.zeros_like(cond)  # Also zero
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Execute step
-        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
-        # Verify transformer was called twice (once with cond, once with zeros)
+        # Verify transformer was called twice (once with cond, once with uncond)
         assert call_count[0] == 2, "Transformer should be called twice for confidence computation"
 
         # Verify outputs
@@ -640,13 +802,14 @@ class TestUnconditionalGeneration:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # Zero conditioning (4*2*2=16)
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # This should not raise an error
-        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
-        # Verify transformer was called (twice - once for cond, once for zeros)
+        # Verify transformer was called (twice - once for cond, once for uncond)
         assert mock_transformer.call_count == 2
         assert new_x.shape == (batch_size, seq_len, embed_dim)
 
@@ -673,10 +836,11 @@ class TestUnconditionalGeneration:
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning for unconditional generation
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning for unconditional generation
+        uncond = torch.zeros_like(cond)
 
         # Should complete without error
-        result = sampler.sample(mock_transformer, mock_vae, shape, cond)
+        result = sampler.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         assert torch.is_tensor(result)
         assert result.shape == (1, 4, 8, 8, 1)
@@ -720,17 +884,18 @@ class TestUnconditionalGeneration:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # Zero conditioning (5-D: B,C,H,W,D where H*W*D=16)
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Verify transformer was called with both zero and non-zero conditioning
         assert len(call_log) == 2
-        # First call uses cond (zeros in this test), second call uses zeros_like(cond) (also zeros)
+        # First call uses cond (zeros in this test), second call uses uncond (also zeros)
         # Both will be detected as zero since we passed zero conditioning
         assert call_log[0][0] == 'zero'  # First call with cond (zeros)
-        assert call_log[1][0] == 'zero'  # Second call with zeros_like(cond) (also zeros)
+        assert call_log[1][0] == 'zero'  # Second call with uncond (also zeros)
 
         # Some positions should be updated
         updated_mask = (new_x != -1.0).any(dim=-1)
@@ -760,20 +925,22 @@ class TestUnconditionalGeneration:
 
         # Test with conditional generation
         x_cond = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond_cond = torch.randn(batch_size, 1, 4, 2, 2)  # Non-zero conditioning (5-D: B,C,H,W,D where H*W*D=16)
+        cond_cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # Non-zero conditioning
+        uncond_cond = torch.zeros_like(cond_cond)
         last_indices_cond = torch.arange(seq_len).unsqueeze(0)
 
-        x_cond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_cond, cond_cond, last_indices_cond)
+        x_cond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_cond, cond_cond, uncond_cond, last_indices_cond)
 
         # Reset call count
         mock_transformer.reset_mock()
 
         # Test with unconditional generation
         x_uncond = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond_uncond = torch.zeros(batch_size, 1, 4, 2, 2)  # Zero conditioning (5-D: B,C,H,W,D where H*W*D=16)
+        cond_uncond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning
+        uncond_uncond = torch.zeros_like(cond_uncond)
         last_indices_uncond = torch.arange(seq_len).unsqueeze(0)
 
-        x_uncond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_uncond, cond_uncond, last_indices_uncond)
+        x_uncond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_uncond, cond_uncond, uncond_uncond, last_indices_uncond)
 
         # Results should be different (or at least not guaranteed to be same)
         # We can't assert they're always different due to randomness, but we verify the process works
@@ -807,8 +974,9 @@ class TestNoGradDecorator:
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        cond = torch.zeros(batch_size, 1, 2, 2, 2)  # Zero conditioning (2*2*2=8)
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        cond = torch.zeros(batch_size, embed_dim, 2, 2, 2)  # Zero conditioning (2*2*2=8)
+        uncond = torch.zeros_like(cond)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Output should not require grad
         assert not new_x.requires_grad
@@ -832,8 +1000,9 @@ class TestNoGradDecorator:
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 1, 8, 8, 1)  # Zero conditioning
-        result = sampler.sample(mock_transformer, mock_vae, shape, cond)
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+        uncond = torch.zeros_like(cond)
+        result = sampler.sample(mock_transformer, mock_vae, shape, cond, uncond)
 
         # Result should not require grad
         assert not result.requires_grad
@@ -894,13 +1063,14 @@ class TestGuidanceScaleParameter:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Call step without guidance_scale override
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
-        # Verify transformer was called twice (once with cond, once with zeros)
+        # Verify transformer was called twice (once with cond, once with uncond)
         # This confirms CFG was applied with default guidance_scale=1.5
         assert call_count[0] == 2
         assert new_x.shape == (batch_size, seq_len, embed_dim)
@@ -933,11 +1103,12 @@ class TestGuidanceScaleParameter:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.zeros(batch_size, 1, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Call step WITH guidance_scale override
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices, guidance_scale=2.5)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices, guidance_scale=2.5)
 
         # Verify transformer was called twice (CFG applied with override value)
         assert call_count[0] == 2
@@ -977,12 +1148,13 @@ class TestGuidanceScaleParameter:
         mock_vae.device = torch.device('cpu')
 
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.randn(batch_size, 1, 4, 2, 2)  # Non-zero conditioning (5-D: B,C,H,W,D where H*W*D=16)
+        cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # Non-zero conditioning (4*2*2=16)
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # With guidance_scale=0.0, formula becomes: (1+0)*cond - 0*uncond = cond
         # This means output should be purely conditional
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Verify both calls were still made (CFG framework is used)
         assert len(call_log) == 2
@@ -1022,11 +1194,12 @@ class TestGuidanceScaleParameter:
         # Test with guidance_scale=0.0
         sampler_0 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=0.0)
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        cond = torch.randn(batch_size, 1, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
+        uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0)
 
         # Force deterministic selection by making position 0 most confident
-        x_out_0, _ = sampler_0.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        x_out_0, _ = sampler_0.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Reset and test with guidance_scale=1.0
         mock_transformer.reset_mock()
@@ -1034,7 +1207,7 @@ class TestGuidanceScaleParameter:
 
         sampler_1 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=1.0)
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
-        x_out_1, _ = sampler_1.step(0, mock_transformer, mock_vae, x, cond, last_indices)
+        x_out_1, _ = sampler_1.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Both should produce valid outputs
         assert x_out_0.shape == (batch_size, seq_len, embed_dim)
@@ -1100,7 +1273,8 @@ class TestTokenGenerationConsistency:
         # Initialize state
         x = torch.full((batch_size, seq_len, embed_dim), -1.0)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
-        cond = torch.zeros(batch_size, 1, 5, 5, 4)  # Zero conditioning (5*5*4=100)
+        cond = torch.zeros(batch_size, embed_dim, 5, 5, 4)  # Zero conditioning (5*5*4=100)
+        uncond = torch.zeros_like(cond)
 
         # Track tokens generated at each step
         initial_seq_len = last_indices.shape[0] * last_indices.shape[1]
@@ -1117,7 +1291,7 @@ class TestTokenGenerationConsistency:
                 break
 
             x, last_indices = sampler.step(
-                step, mock_transformer, mock_vae, x, cond, last_indices
+                step, mock_transformer, mock_vae, x, cond, uncond, last_indices
             )
 
             current_indices_count = last_indices.numel()

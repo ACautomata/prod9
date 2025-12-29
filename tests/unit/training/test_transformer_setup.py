@@ -56,8 +56,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-            cond_channels=3,
-            num_blocks=2,
+                        num_blocks=2,
             hidden_dim=64,
             cond_dim=64,
             num_heads=4,
@@ -81,8 +80,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-            cond_channels=3,
-        )
+                    )
 
         # Call setup multiple times
         model.setup(stage="fit")
@@ -107,8 +105,7 @@ class TestTransformerSetup:
             model = TransformerLightning(
                 autoencoder_path=temp_checkpoint_path,
                 latent_channels=3,
-                cond_channels=3,
-            )
+                            )
 
             # Should not raise any error
             model.setup(stage=stage)
@@ -123,8 +120,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-            cond_channels=3,
-        )
+                    )
 
         model.setup(stage="fit")
 
@@ -144,8 +140,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=checkpoint_path,
             latent_channels=3,
-            cond_channels=3,
-        )
+                    )
 
         # Should raise ValueError
         with pytest.raises(ValueError, match="missing 'config'"):
@@ -168,8 +163,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=checkpoint_path,
             latent_channels=3,
-            cond_channels=3,
-        )
+                    )
 
         # Should raise KeyError (or ValueError when accessing levels)
         with pytest.raises(KeyError):
@@ -180,7 +174,6 @@ class TestTransformerSetup:
         # Create a transformer with specific codebook_size
         custom_transformer = TransformerDecoder(
             d_model=3,
-            c_model=3,
             patch_size=2,
             num_blocks=2,
             hidden_dim=64,
@@ -193,8 +186,7 @@ class TestTransformerSetup:
             autoencoder_path=temp_checkpoint_path,
             transformer=custom_transformer,
             latent_channels=3,
-            cond_channels=3,
-        )
+                    )
 
         model.setup(stage="fit")
 
@@ -237,7 +229,6 @@ class TestExportLoadIntegration:
             model = TransformerLightning(
                 autoencoder_path=export_path,
                 latent_channels=3,
-                cond_channels=3,
             )
 
             model.setup(stage="fit")
