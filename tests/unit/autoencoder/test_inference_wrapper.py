@@ -318,15 +318,20 @@ class TestDeviceDetection(unittest.TestCase):
     def test_device_from_autoencoder_device_attr(self) -> None:
         """Test device detected from autoencoder.device attribute."""
         autoencoder = create_mock_autoencoder()
-        autoencoder.device = torch.device("cpu")
+        # Move to CPU to set device via parameters
+        autoencoder = autoencoder.to(torch.device("cpu"))
 
         config = SlidingWindowConfig(device=None)
         wrapper = AutoencoderInferenceWrapper(autoencoder, config)
 
+        # device should be detected from parameters
+        self.assertIsNotNone(wrapper.sw_config.device)
         self.assertEqual(wrapper.sw_config.device, torch.device("cpu"))
 
     def test_device_from_parameters(self) -> None:
         """Test device detected from autoencoder parameters."""
+        from typing import cast
+
         autoencoder = create_mock_autoencoder()
         # Move to CPU explicitly
         autoencoder = autoencoder.to(torch.device("cpu"))
@@ -334,7 +339,9 @@ class TestDeviceDetection(unittest.TestCase):
         config = SlidingWindowConfig(device=None)
         wrapper = AutoencoderInferenceWrapper(autoencoder, config)
 
-        self.assertEqual(wrapper.sw_config.device.type, "cpu")
+        # Cast for type checker: __init__ guarantees device is not None
+        device = cast(torch.device, wrapper.sw_config.device)
+        self.assertEqual(device.type, "cpu")
 
     def test_device_fallback_to_cpu_when_no_params(self) -> None:
         """Test CPU fallback when autoencoder has no parameters."""
@@ -345,6 +352,7 @@ class TestDeviceDetection(unittest.TestCase):
         config = SlidingWindowConfig(device=None)
         wrapper = AutoencoderInferenceWrapper(mock_ae, config)
 
+        self.assertIsNotNone(wrapper.sw_config.device)
         self.assertEqual(wrapper.sw_config.device, torch.device("cpu"))
 
     def test_device_fallback_for_non_module(self) -> None:
@@ -356,6 +364,7 @@ class TestDeviceDetection(unittest.TestCase):
         config = SlidingWindowConfig(device=None)
         wrapper = AutoencoderInferenceWrapper(mock_ae, config)
 
+        self.assertIsNotNone(wrapper.sw_config.device)
         self.assertEqual(wrapper.sw_config.device, torch.device("cpu"))
 
 
@@ -470,37 +479,49 @@ class TestCreateInferenceWrapperDeviceDetection(unittest.TestCase):
     @patch('torch.backends.mps.is_available')
     def test_create_wrapper_detects_cuda(self, mock_mps, mock_cuda):
         """Test CUDA device priority when available."""
+        from typing import cast
+
         mock_cuda.return_value = True
         mock_mps.return_value = True
 
         autoencoder = create_mock_autoencoder()
         wrapper = create_inference_wrapper(autoencoder)
 
-        self.assertEqual(wrapper.sw_config.device.type, "cuda")
+        # Cast for type checker: create_inference_wrapper guarantees device is not None
+        device = cast(torch.device, wrapper.sw_config.device)
+        self.assertEqual(device.type, "cuda")
 
     @patch('torch.cuda.is_available')
     @patch('torch.backends.mps.is_available')
     def test_create_wrapper_uses_mps_when_no_cuda(self, mock_mps, mock_cuda):
         """Test MPS fallback when CUDA unavailable."""
+        from typing import cast
+
         mock_cuda.return_value = False
         mock_mps.return_value = True
 
         autoencoder = create_mock_autoencoder()
         wrapper = create_inference_wrapper(autoencoder)
 
-        self.assertEqual(wrapper.sw_config.device.type, "mps")
+        # Cast for type checker: create_inference_wrapper guarantees device is not None
+        device = cast(torch.device, wrapper.sw_config.device)
+        self.assertEqual(device.type, "mps")
 
     @patch('torch.cuda.is_available')
     @patch('torch.backends.mps.is_available')
     def test_create_wrapper_uses_cpu_as_final_fallback(self, mock_mps, mock_cuda):
         """Test CPU fallback when no GPU available."""
+        from typing import cast
+
         mock_cuda.return_value = False
         mock_mps.return_value = False
 
         autoencoder = create_mock_autoencoder()
         wrapper = create_inference_wrapper(autoencoder)
 
-        self.assertEqual(wrapper.sw_config.device.type, "cpu")
+        # Cast for type checker: create_inference_wrapper guarantees device is not None
+        device = cast(torch.device, wrapper.sw_config.device)
+        self.assertEqual(device.type, "cpu")
 
     def test_create_wrapper_with_explicit_device(self) -> None:
         """Test explicit device parameter overrides auto-detection."""

@@ -462,6 +462,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                 if img_tensor.shape[0] == 3:
                     img_tensor = img_tensor[0:1, ...]
 
+                # Add batch dimension: (C, D, H, W) -> (1, C, D, H, W)
+                img_tensor = img_tensor.unsqueeze(0)
+
                 # Encode to latent
                 latent_tuple = self.autoencoder.encode(img_tensor)
                 # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar

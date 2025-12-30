@@ -257,23 +257,35 @@ class TestPrepareCondition(unittest.TestCase):
 
     def test_prepare_condition_broadcasts_contrast_embed(self):
         """Test prepare_condition spatially broadcasts contrast embedding."""
+        from typing import cast
+
         source_latent = torch.randn(1, 4, 16, 16, 16)
         target_idx = torch.tensor([2])
 
         result = self.model.prepare_condition(source_latent, target_idx, is_unconditional=False)
 
+        # Should not be None for conditional generation
+        self.assertIsNotNone(result)
+        result_tensor = cast(torch.Tensor, result)
+
         # Should concatenate: [1, 4, 16, 16, 16] + [1, 32, 16, 16, 16] = [1, 36, 16, 16, 16]
-        self.assertEqual(result.shape, (1, 36, 16, 16, 16))
+        self.assertEqual(result_tensor.shape, (1, 36, 16, 16, 16))
 
     def test_prepare_condition_with_batch(self):
         """Test prepare_condition handles batch dimension."""
+        from typing import cast
+
         source_latent = torch.randn(4, 4, 8, 8, 8)
         target_idx = torch.tensor([0, 1, 2, 3])
 
         result = self.model.prepare_condition(source_latent, target_idx, is_unconditional=False)
 
-        self.assertEqual(result.shape[0], 4)
-        self.assertEqual(result.shape[1], 36)  # 4 + 32
+        # Should not be None for conditional generation
+        self.assertIsNotNone(result)
+        result_tensor = cast(torch.Tensor, result)
+
+        self.assertEqual(result_tensor.shape[0], 4)
+        self.assertEqual(result_tensor.shape[1], 36)  # 4 + 32
 
 
 class TestTrainingStep(unittest.TestCase):
@@ -352,7 +364,11 @@ class TestTrainingStep(unittest.TestCase):
 
         result = model.training_step(batch, 0)
 
-        self.assertIn("loss", result)
+        # training_step should return a dict with loss
+        from typing import cast
+        self.assertIsNotNone(result)
+        result_dict = cast(dict, result)
+        self.assertIn("loss", result_dict)
         # Verify transformer was called
         mock_transformer.assert_called_once()
 
@@ -385,7 +401,10 @@ class TestTrainingStep(unittest.TestCase):
 
         result = model.training_step(batch, 0)
 
-        self.assertIn("loss", result)
+        from typing import cast
+        self.assertIsNotNone(result)
+        result_dict = cast(dict, result)
+        self.assertIn("loss", result_dict)
 
 
 class TestValidationStep(unittest.TestCase):
@@ -459,10 +478,15 @@ class TestValidationStep(unittest.TestCase):
 
         result = model.validation_step(batch, 0)
 
-        self.assertIn("modality_metrics", result)
-        self.assertIn("psnr", result["modality_metrics"])
-        self.assertIn("ssim", result["modality_metrics"])
-        self.assertIn("lpips", result["modality_metrics"])
+        # validation_step should return a dict with metrics
+        from typing import cast
+        self.assertIsNotNone(result)
+        result_dict = cast(dict, result)
+        self.assertIn("modality_metrics", result_dict)
+        modality_metrics = cast(dict, result_dict["modality_metrics"])
+        self.assertIn("psnr", modality_metrics)
+        self.assertIn("ssim", modality_metrics)
+        self.assertIn("lpips", modality_metrics)
 
     @patch('prod9.generator.maskgit.MaskGiTSampler')
     @patch('prod9.training.transformer.TransformerLightning.logger', new=None)
@@ -490,7 +514,10 @@ class TestValidationStep(unittest.TestCase):
 
         # Should not raise
         result = model.validation_step(batch, 0)
-        self.assertIn("modality_metrics", result)
+        from typing import cast
+        self.assertIsNotNone(result)
+        result_dict = cast(dict, result)
+        self.assertIn("modality_metrics", result_dict)
 
 
 class TestConfigureOptimizers(unittest.TestCase):
