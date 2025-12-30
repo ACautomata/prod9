@@ -7,7 +7,7 @@ from typing import Dict, Any, Mapping, cast
 import torch
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.cli.shared import create_trainer, resolve_config_path, setup_environment
+from prod9.cli.shared import create_trainer, get_device, resolve_config_path, setup_environment
 from prod9.generator.maskgit import MaskGiTSampler
 from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.training.config import load_config
@@ -27,13 +27,13 @@ def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None)
 
     Args:
         autoencoder_path: Path to exported autoencoder file
-        device: Device to load the model on (default: CPU)
+        device: Device to load the model on (default: auto-detect best available device)
 
     Returns:
         Loaded AutoencoderFSQ model in eval mode
     """
     if device is None:
-        device = torch.device("cpu")
+        device = get_device()
 
     # Load exported data
     loaded_data = torch.load(autoencoder_path, map_location=device)
@@ -102,20 +102,23 @@ def train_transformer(config: str) -> None:
     model = TransformerLightningConfig.from_config(cfg)
 
     # Create data module from config (detect BraTS vs MedMNIST 3D)
+    # Detect device for autoencoder loading
+    device = get_device()
+
     if "dataset_name" in cfg.get("data", {}):
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
-        # Load and set autoencoder
-        autoencoder = _load_autoencoder(autoencoder_path)
+        # Load and set autoencoder with explicit device
+        autoencoder = _load_autoencoder(autoencoder_path, device=device)
         data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
-        # Load and set autoencoder
-        autoencoder = _load_autoencoder(autoencoder_path)
+        # Load and set autoencoder with explicit device
+        autoencoder = _load_autoencoder(autoencoder_path, device=device)
         data_module.set_autoencoder(autoencoder)
 
     # Create trainer
@@ -152,20 +155,23 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     model = TransformerLightningConfig.from_config(cfg)
 
     # Create data module from config (detect BraTS vs MedMNIST 3D)
+    # Detect device for autoencoder loading
+    device = get_device()
+
     if "dataset_name" in cfg.get("data", {}):
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
-        # Load and set autoencoder
-        autoencoder = _load_autoencoder(autoencoder_path)
+        # Load and set autoencoder with explicit device
+        autoencoder = _load_autoencoder(autoencoder_path, device=device)
         data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
-        # Load and set autoencoder
-        autoencoder = _load_autoencoder(autoencoder_path)
+        # Load and set autoencoder with explicit device
+        autoencoder = _load_autoencoder(autoencoder_path, device=device)
         data_module.set_autoencoder(autoencoder)
 
     # Create trainer for validation
@@ -213,8 +219,9 @@ def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         roi_size=tuple(data_config.get("roi_size", (128, 128, 128))),
         train_val_split=data_config.get("train_val_split", 0.8),
     )
-    # Load and set autoencoder
-    autoencoder = _load_autoencoder(cfg["autoencoder_path"])
+    # Load and set autoencoder with explicit device
+    device = get_device()
+    autoencoder = _load_autoencoder(cfg["autoencoder_path"], device=device)
     data_module.set_autoencoder(autoencoder)
 
     # Create trainer for testing

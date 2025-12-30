@@ -258,7 +258,10 @@ class TestMaskGiTSampler:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(batch_size, seq_len, vocab_size)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (2, 2, 1), seq_len = 4
+        h, w, d = 2, 2, 1
+        mock_transformer.return_value = torch.randn(batch_size, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -287,10 +290,15 @@ class TestMaskGiTSampler:
         batch_size, seq_len, vocab_size = 2, 8, 16
         embed_dim = 4
 
-        # Create deterministic logits
-        logits = torch.zeros(batch_size, seq_len, vocab_size)
-        logits[:, 0, 5] = 10.0  # Make position 0 most confident
-        mock_transformer.return_value = logits
+        # Create deterministic logits in spatial format
+        # Transformer returns [B, vocab_size, H, W, D]
+        # For spatial shape (2, 2, 2), seq_len = 8
+        h, w, d = 2, 2, 2
+        logits_spatial = torch.zeros(batch_size, vocab_size, h, w, d)
+        # Make position 0 most confident (first token in sequence)
+        # Position 0 in sequence corresponds to (0,0,0) in spatial
+        logits_spatial[:, 5, 0, 0, 0] = 10.0  # vocab_size=16, token_id=5
+        mock_transformer.return_value = logits_spatial
         mock_transformer.device = torch.device('cpu')
 
         def mock_embed(tid):
@@ -322,8 +330,11 @@ class TestMaskGiTSampler:
         batch_size, seq_len, vocab_size = 2, 32, 16  # Increased from 8 to avoid truncation
         embed_dim = 4
 
-        logits = torch.randn(batch_size, seq_len, vocab_size)
-        mock_transformer.return_value = logits
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 4, 2), seq_len = 32
+        h, w, d = 4, 4, 2
+        logits_spatial = torch.randn(batch_size, vocab_size, h, w, d)
+        mock_transformer.return_value = logits_spatial
         mock_transformer.device = torch.device('cpu')
 
         def mock_embed(tid):
@@ -372,8 +383,11 @@ class TestMaskGiTSampler:
         mock_output = torch.randn(1, 4, 8, 8, 1)
         mock_vae.decode.return_value = mock_output
 
-        # Mock transformer
-        mock_transformer.return_value = torch.randn(1, 64, 32)
+        # Mock transformer - returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        vocab_size = 32
+        h, w, d = 8, 8, 1
+        mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
 
         # Mock VAE embed with proper shape handling
         def mock_embed(tid):
@@ -399,7 +413,11 @@ class TestMaskGiTSampler:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(1, 64, 32)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        vocab_size = 32
+        h, w, d = 8, 8, 1
+        mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -433,7 +451,11 @@ class TestMaskGiTSampler:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(1, 64, 32)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        vocab_size = 32
+        h, w, d = 8, 8, 1
+        mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -606,7 +628,11 @@ class TestEdgeCases:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(1, 64, 32)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        vocab_size = 32
+        h, w, d = 8, 8, 1
+        mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
         mock_vae.embed.return_value = torch.randn(1, 64, 4)
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
 
@@ -632,7 +658,10 @@ class TestEdgeCases:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(batch_size, seq_len, vocab_size)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 16), seq_len = 1024
+        h, w, d = 8, 8, 16
+        mock_transformer.return_value = torch.randn(batch_size, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -679,7 +708,10 @@ class TestEdgeCases:
         embed_dim = 4
         vocab_size = 32
 
-        mock_transformer.return_value = torch.randn(batch_size, seq_len, vocab_size)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        mock_transformer.return_value = torch.randn(batch_size, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -706,7 +738,11 @@ class TestEdgeCases:
             mock_transformer.device = torch.device('cpu')
             mock_vae.device = torch.device('cpu')
 
-            mock_transformer.return_value = torch.randn(1, 64, 32)
+            # Transformer returns spatial logits [B, vocab_size, H, W, D]
+            # For spatial shape (8, 8, 1), seq_len = 64
+            vocab_size = 32
+            h, w, d = 8, 8, 1
+            mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
 
             def mock_embed(tid):
                 B, K = tid.shape
@@ -737,8 +773,11 @@ class TestUnconditionalGeneration:
 
         # Create different logits for conditional vs unconditional calls
         # This allows us to verify both calls happen
-        logits_cond = torch.randn(batch_size, seq_len, vocab_size) * 0.5
-        logits_uncond = torch.randn(batch_size, seq_len, vocab_size) * 0.3
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits_cond = torch.randn(batch_size, vocab_size, h, w, d) * 0.5
+        logits_uncond = torch.randn(batch_size, vocab_size, h, w, d) * 0.3
 
         # Setup mock to return different values based on input
         call_count = [0]
@@ -788,7 +827,10 @@ class TestUnconditionalGeneration:
         batch_size, seq_len, vocab_size = 2, 16, 32
         embed_dim = 4
 
-        logits = torch.randn(batch_size, seq_len, vocab_size)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits = torch.randn(batch_size, vocab_size, h, w, d)
         mock_transformer.return_value = logits
         mock_transformer.device = torch.device('cpu')
 
@@ -825,7 +867,10 @@ class TestUnconditionalGeneration:
         batch_size, seq_len, vocab_size = 1, 64, 32
         embed_dim = 4
 
-        logits = torch.randn(batch_size, seq_len, vocab_size)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        h, w, d = 8, 8, 1
+        logits = torch.randn(batch_size, vocab_size, h, w, d)
         mock_transformer.return_value = logits
 
         def mock_embed(tid):
@@ -857,11 +902,14 @@ class TestUnconditionalGeneration:
         batch_size, seq_len, vocab_size = 2, 16, 32
 
         # Mock returns different logits for conditioned vs unconditioned
-        logits_high_conf = torch.zeros(batch_size, seq_len, vocab_size)
-        logits_high_conf[:, :, 0] = 10.0  # High confidence on token 0
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits_high_conf = torch.zeros(batch_size, vocab_size, h, w, d)
+        logits_high_conf[:, 0, :, :, :] = 10.0  # High confidence on token 0
 
-        logits_low_conf = torch.zeros(batch_size, seq_len, vocab_size)
-        logits_low_conf[:, :, 0] = 1.0  # Low confidence on token 0
+        logits_low_conf = torch.zeros(batch_size, vocab_size, h, w, d)
+        logits_low_conf[:, 0, :, :, :] = 1.0  # Low confidence on token 0
 
         call_log = []
 
@@ -913,8 +961,10 @@ class TestUnconditionalGeneration:
         batch_size, seq_len, vocab_size = 1, 16, 32
         embed_dim = 4
 
-        # Return deterministic logits
-        logits = torch.randn(batch_size, seq_len, vocab_size)
+        # Return deterministic logits - spatial format [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits = torch.randn(batch_size, vocab_size, h, w, d)
         mock_transformer.return_value = logits
 
         def mock_embed(tid):
@@ -962,7 +1012,10 @@ class TestNoGradDecorator:
         batch_size, seq_len, vocab_size = 2, 8, 16
         embed_dim = 4
 
-        logits = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (2, 2, 2), seq_len = 8
+        h, w, d = 2, 2, 2
+        logits = torch.randn(batch_size, vocab_size, h, w, d, requires_grad=True)
         mock_transformer.return_value = logits
 
         def mock_embed(tid):
@@ -990,7 +1043,11 @@ class TestNoGradDecorator:
         mock_transformer.device = torch.device('cpu')
         mock_vae.device = torch.device('cpu')
 
-        mock_transformer.return_value = torch.randn(1, 64, 32)
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (8, 8, 1), seq_len = 64
+        vocab_size = 32
+        h, w, d = 8, 8, 1
+        mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
 
         def mock_embed(tid):
             B, K = tid.shape
@@ -1046,9 +1103,13 @@ class TestGuidanceScaleParameter:
         # Track transformer calls to verify CFG formula is applied
         call_count = [0]
 
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+
         def mock_transformer_call(x, cond):
             call_count[0] += 1
-            return torch.randn(batch_size, seq_len, vocab_size)
+            return torch.randn(batch_size, vocab_size, h, w, d)
 
         mock_transformer.side_effect = mock_transformer_call
         mock_transformer.device = torch.device('cpu')
@@ -1086,9 +1147,13 @@ class TestGuidanceScaleParameter:
         # Track transformer calls
         call_count = [0]
 
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+
         def mock_transformer_call(x, cond):
             call_count[0] += 1
-            return torch.randn(batch_size, seq_len, vocab_size)
+            return torch.randn(batch_size, vocab_size, h, w, d)
 
         mock_transformer.side_effect = mock_transformer_call
         mock_transformer.device = torch.device('cpu')
@@ -1124,9 +1189,12 @@ class TestGuidanceScaleParameter:
         batch_size, seq_len, vocab_size = 2, 16, 32
         embed_dim = 4
 
-        # Create deterministic logits for verification
-        logits_cond = torch.ones(batch_size, seq_len, vocab_size) * 2.0
-        logits_uncond = torch.ones(batch_size, seq_len, vocab_size) * 1.0
+        # Create deterministic logits for verification - spatial format
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits_cond = torch.ones(batch_size, vocab_size, h, w, d) * 2.0
+        logits_uncond = torch.ones(batch_size, vocab_size, h, w, d) * 1.0
 
         call_log = []
 
@@ -1167,12 +1235,15 @@ class TestGuidanceScaleParameter:
         batch_size, seq_len, vocab_size = 1, 16, 32
         embed_dim = 4
 
-        # Create deterministic logits
-        logits_cond = torch.zeros(batch_size, seq_len, vocab_size)
-        logits_cond[:, :, 0] = 10.0  # High confidence on token 0
+        # Create deterministic logits - spatial format
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (4, 2, 2), seq_len = 16
+        h, w, d = 4, 2, 2
+        logits_cond = torch.zeros(batch_size, vocab_size, h, w, d)
+        logits_cond[:, 0, :, :, :] = 10.0  # High confidence on token 0
 
-        logits_uncond = torch.zeros(batch_size, seq_len, vocab_size)
-        logits_uncond[:, :, 1] = 8.0  # High confidence on token 1
+        logits_uncond = torch.zeros(batch_size, vocab_size, h, w, d)
+        logits_uncond[:, 1, :, :, :] = 8.0  # High confidence on token 1
 
         call_count = [0]
 
@@ -1258,10 +1329,16 @@ class TestTokenGenerationConsistency:
         mock_vae.device = torch.device('cpu')
 
         # Create deterministic logits with unique maximum per position
-        # This ensures predictable token selection
-        logits = torch.zeros(batch_size, seq_len, vocab_size)
-        for i in range(seq_len):
-            logits[:, i, i % vocab_size] = 10.0  # Make each position prefer different token
+        # Transformer returns spatial logits [B, vocab_size, H, W, D]
+        # For spatial shape (5, 5, 4), seq_len = 100
+        h, w, d = 5, 5, 4
+        logits = torch.zeros(batch_size, vocab_size, h, w, d)
+        # Make each spatial position prefer different token
+        for i in range(h):
+            for j in range(w):
+                for k in range(d):
+                    token_id = (i * w * d + j * d + k) % vocab_size
+                    logits[:, token_id, i, j, k] = 10.0
         mock_transformer.return_value = logits
 
         def mock_embed(tid):

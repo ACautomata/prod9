@@ -13,7 +13,7 @@ output_dir: "outputs/stage2"
 model:
   # Transformer decoder configuration
   transformer:
-    d_model: 192  # Latent token dimension (was latent_channels)
+    latent_dim: 4  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
     hidden_dim: 512
     cond_dim: 512
@@ -139,8 +139,10 @@ trainer:
   max_epochs: 50
 
   hardware:
-    accelerator: "gpu"
-    devices: 1
+    # Auto-detect accelerator and use all available devices
+    # Override in config for specific needs, e.g., devices: 1 for single GPU
+    accelerator: "auto"  # Options: "auto", "cpu", "gpu", "mps", "cuda", "tpu"
+    devices: "auto"       # Options: "auto", 1, 2, 4, [0, 1], etc.
     precision: "bf16-mixed"
 
   logging:

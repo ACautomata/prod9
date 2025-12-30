@@ -25,7 +25,7 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         num_heads = 4
 
         transformer = TransformerDecoder(
-            d_model=latent_channels,
+            latent_dim=latent_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,
@@ -71,7 +71,7 @@ class TestTransformerTrainingIntegration(unittest.TestCase):
         num_heads = 4
 
         transformer = TransformerDecoder(
-            d_model=latent_channels,
+            latent_dim=latent_channels,
             patch_size=patch_size,
             num_blocks=num_blocks,
             hidden_dim=hidden_dim,

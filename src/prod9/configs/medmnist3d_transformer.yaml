@@ -13,7 +13,7 @@ output_dir: ".output/medmnist3d_stage2"
 model:
   # Transformer decoder configuration
   transformer:
-    d_model: 3  # Latent token dimension (must equal len(levels) for FSQ)
+    latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
     hidden_dim: 256  # Reduced from 512 for smaller dataset
     cond_dim: 256  # Reduced from 512 for smaller dataset
@@ -120,9 +120,9 @@ trainer:
   max_epochs: 50
 
   hardware:
-    accelerator: "gpu"
-    devices: 1
-    precision: "bf16-mixed"
+    accelerator: "auto"  # auto, gpu, cpu, mps
+    devices: "auto"  # auto, 1, 2, 4, etc.
+    precision: "16-mixed"
 
   logging:
     log_every_n_steps: 10

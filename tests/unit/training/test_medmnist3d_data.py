@@ -940,3 +940,73 @@ class TestMedMNIST3DDataModuleStage2:
         assert dm.size == 64
         assert dm.batch_size == 8
         assert dm.cache_dir == "outputs/medmnist3d_encoded"
+
+    @patch("torch.save")
+    def test_pre_encode_data_handles_numpy_array_labels(
+        self, mock_save: MagicMock
+    ) -> None:
+        """Test _pre_encode_data handles both 0-d and 1-d numpy array labels."""
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+
+        mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
+        mock_autoencoder.eval.return_value = None
+        mock_autoencoder.encode.return_value = (
+            torch.randn(1, 4, 4, 4, 4),
+            torch.randn(1, 4, 4, 4, 4),
+        )
+        mock_autoencoder.quantize.return_value = torch.randint(0, 8, (1, 64))
+
+        # Create mock dataset with 0-d numpy array labels (10 items for 90% split)
+        class MockDatasetClassWith0DLabels:
+            def __init__(self, **kwargs):
+                self.data = [(np.random.rand(1, 4, 4, 4).astype(np.float32), np.array(i)) for i in range(10)]
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        dm = MedMNIST3DDataModuleStage2(autoencoder=mock_autoencoder)
+        dm.dataset_class = MockDatasetClassWith0DLabels
+
+        result = dm._pre_encode_data("train", "cache.pt")
+
+        # Should handle 0-d numpy arrays correctly
+        assert len(result) == 9
+        assert all(isinstance(item["label"], int) for item in result)
+
+    @patch("torch.save")
+    def test_pre_encode_data_handles_1d_numpy_array_labels(
+        self, mock_save: MagicMock
+    ) -> None:
+        """Test _pre_encode_data handles 1-d numpy array labels (like [5])."""
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+
+        mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
+        mock_autoencoder.eval.return_value = None
+        mock_autoencoder.encode.return_value = (
+            torch.randn(1, 4, 4, 4, 4),
+            torch.randn(1, 4, 4, 4, 4),
+        )
+        mock_autoencoder.quantize.return_value = torch.randint(0, 8, (1, 64))
+
+        # Create mock dataset with 1-d numpy array labels (10 items for 90% split)
+        class MockDatasetClassWith1DLabels:
+            def __init__(self, **kwargs):
+                self.data = [(np.random.rand(1, 4, 4, 4).astype(np.float32), np.array([i])) for i in range(10)]
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        dm = MedMNIST3DDataModuleStage2(autoencoder=mock_autoencoder)
+        dm.dataset_class = MockDatasetClassWith1DLabels
+
+        result = dm._pre_encode_data("train", "cache.pt")
+
+        # Should handle 1-d numpy arrays correctly using .item()
+        assert len(result) == 9
+        assert all(isinstance(item["label"], int) for item in result)

@@ -174,7 +174,7 @@ class TestTransformerSetup:
         """Test that setup() doesn't recreate transformer if already provided."""
         # Create a transformer with specific codebook_size
         custom_transformer = TransformerDecoder(
-            d_model=3,
+            latent_dim=3,
             patch_size=2,
             num_blocks=2,
             hidden_dim=64,

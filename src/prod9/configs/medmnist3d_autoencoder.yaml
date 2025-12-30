@@ -154,9 +154,9 @@ trainer:
 
   # Hardware
   hardware:
-    accelerator: "gpu"  # gpu, cpu, mps (Apple Silicon)
-    devices: 1
-    precision: "bf16-mixed"  # 32, 16, bf16
+    accelerator: "auto"  # auto, gpu, cpu, mps (Apple Silicon)
+    devices: "auto"  # auto, 1, 2, 4, etc.
+    precision: "16-mixed"  # 32, 16, bf16
 
   # Logging
   logging:

@@ -17,7 +17,7 @@ class TestTransformer:
     def transformer(self, device: torch.device) -> TransformerDecoder:
         """Create transformer instance for testing."""
         transformer = TransformerDecoder(
-            d_model=4,
+            latent_dim=4,
             patch_size=2,
             num_blocks=4,
             hidden_dim=256,
@@ -101,7 +101,7 @@ class TestTransformer:
         """Test with different patch sizes"""
         for patch_size in [1, 2, 4]:
             transformer = TransformerDecoder(
-                d_model=4,
+                latent_dim=4,
                 patch_size=patch_size,
                 num_blocks=2,
                 hidden_dim=128,
@@ -125,7 +125,7 @@ class TestTransformer:
         """Test with different numbers of transformer blocks"""
         for num_blocks in [1, 2, 4, 6]:
             transformer = TransformerDecoder(
-                d_model=4,
+                latent_dim=4,
                 patch_size=2,
                 num_blocks=num_blocks,
                 hidden_dim=128,
@@ -147,7 +147,7 @@ class TestTransformer:
         """Test with different hidden dimensions"""
         for hidden_dim in [64, 128, 256, 512]:
             transformer = TransformerDecoder(
-                d_model=4,
+                latent_dim=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=hidden_dim,
@@ -169,7 +169,7 @@ class TestTransformer:
         """Test with different numbers of attention heads"""
         for num_heads in [1, 2, 4, 8]:
             transformer = TransformerDecoder(
-                d_model=4,
+                latent_dim=4,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,
@@ -218,7 +218,7 @@ class TestTransformer:
         """Test with different latent channels (both input and condition use same channels)"""
         for latent_ch in [(1), (2), (4), (8)]:
             transformer = TransformerDecoder(
-                d_model=latent_ch,
+                latent_dim=latent_ch,
                 patch_size=2,
                 num_blocks=2,
                 hidden_dim=128,

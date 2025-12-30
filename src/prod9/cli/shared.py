@@ -183,15 +183,16 @@ def create_trainer(
 
     # Determine accelerator
     device = get_device()
-    accelerator = hardware_config.get("accelerator")
-    if accelerator is None:
+    accelerator = hardware_config.get("accelerator", "auto")
+    # Override with auto-detection if not explicitly set
+    if accelerator == "auto":
         accelerator = "gpu" if device.type in ["cuda", "mps"] else "cpu"
 
     # Create trainer
     trainer = pl.Trainer(
         max_epochs=trainer_config.get("max_epochs", 100),
         accelerator=accelerator,
-        devices=hardware_config.get("devices", 1),
+        devices=hardware_config.get("devices", "auto"),
         precision=hardware_config.get("precision", 32),
         callbacks=callbacks,
         logger=logger,

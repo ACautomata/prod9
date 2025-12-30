@@ -82,7 +82,7 @@ class TransformerModelConfig(BaseModel):
     """
 
     # REQUIRED: Core transformer architecture - no defaults
-    d_model: int = Field(ge=1, description="Latent token dimension (was latent_channels)")
+    latent_dim: int = Field(ge=1, description="Latent channels (must equal len(levels) for FSQ)")
     cond_dim: int = Field(ge=1, description="Transformer cond hidden dimension")
     hidden_dim: int = Field(ge=1, description="Transformer hidden dimension")
     num_heads: int = Field(ge=1, description="Number of attention heads")
@@ -299,10 +299,13 @@ class CallbacksConfig(BaseModel):
 # =============================================================================
 
 class HardwareConfig(BaseModel):
-    """Trainer hardware configuration."""
+    """Trainer hardware configuration.
 
-    accelerator: str = Field(default="mps")
-    devices: int = Field(default=1, ge=1)
+    Supports both string values like "auto" and explicit integers.
+    """
+
+    accelerator: Union[str, int] = Field(default="auto")
+    devices: Union[str, int] = Field(default="auto")
     precision: Union[str, int] = Field(default=32)
 
 

@@ -1,11 +1,15 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-import torch
 import random
 import math
 
 from prod9.generator.transformer import TransformerDecoder
+from prod9.generator.utils import (
+    spatial_to_sequence,
+    sequence_to_spatial,
+    get_spatial_shape_from_sequence,
+)
 
 
 class MaskGiTSampler:
@@ -42,7 +46,10 @@ class MaskGiTSampler:
         Reference: Ho and Salimans, "Classifier-Free Diffusion Guidance", 2022
 
         Args:
-            cond: Conditioning tensor. Use zero tensor for unconditional generation.
+            x: Token sequence tensor [B, S, d]
+            cond: Conditioning tensor [B, C, H, W, D] (spatial) or [B, S, d] (sequence)
+            uncond: Unconditional conditioning tensor (same shape as cond)
+            last_indices: Indices of remaining masked tokens [B, num_remaining]
             guidance_scale: Optional override for self.guidance_scale
                            Use 0.0 for unconditional, 1.0+ for stronger guidance
         """
@@ -51,9 +58,41 @@ class MaskGiTSampler:
         # Use provided guidance_scale or fall back to default
         w = guidance_scale if guidance_scale is not None else self.guidance_scale
 
+        # Determine input format and handle shape conversion
+        if cond.dim() == 5:  # Spatial format [B, C, H, W, D]
+            # Get spatial shape from condition
+            spatial_shape = cond.shape[2:]  # (H, W, D)
+
+            # Convert input sequence to spatial format for transformer
+            x_spatial = sequence_to_spatial(x, spatial_shape)
+
+            # Transformer expects spatial inputs
+            logits_cond = transformer(x_spatial, cond)
+            logits_uncond = transformer(x_spatial, uncond)
+
+            # Convert transformer outputs from spatial to sequence format
+            # logits shape: [B, codebook_size, H, W, D] -> [B, S, codebook_size]
+            logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
+            logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
+
+        else:  # Sequence format [B, S, d] (for backward compatibility)
+            # Assume cond and uncond are already sequence format
+            # Transformer expects spatial format, so we need spatial shape
+            # Try to infer spatial shape (assuming cubic)
+            spatial_shape = get_spatial_shape_from_sequence(x)
+            x_spatial = sequence_to_spatial(x, spatial_shape)
+            cond_spatial = sequence_to_spatial(cond, spatial_shape)
+            uncond_spatial = sequence_to_spatial(uncond, spatial_shape)
+
+            logits_cond = transformer(x_spatial, cond_spatial)
+            logits_uncond = transformer(x_spatial, uncond_spatial)
+
+            logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
+            logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
+
         # Classifier-Free Guidance formula
-        logits = (1 + w) * transformer(x, cond) - w * \
-            transformer(x, uncond)   # [B,S,V]
+        logits = (1 + w) * logits_cond_sequence - w * logits_uncond_sequence  # [B, S, V]
+
         conf = logits.softmax(-1).amax(-1)                     # [B,S]
         # [B,S] 预测 token id
         token_id = logits.argmax(-1)

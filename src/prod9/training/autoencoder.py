@@ -107,11 +107,9 @@ class AutoencoderLightning(pl.LightningModule):
             discriminator_iter_start=discriminator_iter_start,
         )
 
-        # Metrics for validation
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric().to(device)
+        self.lpips = LPIPSMetric()
 
         # Sliding window config (for validation only)
         self.use_sliding_window = use_sliding_window

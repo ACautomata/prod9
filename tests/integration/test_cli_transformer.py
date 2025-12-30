@@ -28,7 +28,7 @@ class TestTransformerCLI(unittest.TestCase):
             "autoencoder_path": os.path.join(self.temp_dir, "autoencoder.pt"),
             "model": {
                 "transformer": {
-                    "d_model": 64,
+                    "latent_dim": 64,
                     "patch_size": 2,
                     "num_blocks": 2,
                     "hidden_dim": 64,

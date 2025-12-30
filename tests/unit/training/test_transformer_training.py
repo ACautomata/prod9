@@ -314,15 +314,12 @@ class TestTrainingStep(unittest.TestCase):
             autoencoder_path=self.checkpoint_path,
         )
 
-        # Mock scheduler to avoid shape issues
-        model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1]]))
-        model.scheduler.generate_pair = MagicMock(return_value=(torch.randn(1, 1, 512), torch.tensor([0, 1])))
-
+        # Use correct spatial format for batch data
         batch = {
-            "cond_latent": torch.randn(1, 1, 512),  # Changed to match scheduler expectations
+            "cond_latent": torch.randn(1, 4, 8, 8, 8),
             "cond_idx": torch.tensor([0]),
-            "target_latent": torch.randn(1, 1, 512),
-            "target_indices": torch.randint(0, 16, (2,)),
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "target_indices": torch.randint(0, 16, (1, 512)),
         }
 
         with self.assertRaises(RuntimeError) as ctx:
@@ -350,9 +347,10 @@ class TestTrainingStep(unittest.TestCase):
         # Mock scheduler to return properly shaped tensors
         # select_indices should return [batch, num_masked]
         model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1, 2, 3]]))
-        # generate_pair should return (conditioned_tokens, target_tokens)
+        # generate_pair should return (z_masked, label) in sequence format
+        # z_masked: [B, S, d] where S = H*W*D = 512, d = 4
         model.scheduler.generate_pair = MagicMock(
-            return_value=(torch.randint(0, 16, (1, 1, 8, 8, 8)), torch.randint(0, 16, (1, 512)))
+            return_value=(torch.randn(1, 512, 4), torch.randint(0, 16, (1, 4)))
         )
 
         batch = {
@@ -388,8 +386,10 @@ class TestTrainingStep(unittest.TestCase):
 
         # Mock scheduler
         model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1, 2, 3]]))
+        # generate_pair should return (z_masked, label) in sequence format
+        # z_masked: [B, S, d] where S = H*W*D = 512, d = 4
         model.scheduler.generate_pair = MagicMock(
-            return_value=(torch.randint(0, 16, (1, 1, 8, 8, 8)), torch.randint(0, 16, (1, 512)))
+            return_value=(torch.randn(1, 512, 4), torch.randint(0, 16, (1, 4)))
         )
 
         batch = {

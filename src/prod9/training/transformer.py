@@ -17,6 +17,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.generator.utils import spatial_to_sequence, sequence_to_spatial
 from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 
 
@@ -159,7 +160,8 @@ class TransformerLightning(pl.LightningModule):
 
         # Load checkpoint weights
         # weights_only=False because we need to load custom classes (MONAI)
-        checkpoint = torch.load(self.autoencoder_path, map_location='cpu', weights_only=False)
+        # Let Lightning handle device placement - don't specify map_location
+        checkpoint = torch.load(self.autoencoder_path, weights_only=False)
 
         # Check for config
         if "config" not in checkpoint:
@@ -179,7 +181,7 @@ class TransformerLightning(pl.LightningModule):
         if self.transformer is None:
             from prod9.generator.transformer import TransformerDecoder
             self.transformer = TransformerDecoder(
-                d_model=self._transformer_config["latent_channels"],
+                latent_dim=self._transformer_config["latent_channels"],
                 patch_size=self._transformer_config["patch_size"],
                 num_blocks=self._transformer_config["num_blocks"],
                 hidden_dim=self._transformer_config["hidden_dim"],
@@ -204,6 +206,16 @@ class TransformerLightning(pl.LightningModule):
             sw_batch_size=self.sw_batch_size,
         )
         self.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
+
+    def on_train_start(self) -> None:
+        """Update autoencoder wrapper device after Lightning moves everything.
+
+        This is called after Lightning has moved all nn.Module attributes to the
+        correct device. We need to update the wrapper's sw_config.device to match.
+        """
+        if self.autoencoder is not None:
+            # Update the wrapper's sw_config.device to match actual device
+            self.autoencoder.sw_config.device = self.device
 
     def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -296,14 +308,35 @@ class TransformerLightning(pl.LightningModule):
             cond[drop_mask] = uncond[drop_mask]
 
         # Generate masked pairs via MaskGiTScheduler
+        # Convert target_latent from spatial to sequence format for scheduler
+        target_sequence, spatial_shape = spatial_to_sequence(target_latent)
+
         step = random.randint(1, self.num_steps)
-        mask_indices = self.scheduler.select_indices(target_latent, step)
-        masked_tokens, label_indices = self.scheduler.generate_pair(target_latent, mask_indices)
+        mask_indices = self.scheduler.select_indices(target_sequence, step)
+        masked_tokens_sequence, _ = self.scheduler.generate_pair(target_sequence, mask_indices)
+
+        # Get token indices for masked positions from target_indices
+        # target_indices shape: [B, S] where S = H*W*D
+        # mask_indices shape: [B, num_masked]
+        # Gather token indices for masked positions
+        label_indices = torch.gather(
+            target_indices,
+            dim=1,
+            index=mask_indices[:, :, 0] if mask_indices.dim() == 3 else mask_indices
+        )
+
+        # Convert masked tokens back to spatial format for transformer
+        masked_tokens_spatial = sequence_to_spatial(
+            masked_tokens_sequence,
+            spatial_shape,
+            patch_size=self._transformer_config["patch_size"],
+            validate_patch_size=True,
+        )
 
         # Forward through transformer
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
-        predicted_logits = self.transformer(masked_tokens, cond)
+        predicted_logits = self.transformer(masked_tokens_spatial, cond)
 
         # Compute cross-entropy loss on masked positions only
         b, vocab_size, h, w, d = predicted_logits.shape
@@ -312,14 +345,35 @@ class TransformerLightning(pl.LightningModule):
         # Reshape logits: [B, codebook_size, H, W, D] -> [B, codebook_size, H*W*D]
         predicted_flat = predicted_logits.view(b, vocab_size, seq_len)
 
-        # Cross-entropy per token
+        # Create target tensor with ignore_index for non-masked positions
+        # target_indices shape: [B, seq_len] (flattened token indices)
+        # mask_indices shape: [B, num_masked]
+        # label_indices shape: [B, num_masked] (token indices for masked positions)
+
+        # Initialize target with ignore_index
+        ignore_index = -100  # Standard ignore index for cross_entropy
+        target = torch.full((b, seq_len), ignore_index,
+                           device=predicted_flat.device, dtype=torch.long)
+
+        # Fill masked positions with token indices
+        # Ensure mask_indices and label_indices have correct shapes
+        if mask_indices.dim() == 3:
+            mask_indices_flat = mask_indices[:, :, 0]  # [B, num_masked]
+        else:
+            mask_indices_flat = mask_indices  # [B, num_masked]
+
+        # Scatter label_indices into target at masked positions
+        target.scatter_(dim=1, index=mask_indices_flat, src=label_indices)
+
+        # Cross-entropy loss (automatically ignores positions with ignore_index)
         loss_per_token = nn.functional.cross_entropy(
             predicted_flat,
-            label_indices,
-        )  # [B, seq_len]
+            target,
+            ignore_index=ignore_index,
+        )  # Scalar loss (mean over non-ignored positions)
 
-        # Normalize by number of masked tokens
-        loss = loss_per_token / label_indices.shape[1]
+        # Normalize by number of masked tokens (already accounted by ignore_index)
+        loss = loss_per_token
 
         # Log loss
         self.log("train/loss", loss, prog_bar=True)

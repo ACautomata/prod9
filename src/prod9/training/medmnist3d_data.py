@@ -474,11 +474,13 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                 indices_tensor = self.autoencoder.quantize(latent)
 
                 # Store label index (not embedding) - embedding will be added by MaskGiTConditionGenerator
+                # Convert numpy array to Python int (handle both 0-d and multi-dimensional arrays)
+                label_int = int(label) if np.ndim(label) == 0 else int(label.item())
                 encoded_data.append(
                     {
                         "latent": latent.squeeze(0),  # Remove batch dimension
                         "indices": indices_tensor,
-                        "label": int(label),
+                        "label": label_int,
                     }
                 )
 

@@ -7,7 +7,7 @@ from .modules import AdaLNZeroBlock, SinCosPosEmbed
 class TransformerDecoder(nn.Module):
     def __init__(
         self,
-        d_model,
+        latent_dim,
         patch_size,
         num_blocks,
         hidden_dim,
@@ -19,14 +19,15 @@ class TransformerDecoder(nn.Module):
     ):
         super().__init__()
         self.patch_size = patch_size
+        self.latent_dim = latent_dim
         self.input_patch_proj = nn.Conv3d(
-            d_model,
+            latent_dim,
             hidden_dim,
             kernel_size=patch_size,
             stride=patch_size
         )
         self.cond_patch_proj = nn.Conv3d(
-            d_model,
+            latent_dim,
             hidden_dim,
             kernel_size=patch_size,
             stride=patch_size
@@ -46,10 +47,10 @@ class TransformerDecoder(nn.Module):
         ])
         self.unpatch_proj = nn.Linear(
             hidden_dim,
-            patch_size ** 3 * d_model
+            patch_size ** 3 * latent_dim
         )
         self.out_proj = nn.Conv3d(
-            d_model,
+            latent_dim,
             codebook_size,
             kernel_size=1,
             padding=0,
