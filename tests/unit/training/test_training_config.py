@@ -4,18 +4,18 @@ Tests for training configuration module.
 Tests environment variable replacement and config loading functionality.
 """
 import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from prod9.training.config import load_config
-else:
-    try:
-        from prod9.training.config import load_config
-    except ImportError:
-        # Config module not implemented yet - skip tests
-        load_config = None  # type: ignore[assignment]
+from prod9.training.config import (
+    load_config,
+    save_config,
+    load_validated_config,
+    get_default_config,
+)
 
 
 class TestTrainingConfig(unittest.TestCase):
@@ -23,9 +23,6 @@ class TestTrainingConfig(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures."""
-        if load_config is None:
-            self.skipTest("training.config module not implemented yet")
-
         # Save original environment
         self.original_env = os.environ.copy()
 
@@ -229,6 +226,220 @@ num_epochs: 100
 
         # Cleanup
         config_file.unlink()
+
+
+class TestSaveConfig(unittest.TestCase):
+    """Test suite for save_config function."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_save_config_creates_directory(self):
+        """Test that save_config creates output directory if needed."""
+        config = {"learning_rate": 0.001, "batch_size": 8}
+        output_path = self.temp_dir / "nested" / "dir" / "config.yaml"
+
+        save_config(config, str(output_path))
+
+        self.assertTrue(output_path.parent.exists())
+        self.assertTrue(output_path.exists())
+
+    def test_save_config_writes_valid_yaml(self):
+        """Test that save_config writes valid YAML that can be read back."""
+        original_config = {
+            "model": {
+                "levels": [6, 6, 6, 5],
+                "channels": [64, 128, 256],
+            },
+            "training": {
+                "learning_rate": 0.001,
+                "batch_size": 8,
+            },
+        }
+        output_path = self.temp_dir / "config.yaml"
+
+        save_config(original_config, str(output_path))
+
+        # Read back and verify
+        loaded_config = load_config(str(output_path))
+
+        self.assertEqual(loaded_config, original_config)
+
+    def test_save_config_preserves_key_order(self):
+        """Test that save_config preserves dictionary key order."""
+        config = {"z": 1, "a": 2, "m": 3}
+        output_path = self.temp_dir / "config.yaml"
+
+        save_config(config, str(output_path))
+
+        # Read the file content
+        content = output_path.read_text()
+
+        # Check that keys appear in original order (sort_keys=False)
+        # The content should have z before a before m
+        z_pos = content.find("z")
+        a_pos = content.find("a")
+        m_pos = content.find("m")
+
+        self.assertLess(z_pos, a_pos)
+        self.assertLess(a_pos, m_pos)
+
+
+class TestLoadValidatedConfig(unittest.TestCase):
+    """Test suite for load_validated_config function."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.original_env = os.environ.copy()
+        self.temp_dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        os.environ.clear()
+        os.environ.update(self.original_env)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_load_validated_config_autoencoder_stage(self):
+        """Test loading and validating autoencoder config."""
+        # Create a minimal valid autoencoder config
+        config_file = self.temp_dir / "autoencoder.yaml"
+        config_file.write_text("""
+output_dir: outputs/stage1
+autoencoder_export_path: outputs/autoencoder.pt
+data:
+  data_dir: /data
+  dataset_name: brats
+  batch_size: 2
+  roi_size: [32, 32, 32]
+model:
+  spatial_dims: 3
+  in_channels: 1
+  out_channels: 1
+  levels: [2, 2, 2, 2]
+  num_channels: [32, 64]
+  attention_levels: [false, false, false, true]
+training:
+  learning_rate: 0.0001
+loss:
+  reconstruction_weight: 1.0
+""")
+
+        config = load_validated_config(str(config_file), stage="autoencoder")
+
+        self.assertIsInstance(config, dict)
+        self.assertIn("output_dir", config)
+        self.assertEqual(config["output_dir"], "outputs/stage1")
+        self.assertIn("data", config)
+        self.assertIn("model", config)
+
+    def test_load_validated_config_transformer_stage(self):
+        """Test loading and validating transformer config."""
+        config_file = self.temp_dir / "transformer.yaml"
+        config_file.write_text("""
+output_dir: outputs/stage2
+autoencoder_path: outputs/autoencoder.pt
+data:
+  data_dir: /data
+  dataset_name: brats
+  batch_size: 2
+  roi_size: [32, 32, 32]
+model:
+  latent_channels: 4
+  num_classes: 8
+  patch_size: 2
+  num_blocks: 4
+  hidden_dim: 128
+training:
+  learning_rate: 0.0001
+""")
+
+        config = load_validated_config(str(config_file), stage="transformer")
+
+        self.assertIsInstance(config, dict)
+        self.assertIn("output_dir", config)
+        self.assertEqual(config["output_dir"], "outputs/stage2")
+        self.assertIn("autoencoder_path", config)
+
+    def test_load_validated_config_invalid_stage_raises_error(self):
+        """Test that invalid stage name raises ValueError."""
+        config_file = self.temp_dir / "test.yaml"
+        config_file.write_text("""
+output_dir: outputs/test
+data:
+  data_dir: /data
+""")
+
+        with self.assertRaises(ValueError) as context:
+            load_validated_config(str(config_file), stage="invalid_stage")
+
+        self.assertIn("Unknown stage", str(context.exception))
+
+    def test_load_validated_config_with_env_vars(self):
+        """Test load_validated_config with environment variable substitution."""
+        os.environ["TEST_DATA_DIR"] = "/custom/data"
+
+        config_file = self.temp_dir / "with_env.yaml"
+        config_file.write_text("""
+output_dir: outputs/stage1
+autoencoder_export_path: outputs/autoencoder.pt
+data:
+  data_dir: ${TEST_DATA_DIR}
+  batch_size: 2
+  roi_size: [32, 32, 32]
+model:
+  spatial_dims: 3
+  in_channels: 1
+  out_channels: 1
+  levels: [2, 2, 2, 2]
+  num_channels: [32, 64]
+  attention_levels: [false, false, false, true]
+training:
+  learning_rate: 0.0001
+loss:
+  reconstruction_weight: 1.0
+""")
+
+        config = load_validated_config(str(config_file), stage="autoencoder")
+
+        self.assertEqual(config["data"]["data_dir"], "/custom/data")
+
+
+class TestGetDefaultConfig(unittest.TestCase):
+    """Test suite for get_default_config function."""
+
+    def test_get_default_config_autoencoder(self):
+        """Test getting default config for autoencoder stage."""
+        config = get_default_config(stage="autoencoder")
+
+        self.assertIsInstance(config, dict)
+        self.assertIn("output_dir", config)
+        self.assertIn("autoencoder_export_path", config)
+        self.assertIn("data", config)
+        self.assertEqual(config["output_dir"], "outputs/stage1")
+        self.assertEqual(config["autoencoder_export_path"], "outputs/autoencoder_final.pt")
+
+    def test_get_default_config_transformer(self):
+        """Test getting default config for transformer stage."""
+        config = get_default_config(stage="transformer")
+
+        self.assertIsInstance(config, dict)
+        self.assertIn("output_dir", config)
+        self.assertIn("autoencoder_path", config)
+        self.assertIn("data", config)
+        self.assertEqual(config["output_dir"], "outputs/stage2")
+        self.assertEqual(config["autoencoder_path"], "outputs/autoencoder_final.pt")
+
+    def test_get_default_config_invalid_stage_raises_error(self):
+        """Test that invalid stage name raises ValueError."""
+        with self.assertRaises(ValueError) as context:
+            get_default_config(stage="invalid_stage")
+
+        self.assertIn("Unknown stage", str(context.exception))
 
 
 if __name__ == '__main__':

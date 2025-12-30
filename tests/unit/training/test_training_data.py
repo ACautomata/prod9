@@ -8,35 +8,19 @@ BraTSDataModuleStage2 (transformer training).
 import os
 import unittest
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from unittest.mock import Mock, MagicMock, patch
 
 import torch
 import numpy as np
 
-if TYPE_CHECKING:
-    from prod9.training.brats_data import (
-        BraTSDataModuleStage1,
-        BraTSDataModuleStage2,
-        _RandomModalityDataset,
-        _PreEncodedDataset,
-        PreEncodedSample,
-    )  # type: ignore[attr-defined]
-else:
-    try:
-        from prod9.training.brats_data import (
-            BraTSDataModuleStage1,
-            BraTSDataModuleStage2,
-            _RandomModalityDataset,
-            _PreEncodedDataset,
-            PreEncodedSample,
-        )
-    except ImportError:
-        # Data module not implemented yet - skip tests
-        BraTSDataModuleStage1 = None  # type: ignore[assignment]
-        BraTSDataModuleStage2 = None  # type: ignore[assignment]
-        _RandomModalityDataset = None  # type: ignore[assignment]
-        _PreEncodedDataset = None  # type: ignore[assignment]
+from prod9.training.brats_data import (
+    BraTSDataModuleStage1,
+    BraTSDataModuleStage2,
+    _RandomModalityDataset,
+    _PreEncodedDataset,
+    PreEncodedSample,
+)
 
 
 class TestBraTSDataModuleStage1(unittest.TestCase):
@@ -44,9 +28,6 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures."""
-        if BraTSDataModuleStage1 is None:
-            self.skipTest("BraTSDataModuleStage1 not implemented yet")
-
         # Create temporary data directory structure
         self.temp_dir = Path(__file__).parent / "temp_test_data"
         self.temp_dir.mkdir(exist_ok=True)
@@ -567,6 +548,744 @@ class TestPreEncodedDatasetUnconditional(unittest.TestCase):
         sample: PreEncodedSample = dataset[0]
         self.assertIn("cond_latent", sample)
         self.assertIn("target_latent", sample)
+
+
+class TestGetBratsFiles(unittest.TestCase):
+    """Test suite for _get_brats_files helper function."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(__file__).parent / "temp_test_files"
+        self.temp_dir.mkdir(exist_ok=True)
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        if self.temp_dir.exists():
+            import shutil
+            shutil.rmtree(self.temp_dir)
+
+    def test_get_brats_files_success(self):
+        """Test successful file discovery for all modalities."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Create patient directory with all modality files
+        patient_dir = self.temp_dir / "BraTS2023__patient_001"
+        patient_dir.mkdir(exist_ok=True)
+
+        for modality in ["t1", "t1ce", "t2", "flair"]:
+            filename = f"BraTS2023__patient_001_{modality}.nii.gz"
+            (patient_dir / filename).touch()
+
+        # Add segmentation
+        (patient_dir / "BraTS2023__patient_001_seg.nii.gz").touch()
+
+        result = _get_brats_files(str(self.temp_dir), "BraTS2023__patient_001")
+
+        # Verify all modalities are present
+        self.assertIn("T1", result)
+        self.assertIn("T1ce", result)
+        self.assertIn("T2", result)
+        self.assertIn("FLAIR", result)
+        self.assertIn("seg", result)
+
+    def test_get_brats_files_missing_patient_directory(self):
+        """Test FileNotFoundError when patient directory doesn't exist."""
+        from prod9.training.brats_data import _get_brats_files
+
+        with self.assertRaises(FileNotFoundError) as ctx:
+            _get_brats_files(str(self.temp_dir), "nonexistent_patient")
+
+        self.assertIn("Patient directory not found", str(ctx.exception))
+
+    def test_get_brats_files_missing_modality_file(self):
+        """Test FileNotFoundError when modality file is missing."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Create patient directory with only T1
+        patient_dir = self.temp_dir / "BraTS2023__patient_002"
+        patient_dir.mkdir(exist_ok=True)
+        (patient_dir / "BraTS2023__patient_002_t1.nii.gz").touch()
+
+        with self.assertRaises(FileNotFoundError) as ctx:
+            _get_brats_files(str(self.temp_dir), "BraTS2023__patient_002")
+
+        self.assertIn("File not found", str(ctx.exception))
+
+    def test_get_brats_files_without_segmentation(self):
+        """Test file discovery when segmentation is optional."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Create patient directory without segmentation
+        patient_dir = self.temp_dir / "BraTS2023__patient_003"
+        patient_dir.mkdir(exist_ok=True)
+
+        for modality in ["t1", "t1ce", "t2", "flair"]:
+            filename = f"BraTS2023__patient_003_{modality}.nii.gz"
+            (patient_dir / filename).touch()
+
+        result = _get_brats_files(str(self.temp_dir), "BraTS2023__patient_003")
+
+        # Segmentation should not be present
+        self.assertNotIn("seg", result)
+        # But modalities should be
+        self.assertIn("T1", result)
+
+
+class TestSingleModalityDataset(unittest.TestCase):
+    """Test suite for _SingleModalityDataset."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(__file__).parent / "temp_single_modality"
+        self.temp_dir.mkdir(exist_ok=True)
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        if self.temp_dir.exists():
+            import shutil
+            shutil.rmtree(self.temp_dir)
+
+    def test_dataset_initialization(self):
+        """Test _SingleModalityDataset initialization."""
+        from prod9.training.brats_data import _SingleModalityDataset
+
+        data_files = [{"T1": "/path/to/t1.nii.gz"}]
+        mock_transforms = MagicMock()
+
+        dataset = _SingleModalityDataset(
+            data_files=data_files,
+            modality="T1",
+            transforms=mock_transforms,
+        )
+
+        self.assertEqual(dataset.data_files, data_files)
+        self.assertEqual(dataset.modality, "T1")
+        self.assertEqual(dataset.transforms, mock_transforms)
+
+    def test_dataset_length(self):
+        """Test __len__ returns correct length."""
+        from prod9.training.brats_data import _SingleModalityDataset
+
+        data_files = [{"T1": f"/path/to/t1_{i}.nii.gz"} for i in range(5)]
+        mock_transforms = MagicMock()
+
+        dataset = _SingleModalityDataset(
+            data_files=data_files,
+            modality="T1",
+            transforms=mock_transforms,
+        )
+
+        self.assertEqual(len(dataset), 5)
+
+    @patch('prod9.training.brats_data.Compose')
+    def test_dataset_getitem(self, mock_compose):
+        """Test __getitem__ loads and transforms data."""
+        from prod9.training.brats_data import _SingleModalityDataset
+
+        data_files = [{"T1": "/path/to/t1.nii.gz"}]
+        mock_transforms = MagicMock()
+        mock_transforms.return_value = {"image": torch.randn(1, 1, 32, 32, 32)}
+
+        dataset = _SingleModalityDataset(
+            data_files=data_files,
+            modality="T1",
+            transforms=mock_transforms,
+        )
+
+        result = dataset[0]
+
+        self.assertIn("image", result)
+        mock_transforms.assert_called_once()
+
+
+class TestAllModalitiesDataset(unittest.TestCase):
+    """Test suite for _AllModalitiesDataset."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(__file__).parent / "temp_all_modalities"
+        self.temp_dir.mkdir(exist_ok=True)
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        if self.temp_dir.exists():
+            import shutil
+            shutil.rmtree(self.temp_dir)
+
+    def test_dataset_initialization(self):
+        """Test _AllModalitiesDataset initialization."""
+        from prod9.training.brats_data import _AllModalitiesDataset
+
+        data_files = [
+            {"T1": "/t1.nii.gz", "T1ce": "/t1ce.nii.gz", "T2": "/t2.nii.gz", "FLAIR": "/flair.nii.gz"}
+        ]
+        mock_transforms = MagicMock()
+
+        dataset = _AllModalitiesDataset(
+            data_files=data_files,
+            transforms=mock_transforms,
+        )
+
+        self.assertEqual(dataset.data_files, data_files)
+        self.assertEqual(dataset.transforms, mock_transforms)
+
+    def test_dataset_length(self):
+        """Test __len__ returns correct length."""
+        from prod9.training.brats_data import _AllModalitiesDataset
+
+        data_files = [
+            {"T1": f"/t1_{i}.nii.gz", "T1ce": f"/t1ce_{i}.nii.gz", "T2": f"/t2_{i}.nii.gz", "FLAIR": f"/flair_{i}.nii.gz"}
+            for i in range(3)
+        ]
+        mock_transforms = MagicMock()
+
+        dataset = _AllModalitiesDataset(
+            data_files=data_files,
+            transforms=mock_transforms,
+        )
+
+        self.assertEqual(len(dataset), 3)
+
+    @patch('prod9.training.brats_data.Compose')
+    def test_dataset_getitem(self, mock_compose):
+        """Test __getitem__ loads and transforms all modalities."""
+        from prod9.training.brats_data import _AllModalitiesDataset
+
+        data_files = [
+            {"T1": "/t1.nii.gz", "T1ce": "/t1ce.nii.gz", "T2": "/t2.nii.gz", "FLAIR": "/flair.nii.gz"}
+        ]
+        mock_transforms = MagicMock()
+        mock_transforms.return_value = {
+            "T1": torch.randn(1, 1, 32, 32, 32),
+            "T1ce": torch.randn(1, 1, 32, 32, 32),
+            "T2": torch.randn(1, 1, 32, 32, 32),
+            "FLAIR": torch.randn(1, 1, 32, 32, 32),
+        }
+
+        dataset = _AllModalitiesDataset(
+            data_files=data_files,
+            transforms=mock_transforms,
+        )
+
+        result = dataset[0]
+
+        # Should contain all modalities
+        self.assertIn("T1", result)
+        self.assertIn("T1ce", result)
+        self.assertIn("T2", result)
+        self.assertIn("FLAIR", result)
+
+
+class TestBraTSDataModuleStage1FromConfig(unittest.TestCase):
+    """Test suite for BraTSDataModuleStage1.from_config method."""
+
+    def test_from_config_with_all_parameters(self):
+        """Test from_config with all config parameters."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+                "batch_size": 4,
+                "num_workers": 2,
+                "cache_rate": 0.8,
+                "roi_size": [64, 64, 64],
+                "train_val_split": 0.9,
+                "modalities": ["T1", "T2"],
+                "preprocessing": {
+                    "spacing": [1.5, 1.5, 1.5],
+                    "orientation": "LPS",
+                    "intensity_a_min": 10.0,
+                    "intensity_a_max": 400.0,
+                    "intensity_b_min": 0.0,
+                    "intensity_b_max": 1.0,
+                    "clip": False,
+                },
+                "augmentation": {
+                    "flip_prob": 0.3,
+                    "flip_axes": [0, 1],
+                    "rotate_prob": 0.2,
+                    "rotate_max_k": 2,
+                    "rotate_axes": [1, 2],
+                    "shift_intensity_prob": 0.4,
+                    "shift_intensity_offset": 0.2,
+                },
+            },
+        }
+
+        dm = BraTSDataModuleStage1.from_config(config)
+
+        self.assertEqual(dm.data_dir, "/fake/data")
+        self.assertEqual(dm.batch_size, 4)
+        self.assertEqual(dm.num_workers, 2)
+        self.assertEqual(dm.cache_rate, 0.8)
+        self.assertEqual(dm.roi_size, (64, 64, 64))
+        self.assertEqual(dm.train_val_split, 0.9)
+        self.assertEqual(dm.modalities, ["T1", "T2"])
+        self.assertEqual(dm.spacing, (1.5, 1.5, 1.5))
+        self.assertEqual(dm.orientation, "LPS")
+        self.assertEqual(dm.intensity_a_min, 10.0)
+        self.assertEqual(dm.intensity_a_max, 400.0)
+        self.assertEqual(dm.intensity_b_min, 0.0)
+        self.assertEqual(dm.intensity_b_max, 1.0)
+        self.assertFalse(dm.clip)
+        self.assertEqual(dm.flip_prob, 0.3)
+        self.assertEqual(dm.flip_axes, [0, 1])
+        self.assertEqual(dm.rotate_prob, 0.2)
+        self.assertEqual(dm.rotate_max_k, 2)
+        self.assertEqual(dm.rotate_axes, (1, 2))
+        self.assertEqual(dm.shift_intensity_prob, 0.4)
+        self.assertEqual(dm.shift_intensity_offset, 0.2)
+
+    def test_from_config_with_defaults(self):
+        """Test from_config uses default values for missing parameters."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+            },
+        }
+
+        dm = BraTSDataModuleStage1.from_config(config)
+
+        self.assertEqual(dm.data_dir, "/fake/data")
+        self.assertEqual(dm.batch_size, 2)
+        self.assertEqual(dm.num_workers, 4)
+        self.assertEqual(dm.cache_rate, 0.5)
+        self.assertEqual(dm.roi_size, (64, 64, 64))
+        self.assertEqual(dm.train_val_split, 0.8)
+        # modalities=None becomes MODALITY_KEYS in __init__ due to `or` operator
+        self.assertEqual(dm.modalities, ["T1", "T1ce", "T2", "FLAIR"])
+        self.assertEqual(dm.spacing, (1.0, 1.0, 1.0))
+        self.assertEqual(dm.orientation, "RAS")
+        self.assertTrue(dm.clip)
+
+    def test_from_config_with_empty_augmentation(self):
+        """Test from_config with empty augmentation config."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+                "augmentation": {},
+            },
+        }
+
+        dm = BraTSDataModuleStage1.from_config(config)
+
+        # Should use defaults when augmentation dict is empty
+        self.assertEqual(dm.flip_prob, 0.5)
+        self.assertEqual(dm.flip_axes, [0, 1, 2])  # Default when None
+        self.assertEqual(dm.rotate_prob, 0.5)
+
+
+class TestBraTSDataModuleStage1ErrorPaths(unittest.TestCase):
+    """Test suite for BraTSDataModuleStage1 error handling."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(__file__).parent / "temp_test_error_stage1"
+        self.temp_dir.mkdir(exist_ok=True)
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        if self.temp_dir.exists():
+            import shutil
+            shutil.rmtree(self.temp_dir)
+
+    def test_setup_with_empty_data_directory(self):
+        """Test ValueError when data directory has no patients."""
+        empty_dir = self.temp_dir / "empty_data"
+        empty_dir.mkdir(exist_ok=True)
+
+        dm = BraTSDataModuleStage1(
+            data_dir=str(empty_dir),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            dm.setup(stage="fit")
+
+        self.assertIn("No patient directories found", str(ctx.exception))
+
+    def test_train_dataloader_without_setup(self):
+        """Test RuntimeError when train_dataloader called before setup."""
+        dm = BraTSDataModuleStage1(
+            data_dir=str(self.temp_dir),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            dm.train_dataloader()
+
+        self.assertIn("Dataset not setup", str(ctx.exception))
+
+    def test_val_dataloader_without_setup(self):
+        """Test RuntimeError when val_dataloader called before setup."""
+        dm = BraTSDataModuleStage1(
+            data_dir=str(self.temp_dir),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            dm.val_dataloader()
+
+        self.assertIn("Dataset not setup", str(ctx.exception))
+
+    def test_setup_predict_stage_returns_early(self):
+        """Test that setup with stage='predict' returns early."""
+        brats_root = self.temp_dir / "BraTS2023"
+        brats_root.mkdir(exist_ok=True)
+
+        dm = BraTSDataModuleStage1(
+            data_dir=str(brats_root),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        # Should return without error
+        dm.setup(stage="predict")
+
+        # Datasets should remain None
+        self.assertIsNone(dm.train_dataset)
+        self.assertIsNone(dm.val_dataset)
+
+    def test_setup_none_stage_returns_early(self):
+        """Test that setup with stage=None returns early."""
+        brats_root = self.temp_dir / "BraTS2023"
+        brats_root.mkdir(exist_ok=True)
+
+        dm = BraTSDataModuleStage1(
+            data_dir=str(brats_root),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        # Should return without error
+        dm.setup(stage=None)
+
+        # Datasets should remain None
+        self.assertIsNone(dm.train_dataset)
+        self.assertIsNone(dm.val_dataset)
+
+
+class TestBraTSDataModuleStage2FromConfig(unittest.TestCase):
+    """Test suite for BraTSDataModuleStage2.from_config method."""
+
+    def test_from_config_with_all_parameters(self):
+        """Test from_config with all config parameters."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+                "batch_size": 4,
+                "num_workers": 2,
+                "cache_rate": 0.8,
+                "roi_size": [64, 64, 64],
+                "train_val_split": 0.9,
+                "modalities": ["T1", "T2"],
+                "preprocessing": {
+                    "spacing": [1.5, 1.5, 1.5],
+                    "orientation": "LPS",
+                    "intensity_a_min": 10.0,
+                    "intensity_a_max": 400.0,
+                    "intensity_b_min": 0.0,
+                    "intensity_b_max": 1.0,
+                    "clip": False,
+                },
+            },
+            "sliding_window": {
+                "roi_size": [32, 32, 32],
+                "overlap": 0.25,
+                "sw_batch_size": 2,
+            },
+        }
+
+        dm = BraTSDataModuleStage2.from_config(config)
+
+        self.assertEqual(dm.data_dir, "/fake/data")
+        self.assertEqual(dm.batch_size, 4)
+        self.assertEqual(dm.num_workers, 2)
+        self.assertEqual(dm.cache_rate, 0.8)
+        self.assertEqual(dm.roi_size, (64, 64, 64))
+        self.assertEqual(dm.train_val_split, 0.9)
+        self.assertEqual(dm.modalities, ["T1", "T2"])
+        self.assertEqual(dm.sw_roi_size, (32, 32, 32))
+        self.assertEqual(dm.sw_overlap, 0.25)
+        self.assertEqual(dm.sw_batch_size, 2)
+        self.assertEqual(dm.spacing, (1.5, 1.5, 1.5))
+        self.assertEqual(dm.orientation, "LPS")
+        self.assertFalse(dm.clip)
+
+    def test_from_config_with_defaults(self):
+        """Test from_config uses default values."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+            },
+        }
+
+        dm = BraTSDataModuleStage2.from_config(config)
+
+        self.assertEqual(dm.data_dir, "/fake/data")
+        self.assertEqual(dm.batch_size, 2)
+        self.assertEqual(dm.sw_roi_size, (64, 64, 64))
+        self.assertEqual(dm.sw_overlap, 0.5)
+        self.assertEqual(dm.sw_batch_size, 1)
+
+
+class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
+    """Test suite for BraTSDataModuleStage2 pre-encoding functionality."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.temp_dir = Path(__file__).parent / "temp_test_preencode"
+        self.temp_dir.mkdir(exist_ok=True)
+
+    def tearDown(self) -> None:
+        """Clean up after tests."""
+        if self.temp_dir.exists():
+            import shutil
+            shutil.rmtree(self.temp_dir)
+
+    @patch('torch.save')
+    @patch('os.makedirs')
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    @patch('os.path.exists')
+    def test_cache_file_created_after_encoding(
+        self, mock_exists, mock_isdir, mock_listdir, mock_makedirs, mock_save
+    ):
+        """Test that cache file is created after pre-encoding."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Setup mocks - cache file does NOT exist initially
+        def exists_side_effect(path):
+            # Only cache dir exists, not the cache file
+            return "cache" in path and "encoded" not in path
+
+        mock_exists.side_effect = exists_side_effect
+        mock_isdir.return_value = True
+        # Use 10 patients so train split (80%) has 8 patients
+        mock_listdir.return_value = [f"patient_{i:03d}" for i in range(10)]
+
+        # Mock _get_brats_files to return valid files
+        patient_files = {
+            "T1": "/fake/patient_t1.nii.gz",
+            "T1ce": "/fake/patient_t1ce.nii.gz",
+            "T2": "/fake/patient_t2.nii.gz",
+            "FLAIR": "/fake/patient_flair.nii.gz",
+        }
+
+        # Create mock autoencoder
+        mock_autoencoder = MagicMock()
+        mock_autoencoder.encode.return_value = (torch.randn(1, 4, 8, 8, 8), None)
+        mock_autoencoder.quantize.return_value = torch.randint(0, 512, (8 * 8 * 8,))
+
+        # Create transforms that return tensors
+        mock_transforms = MagicMock()
+        mock_transforms.return_value = {
+            "T1": torch.randn(1, 1, 64, 64, 64),
+            "T1ce": torch.randn(1, 1, 64, 64, 64),
+            "T2": torch.randn(1, 1, 64, 64, 64),
+            "FLAIR": torch.randn(1, 1, 64, 64, 64),
+        }
+
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+        dm._autoencoder = mock_autoencoder
+
+        # Patch _get_brats_files and transforms
+        with patch('prod9.training.brats_data._get_brats_files', return_value=patient_files):
+            with patch.object(dm, '_get_transforms', return_value=mock_transforms):
+                result = dm._pre_encode_data(split="train")
+
+        # Verify torch.save was called to cache the data
+        mock_save.assert_called_once()
+        self.assertTrue(len(result) > 0)
+
+    @patch('torch.load')
+    @patch('os.path.exists')
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    def test_pre_encode_loads_from_cache(self, mock_isdir, mock_listdir, mock_exists, mock_load):
+        """Test that pre-encoding loads from cache if available."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Mock cache file exists
+        cache_file = str(self.temp_dir / "cache" / "train_encoded.pt")
+
+        def exists_side_effect(path):
+            # Cache file exists
+            return "encoded" in path
+
+        mock_exists.side_effect = exists_side_effect
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ["patient_001"]
+
+        # Mock cached data
+        cached_data = [
+            {
+                "T1_latent": torch.randn(4, 8, 8, 8),
+                "T1_indices": torch.randint(0, 512, (512,)),
+                "T1ce_latent": torch.randn(4, 8, 8, 8),
+                "T1ce_indices": torch.randint(0, 512, (512,)),
+                "T2_latent": torch.randn(4, 8, 8, 8),
+                "T2_indices": torch.randint(0, 512, (512,)),
+                "FLAIR_latent": torch.randn(4, 8, 8, 8),
+                "FLAIR_indices": torch.randint(0, 512, (512,)),
+            }
+        ]
+        mock_load.return_value = cached_data
+
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+        dm._autoencoder = MagicMock()  # Mock autoencoder
+
+        result = dm._pre_encode_data(split="train")
+
+        # Should load from cache
+        mock_load.assert_called_once()
+        self.assertEqual(len(result), 1)
+
+    def test_pre_encode_without_autoencoder_raises_error(self):
+        """Test RuntimeError when autoencoder not set."""
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+        dm._autoencoder = None
+
+        with self.assertRaises(RuntimeError) as ctx:
+            dm._pre_encode_data(split="train")
+
+        self.assertIn("Autoencoder not set", str(ctx.exception))
+
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    @patch('os.path.exists')
+    def test_pre_encode_with_no_patients_raises_error(self, mock_exists, mock_isdir, mock_listdir):
+        """Test ValueError when no patient directories found."""
+        mock_exists.return_value = False
+        mock_isdir.return_value = True
+        mock_listdir.return_value = []  # No patients
+
+        mock_autoencoder = MagicMock()
+
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+        dm._autoencoder = mock_autoencoder
+
+        with self.assertRaises(ValueError) as ctx:
+            dm._pre_encode_data(split="train")
+
+        self.assertIn("No patient directories found", str(ctx.exception))
+
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    @patch('os.path.exists')
+    @patch('builtins.print')
+    @patch('torch.save')
+    @patch('os.makedirs')
+    def test_pre_encode_handles_encoding_errors_gracefully(
+        self, mock_makedirs, mock_save, mock_print, mock_exists, mock_isdir, mock_listdir
+    ):
+        """Test that encoding errors are handled gracefully."""
+        from prod9.training.brats_data import _get_brats_files
+
+        # Mock patients - cache file does NOT exist initially
+        def exists_side_effect(path):
+            # Only cache dir exists, not the cache file
+            return "cache" in path and "encoded" not in path
+
+        mock_exists.side_effect = exists_side_effect
+        mock_isdir.return_value = True
+        # Use 10 patients so train split has 8 patients
+        mock_listdir.return_value = [f"patient_{i:03d}" for i in range(10)]
+
+        # Create mock autoencoder that fails on second patient (after 4 successful encode calls for first patient)
+        mock_autoencoder = MagicMock()
+        call_count = [0]
+
+        def side_effect_encode(x):
+            call_count[0] += 1
+            # First patient has 4 modalities (4 encode calls), fail on the 5th call (second patient)
+            if call_count[0] > 4:
+                raise RuntimeError("Encoding failed")
+            return (torch.randn(1, 4, 8, 8, 8), None)
+
+        mock_autoencoder.encode.side_effect = side_effect_encode
+        mock_autoencoder.quantize.return_value = torch.randint(0, 512, (512,))
+
+        patient_files = {
+            "T1": "/fake/patient_t1.nii.gz",
+            "T1ce": "/fake/patient_t1ce.nii.gz",
+            "T2": "/fake/patient_t2.nii.gz",
+            "FLAIR": "/fake/patient_flair.nii.gz",
+        }
+
+        mock_transforms = MagicMock()
+        mock_transforms.return_value = {
+            "T1": torch.randn(1, 1, 64, 64, 64),
+            "T1ce": torch.randn(1, 1, 64, 64, 64),
+            "T2": torch.randn(1, 1, 64, 64, 64),
+            "FLAIR": torch.randn(1, 1, 64, 64, 64),
+        }
+
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+        dm._autoencoder = mock_autoencoder
+
+        with patch('prod9.training.brats_data._get_brats_files', return_value=patient_files):
+            with patch.object(dm, '_get_transforms', return_value=mock_transforms):
+                # Should not raise, should handle error gracefully
+                result = dm._pre_encode_data(split="train")
+
+        # Should have 1 successful encoding (first patient succeeds, second fails and continues)
+        self.assertEqual(len(result), 1)
+
+    def test_train_dataloader_without_setup_raises_error(self):
+        """Test RuntimeError when train_dataloader called before setup."""
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            dm.train_dataloader()
+
+        self.assertIn("Dataset not setup", str(ctx.exception))
+
+    def test_val_dataloader_without_setup_raises_error(self):
+        """Test RuntimeError when val_dataloader called before setup."""
+        dm = BraTSDataModuleStage2(
+            data_dir="/fake/data",
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=1,
+            num_workers=0,
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            dm.val_dataloader()
+
+        self.assertIn("Dataset not setup", str(ctx.exception))
 
 
 if __name__ == '__main__':

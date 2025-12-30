@@ -3,7 +3,7 @@
 import os
 import random
 import tempfile
-from typing import Dict, Any
+from typing import Any, Dict, cast
 
 import pytest
 import torch
@@ -114,9 +114,9 @@ class TestAutoencoderTraining:
                 }
 
         # Create model
-        config = minimal_config.copy()
-        config["data"]["data_dir"] = temp_output_dir  # type: ignore[index]
-        model = AutoencoderLightningConfig.from_config(config)  # type: ignore[arg-type]
+        config: Dict[str, Any] = cast(Dict[str, Any], minimal_config.copy())
+        config["data"]["data_dir"] = temp_output_dir
+        model = AutoencoderLightningConfig.from_config(config)
 
         # Wrap discriminator to handle shape issues
         from ..test_helpers import wrap_discriminator_in_lightning_module
@@ -138,7 +138,7 @@ class TestAutoencoderTraining:
 
         # Run training for one epoch
         try:
-            trainer.fit(model, train_dataloaders=train_loader)  # type: ignore[arg-type]
+            trainer.fit(model, train_dataloaders=train_loader)
             assert True  # Training completed without error
         except RuntimeError as e:
             if "Calculated padded input size" in str(e):

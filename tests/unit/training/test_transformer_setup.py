@@ -126,6 +126,7 @@ class TestTransformerSetup:
 
         # levels = [4, 4, 4], so codebook_size = 64
         expected_codebook_size = 4 * 4 * 4
+        assert model.transformer is not None  # Type guard
         actual_codebook_size = cast(nn.Conv3d, model.transformer.out_proj).out_channels
 
         assert actual_codebook_size == expected_codebook_size
@@ -191,6 +192,7 @@ class TestTransformerSetup:
         model.setup(stage="fit")
 
         # Should use the provided transformer, not create a new one
+        assert model.transformer is not None  # Type guard
         assert model.transformer is custom_transformer
         assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 999
 

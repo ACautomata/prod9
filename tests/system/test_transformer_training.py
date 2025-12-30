@@ -9,6 +9,7 @@ import torch
 
 from prod9.training.lightning_module import TransformerLightning, TransformerLightningConfig
 from prod9.generator.transformer import TransformerDecoder
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
 class TestTransformerTraining:
@@ -89,8 +90,10 @@ class TestTransformerTraining:
             num_channels=[32, 64, 128, 128],
             attention_levels=[False, False, False, True],
         ).to(device)
-        model.autoencoder = autoencoder  # type: ignore[assignment]
-        model.autoencoder.eval()  # type: ignore[optional-attr]
+        # Wrap with inference wrapper as expected by the model
+        sw_config = SlidingWindowConfig(roi_size=(32, 32, 32), overlap=0.5, sw_batch_size=1)
+        model.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
+        model.autoencoder.eval()
 
         # Create dummy input
         source_image = torch.randn(1, 1, 32, 32, 32).to(device)

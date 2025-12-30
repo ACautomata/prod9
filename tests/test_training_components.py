@@ -11,7 +11,7 @@ import pytest
 import torch
 import tempfile
 import shutil
-from typing import Dict
+from typing import Any, Dict, cast
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 
 from prod9.training.losses import VAEGANLoss
@@ -118,7 +118,12 @@ class TestVAEGANLoss:
                 "commitment_weight": 1.0,
             }
 
-            loss_fn = VAEGANLoss(**custom_weights)  # type: ignore[call-arg]
+            loss_fn = VAEGANLoss(
+                recon_weight=custom_weights["recon_weight"],
+                perceptual_weight=custom_weights["perceptual_weight"],
+                adv_weight=custom_weights["adv_weight"],
+                commitment_weight=custom_weights["commitment_weight"],
+            )
 
             assert loss_fn.recon_weight == 2.0
             assert loss_fn.perceptual_weight == 0.1
@@ -538,9 +543,12 @@ class TestPreEncodedDataset:
         assert "target_modality_idx" in item
 
         # Check shapes
-        assert item["cond_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
-        assert item["target_latent"].shape == (4, 8, 8, 8)  # type: ignore[has-attribute]
-        assert item["target_indices"].shape == (512,)  # type: ignore[has-attribute]
+        cond_latent = cast(torch.Tensor, item["cond_latent"])
+        target_latent = cast(torch.Tensor, item["target_latent"])
+        target_indices = cast(torch.Tensor, item["target_indices"])
+        assert cond_latent.shape == (4, 8, 8, 8)
+        assert target_latent.shape == (4, 8, 8, 8)
+        assert target_indices.shape == (512,)
 
         # Check modality index is in valid range
         assert 0 <= item["target_modality_idx"] <= 3

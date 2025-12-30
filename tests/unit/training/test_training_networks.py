@@ -95,8 +95,8 @@ class TestMultiScalePatchDiscriminator(unittest.TestCase):
         outputs, features = disc(input_tensor)
 
         # Compute loss from all discriminators
-        loss = sum(out.mean() for out in outputs)
-        loss.backward()  # type: ignore[has-attribute]
+        loss = torch.stack([out.mean() for out in outputs]).sum()
+        loss.backward()
 
         # Check gradients exist
         self.assertIsNotNone(input_tensor.grad)

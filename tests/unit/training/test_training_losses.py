@@ -5,16 +5,9 @@ Tests VAEGAN loss from prod9.training.losses.
 """
 import unittest
 import torch
-from typing import TYPE_CHECKING
 from urllib.error import HTTPError
 
-if TYPE_CHECKING:
-    from prod9.training.losses import VAEGANLoss  # type: ignore[attr-defined]
-else:
-    try:
-        from prod9.training.losses import VAEGANLoss
-    except ImportError:
-        VAEGANLoss = None  # type: ignore[assignment]
+from prod9.training.losses import VAEGANLoss
 
 
 class TestVAEGANLoss(unittest.TestCase):
@@ -22,16 +15,13 @@ class TestVAEGANLoss(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures."""
-        if VAEGANLoss is None:
-            self.skipTest("VAEGANLoss not available in prod9.training.losses")
-
         self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
         self.batch_size = 4
         self.channels = 1
         self.spatial_size = 16
 
         # Create loss function
-        self.vaegan_loss = VAEGANLoss(  # type: ignore[misc]
+        self.vaegan_loss = VAEGANLoss(
             recon_weight=1.0,
             perceptual_weight=0.1,
             adv_weight=0.5
@@ -306,13 +296,14 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             ).to(self.device)
             self.has_real_implementation = True
         except (ImportError, Exception, HTTPError, OSError):
-            self.vaegan_loss = None  # type: ignore[assignment]
+            self.vaegan_loss = None
             self.has_real_implementation = False
 
     def test_adaptive_weight_calculation(self):
         """Test VQGAN-style adaptive weight computation based on gradient norms."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create a simple computation graph
         # Simulate: output = layer(input), loss = f(output)
@@ -324,7 +315,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         output_g = (last_layer * input_x * 0.5).sum()
 
         # Calculate adaptive weight
-        adv_weight = self.vaegan_loss.calculate_adaptive_weight(  # type: ignore[optional-attr]
+        adv_weight = self.vaegan_loss.calculate_adaptive_weight(
             output_nll,
             output_g,
             last_layer,
@@ -337,8 +328,8 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             f"Adaptive weight should be non-negative, got {adv_weight}"
         )
         self.assertTrue(
-            adv_weight <= self.vaegan_loss.MAX_ADAPTIVE_WEIGHT,  # type: ignore[optional-attr]
-            f"Adaptive weight {adv_weight} exceeds max {self.vaegan_loss.MAX_ADAPTIVE_WEIGHT}"  # type: ignore[optional-attr]
+            adv_weight <= self.vaegan_loss.MAX_ADAPTIVE_WEIGHT,
+            f"Adaptive weight {adv_weight} exceeds max {self.vaegan_loss.MAX_ADAPTIVE_WEIGHT}"
         )
         self.assertFalse(
             adv_weight.requires_grad,
@@ -349,6 +340,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         """Test that class constants are properly defined."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Verify MAX_ADAPTIVE_WEIGHT constant
         self.assertTrue(
@@ -356,7 +348,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             "VAEGANLoss should have MAX_ADAPTIVE_WEIGHT constant"
         )
         self.assertEqual(
-            self.vaegan_loss.MAX_ADAPTIVE_WEIGHT, 1e4,  # type: ignore[optional-attr]
+            self.vaegan_loss.MAX_ADAPTIVE_WEIGHT, 1e4,
             "MAX_ADAPTIVE_WEIGHT should be 1e4"
         )
 
@@ -366,7 +358,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             "VAEGANLoss should have GRADIENT_NORM_EPS constant"
         )
         self.assertEqual(
-            self.vaegan_loss.GRADIENT_NORM_EPS, 1e-4,  # type: ignore[optional-attr]
+            self.vaegan_loss.GRADIENT_NORM_EPS, 1e-4,
             "GRADIENT_NORM_EPS should be 1e-4"
         )
 
@@ -374,12 +366,13 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         """Test discriminator warmup schedule with adopt_weight method."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Set warmup threshold
-        self.vaegan_loss.discriminator_iter_start = 100  # type: ignore[optional-attr]
+        self.vaegan_loss.discriminator_iter_start = 100
 
         # Before warmup (step < threshold)
-        weight = self.vaegan_loss.adopt_weight(  # type: ignore[optional-attr]  # type: ignore[optional-attr]
+        weight = self.vaegan_loss.adopt_weight(
             global_step=50,
             threshold=100
         )
@@ -389,22 +382,22 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         )
 
         # At threshold (step == threshold)
-        weight = self.vaegan_loss.adopt_weight(  # type: ignore[optional-attr]
+        weight = self.vaegan_loss.adopt_weight(
             global_step=100,
             threshold=100
         )
         self.assertEqual(
-            weight, self.vaegan_loss.disc_factor,  # type: ignore[optional-attr]
+            weight, self.vaegan_loss.disc_factor,
             "Weight should be disc_factor at threshold"
         )
 
         # After warmup (step > threshold)
-        weight = self.vaegan_loss.adopt_weight(  # type: ignore[optional-attr]
+        weight = self.vaegan_loss.adopt_weight(
             global_step=150,
             threshold=100
         )
         self.assertEqual(
-            weight, self.vaegan_loss.disc_factor,  # type: ignore[optional-attr]
+            weight, self.vaegan_loss.disc_factor,
             "Weight should be disc_factor after warmup threshold"
         )
 
@@ -412,6 +405,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         """Test discriminator warmup with different thresholds."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Skip threshold=0 as there's no "before threshold" case when threshold=0
         # (global_step can never be < 0)
@@ -420,23 +414,24 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         for threshold in thresholds:
             with self.subTest(threshold=threshold):
                 # Before threshold
-                weight_before = self.vaegan_loss.adopt_weight(  # type: ignore[optional-attr]
+                weight_before = self.vaegan_loss.adopt_weight(
                     global_step=max(0, threshold - 10),
                     threshold=threshold
                 )
                 self.assertEqual(weight_before, 0.0)
 
                 # At/after threshold
-                weight_after = self.vaegan_loss.adopt_weight(  # type: ignore[optional-attr]
+                weight_after = self.vaegan_loss.adopt_weight(
                     global_step=threshold + 10,
                     threshold=threshold
                 )
-                self.assertEqual(weight_after, self.vaegan_loss.disc_factor)  # type: ignore[optional-attr]
+                self.assertEqual(weight_after, self.vaegan_loss.disc_factor)
 
     def test_adaptive_weight_gradient_computation(self):
         """Test that adaptive weight computation uses gradient norms correctly."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create a simple computation graph
         last_layer = torch.randn(16, 16, 3, 3, requires_grad=True).to(self.device)
@@ -447,7 +442,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         g_loss = (last_layer * input_x).sum()
 
         # Calculate adaptive weight
-        adv_weight = self.vaegan_loss.calculate_adaptive_weight(  # type: ignore[optional-attr]
+        adv_weight = self.vaegan_loss.calculate_adaptive_weight(
             nll_loss,
             g_loss,
             last_layer,
@@ -458,13 +453,14 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         self.assertTrue(adv_weight > 0)
 
         # Verify weight scales with disc_factor
-        expected_max = self.vaegan_loss.disc_factor * self.vaegan_loss.MAX_ADAPTIVE_WEIGHT  # type: ignore[optional-attr]
+        expected_max = self.vaegan_loss.disc_factor * self.vaegan_loss.MAX_ADAPTIVE_WEIGHT
         self.assertTrue(adv_weight <= expected_max)
 
     def test_forward_with_adaptive_weight(self):
         """Test forward pass returns adaptive weight in loss dict."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create a real autoencoder and discriminator to establish proper computational graph
         # Use configuration where num_channels matches len(levels)
@@ -515,7 +511,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         discriminator_output, _ = disc(fake_images)
 
         # Compute loss with adaptive weight - now both nll_loss and g_loss depend on last_layer
-        loss_dict = self.vaegan_loss.forward(  # type: ignore[optional-attr]
+        loss_dict = self.vaegan_loss.forward(
             real_images=real_images,
             fake_images=fake_images,
             encoder_output=encoder_output,
@@ -538,6 +534,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         """Test forward pass without last_layer (fixed weight mode)."""
         if not self.has_real_implementation:
             self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create test data
         batch_size = 2
@@ -548,7 +545,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         discriminator_output = torch.randn(batch_size, 1, 4, 4, 4).to(self.device)
 
         # Compute loss WITHOUT last_layer (uses fixed weight)
-        loss_dict = self.vaegan_loss.forward(  # type: ignore[optional-attr]
+        loss_dict = self.vaegan_loss.forward(
             real_images=real_images,
             fake_images=fake_images,
             encoder_output=encoder_output,
