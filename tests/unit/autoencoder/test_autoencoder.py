@@ -222,3 +222,35 @@ class TestAutoencoder(unittest.TestCase):
         decode_diff = torch.abs(decoded_from_encoded - decoded_from_embedded).mean()
         assert decode_diff < 1e-5, \
             f"Decoded outputs differ too much: mean diff = {decode_diff}"
+
+    def test_embed_sequence_format(self):
+        """Test embed method with sequence format input [B, K] -> [B, K, C]"""
+        # Create sequence-format indices (like from MaskGiT sampling)
+        batch_size = 2
+        num_tokens = 10
+        indices = torch.randint(0, 1000, (batch_size, num_tokens), device=self.device)
+
+        # Embed should return [B, K, C] for sequence format
+        embedded = self.autoencoder.embed(indices)
+
+        assert embedded.dim() == 3, f"Expected 3D tensor, got {embedded.dim()}D with shape {embedded.shape}"
+        assert embedded.shape == (batch_size, num_tokens, 4), \
+            f"Expected shape {(batch_size, num_tokens, 4)}, got {embedded.shape}"
+        assert not torch.isnan(embedded).any(), "Embed contains NaN"
+        assert not torch.isinf(embedded).any(), "Embed contains Inf"
+
+    def test_embed_spatial_vs_sequence_format(self):
+        """Test that embed handles both spatial [B, H, W, D] and sequence [B, K] formats"""
+        # Spatial format: [B, H, W, D]
+        spatial_indices = torch.randint(0, 1000, (2, 4, 4, 4), device=self.device)
+        spatial_embedded = self.autoencoder.embed(spatial_indices)
+        # Should return [B, C, H, W, D]
+        assert spatial_embedded.shape == (2, 4, 4, 4, 4), \
+            f"Spatial format failed: expected (2, 4, 4, 4, 4), got {spatial_embedded.shape}"
+
+        # Sequence format: [B, K]
+        seq_indices = torch.randint(0, 1000, (2, 64), device=self.device)
+        seq_embedded = self.autoencoder.embed(seq_indices)
+        # Should return [B, K, C]
+        assert seq_embedded.shape == (2, 64, 4), \
+            f"Sequence format failed: expected (2, 64, 4), got {seq_embedded.shape}"

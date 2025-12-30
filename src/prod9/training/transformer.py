@@ -206,16 +206,14 @@ class TransformerLightning(pl.LightningModule):
         )
         self.autoencoder = AutoencoderInferenceWrapper(autoencoder, sw_config)
 
-    def on_train_start(self) -> None:
-        """Update autoencoder wrapper device after Lightning moves everything.
+    def on_fit_start(self) -> None:
+        """Move autoencoder to device before sanity check.
 
-        This is called after Lightning has moved all nn.Module attributes to the
-        correct device. We need to move the autoencoder and update sw_config.device.
+        This hook runs after setup() but BEFORE the sanity check, and self.device
+        is available here (unlike in setup()).
         """
         if self.autoencoder is not None:
-            # Move the underlying autoencoder to the device (this also moves buffers)
             self.autoencoder.autoencoder = self.autoencoder.autoencoder.to(self.device)
-            # Update the wrapper's sw_config.device to match actual device
             self.autoencoder.sw_config.device = self.device
 
     def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:

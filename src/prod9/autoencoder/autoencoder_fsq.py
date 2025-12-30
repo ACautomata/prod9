@@ -42,13 +42,35 @@ class FiniteScalarQuantizer(nn.Module):
         return (zhat * self._basis).sum(dim=-1).long()
 
     def embed(self, embedding_indices: torch.Tensor) -> torch.Tensor:
+        """
+        Embed token indices to continuous latent vectors.
+
+        Supports two input formats:
+        1. Spatial format: [B, H, W, D] -> [B, C, H, W, D]
+        2. Sequence format: [B, K] -> [B, K, C]
+
+        Args:
+            embedding_indices: Token indices (spatial or sequence format)
+
+        Returns:
+            Embedded latent vectors
+        """
+        is_sequence_format = embedding_indices.dim() == 2
+
         embedding_indices = embedding_indices[..., None]
         # 纯PyTorch实现的整数除法与取余
         codes_non_centered = torch.remainder(
             torch.div(embedding_indices, self._basis, rounding_mode='floor'),
             self._levels_tensor
         )
-        return self._scale_and_shift_inverse(codes_non_centered).permute(self.quantization_permutation)
+        result = self._scale_and_shift_inverse(codes_non_centered)
+
+        if is_sequence_format:
+            # Sequence format: [B, K, C] -> return as-is
+            return result
+        else:
+            # Spatial format: [B, H, W, D, C] -> [B, C, H, W, D]
+            return result.permute(self.quantization_permutation)
 
     def _scale_and_shift(self, zhat_normalized):
         half_width = self._levels_tensor // 2
