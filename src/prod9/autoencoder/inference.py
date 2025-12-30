@@ -176,7 +176,7 @@ class AutoencoderInferenceWrapper:
         """
         Encode image and return token indices for Stage 2 transformer training.
 
-        Delegates to self.autoencoder.encode_stage_2_inputs() with sliding window.
+        Uses sliding window for encoding, then quantizes to indices.
 
         Args:
             x: Input image [B, C, H, W, D]
@@ -184,15 +184,10 @@ class AutoencoderInferenceWrapper:
         Returns:
             Token indices [B, H, W, D] (flat scalar indices for FSQ)
         """
-        inferer = self._create_inferer()
-        result = inferer(x, self.autoencoder.encode_stage_2_inputs)
-
-        if isinstance(result, tuple):
-            result = result[0]
-        elif isinstance(result, dict):
-            result = result[list(result.keys())[0]]
-
-        return result
+        # First encode with sliding window to get continuous latent
+        z_mu, _ = self.encode(x)
+        # Then quantize to discrete indices
+        return self.autoencoder.quantize(z_mu)
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """

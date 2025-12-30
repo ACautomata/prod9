@@ -12,7 +12,7 @@ Key features:
 """
 
 import os
-from typing import Literal
+from typing import Literal, cast
 
 import medmnist
 import numpy as np
@@ -22,6 +22,7 @@ from medmnist import INFO
 from torch.utils.data import DataLoader, Dataset as TorchDataset
 
 import prod9.training.brats_data as brats_data
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.config import load_config
 
 
@@ -94,14 +95,16 @@ class _MedMNIST3DStage2Dataset(TorchDataset):
 
         # For MedMNIST, use zeros as condition input (aligned with BraTS format)
         # The actual condition information is passed via cond_idx
-        target_latent: torch.Tensor = sample["latent"]  # type: ignore[assignment]
+        target_latent: torch.Tensor = cast(torch.Tensor, sample["latent"])
         cond_latent = torch.zeros_like(target_latent)  # Zeros for MaskGiTConditionGenerator
+        target_indices: torch.Tensor = cast(torch.Tensor, sample["indices"])
+        label_int: int = cast(int, sample["label"])
 
         return {
             "cond_latent": cond_latent,  # [C, D, H, W] zeros tensor (aligned with BraTS)
             "target_latent": target_latent,  # [C, D, H, W]
-            "target_indices": sample["indices"],  # type: ignore[assignment]
-            "cond_idx": torch.tensor(sample["label"], dtype=torch.long),  # Unified condition index
+            "target_indices": target_indices,
+            "cond_idx": torch.tensor(label_int, dtype=torch.long),  # Unified condition index
         }
 
 
@@ -279,9 +282,10 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         """Return training DataLoader."""
         if self.train_dataset is None:
             self.setup()
+        assert self.train_dataset is not None  # Type guard for pyright
 
         return DataLoader(
-            self.train_dataset,  # type: ignore[arg-type]
+            self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
@@ -292,9 +296,10 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         """Return validation DataLoader."""
         if self.val_dataset is None:
             self.setup()
+        assert self.val_dataset is not None  # Type guard for pyright
 
         return DataLoader(
-            self.val_dataset,  # type: ignore[arg-type]
+            self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
@@ -344,13 +349,14 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
     """
 
     autoencoder_path: str
+    autoencoder: AutoencoderFSQ | None
 
     def __init__(
         self,
         dataset_name: str = "organmnist3d",
         size: Literal[28, 64] = 64,
         root: str = "./.medmnist",
-        autoencoder=None,
+        autoencoder: AutoencoderFSQ | None = None,
         cache_dir: str = "outputs/medmnist3d_encoded",
         batch_size: int = 8,
         num_workers: int = 4,
@@ -379,7 +385,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
 
-    def set_autoencoder(self, autoencoder):
+    def set_autoencoder(self, autoencoder: AutoencoderFSQ) -> None:
         """Set the trained autoencoder for pre-encoding."""
         self.autoencoder = autoencoder
 
@@ -422,6 +428,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         """Pre-encode data using trained autoencoder."""
         if self.autoencoder is None:
             raise ValueError("autoencoder must be set to pre-encode data")
+        assert self.autoencoder is not None  # Type guard for pyright
 
         # Load raw dataset
         raw_dataset = self.dataset_class(split=split, download=False, size=self.size, root=self.root)
@@ -441,7 +448,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
 
         # Pre-encode all samples
         encoded_data = []
-        self.autoencoder.eval()  # type: ignore[union-attr]
+        self.autoencoder.eval()
 
         with torch.no_grad():
             for img, label in subset:
@@ -456,7 +463,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                     img_tensor = img_tensor[0:1, ...]
 
                 # Encode to latent
-                latent = self.autoencoder.encode(img_tensor)
+                latent_tuple = self.autoencoder.encode(img_tensor)
+                # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar
+                latent = latent_tuple[0] if isinstance(latent_tuple, tuple) else latent_tuple
 
                 # Quantize to token indices
                 indices_tensor = self.autoencoder.quantize(latent)
@@ -479,9 +488,10 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         """Return training DataLoader."""
         if self.train_dataset is None:
             self.setup()
+        assert self.train_dataset is not None  # Type guard for pyright
 
         return DataLoader(
-            self.train_dataset,  # type: ignore[arg-type]
+            self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
@@ -492,9 +502,10 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         """Return validation DataLoader."""
         if self.val_dataset is None:
             self.setup()
+        assert self.val_dataset is not None  # Type guard for pyright
 
         return DataLoader(
-            self.val_dataset,  # type: ignore[arg-type]
+            self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,

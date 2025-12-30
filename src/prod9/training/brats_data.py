@@ -5,10 +5,11 @@ This module provides PyTorch Lightning DataModules for the two-stage training pi
 - Stage 1: Self-supervised single-modality autoencoder training
 - Stage 2: Cross-modality generation with pre-encoded latents/indices
 """
+from __future__ import annotations
 
 import os
 import random
-from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict
+from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict, cast
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -557,7 +558,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
     def __init__(
         self,
         data_dir: str,
-        autoencoder: Optional[object] = None,
+        autoencoder: Optional[AutoencoderInferenceWrapper] = None,
         autoencoder_path: Optional[str] = None,
         batch_size: int = 2,
         num_workers: int = 4,
@@ -650,11 +651,14 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             sw_batch_size=sw_config.get("sw_batch_size", 1),
         )
 
-    def set_autoencoder(self, autoencoder: object) -> None:
+    def set_autoencoder(self, autoencoder: Any) -> None:
         """
         Set the autoencoder for pre-encoding and wrap with sliding window.
 
         The wrapper ensures memory-safe encoding of large 3D volumes.
+
+        Args:
+            autoencoder: AutoencoderFSQ instance
         """
         # Wrap with SW config (device is auto-detected by wrapper)
         sw_config = SlidingWindowConfig(
@@ -662,7 +666,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             overlap=self.sw_overlap,
             sw_batch_size=self.sw_batch_size,
         )
-        wrapper = AutoencoderInferenceWrapper(autoencoder, sw_config)  # type: ignore[arg-type]
+        wrapper = AutoencoderInferenceWrapper(autoencoder, sw_config)
         self._autoencoder = wrapper
 
     def setup(self, stage: Optional[str] = None) -> None:
@@ -695,6 +699,8 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         """
         if self._autoencoder is None:
             raise RuntimeError("Autoencoder not set. Call set_autoencoder() first.")
+        # Type guard: autoencoder is guaranteed non-None after the check
+        autoencoder = cast(AutoencoderInferenceWrapper, self._autoencoder)
 
         # Get patient directories
         patients = sorted([
@@ -725,22 +731,22 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                 try:
                     files = _get_brats_files(self.data_dir, patient)
                     # Load all modalities
-                    data: Any = transforms(files)
+                    data: Dict[str, torch.Tensor] = cast(Dict[str, torch.Tensor], transforms(files))
 
                     # Encode each modality
                     patient_data: Dict[str, torch.Tensor] = {}
                     for modality in self.modalities:
-                        image: torch.Tensor = data[modality]  # type: ignore[index]
+                        image: torch.Tensor = data[modality]
                         # image: [1, 1, H, W, D]
 
                         # Encode to latent
-                        latent_tuple = self._autoencoder.encode(image)  # type: ignore
+                        latent_tuple = autoencoder.encode(image)
                         # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar
                         latent = latent_tuple[0] if isinstance(latent_tuple, tuple) else latent_tuple
                         # latent: [1, C, H', W', D']
 
                         # Get token indices
-                        indices = self._autoencoder.quantize(latent)  # type: ignore
+                        indices = autoencoder.quantize(latent)
                         # indices: [1, H'*W'*D']
 
                         patient_data[f"{modality}_latent"] = latent.squeeze(0)

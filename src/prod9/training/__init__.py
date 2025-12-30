@@ -20,19 +20,13 @@ from prod9.training.brats_data import (
 )
 # Callbacks are now handled by standard PyTorch Lightning callbacks
 
-# Lightning modules (optional, may not be available in all contexts)
-try:
-    from prod9.training.lightning_module import (
-        AutoencoderLightning,
-        AutoencoderLightningConfig,
-        TransformerLightning,
-        TransformerLightningConfig,
-    )
-except ImportError:
-    AutoencoderLightning = None  # type: ignore
-    AutoencoderLightningConfig = None  # type: ignore
-    TransformerLightning = None  # type: ignore
-    TransformerLightningConfig = None  # type: ignore
+# Lightning modules - always import, let ImportError propagate if dependencies missing
+from prod9.training.lightning_module import (
+    AutoencoderLightning,
+    AutoencoderLightningConfig,
+    TransformerLightning,
+    TransformerLightningConfig,
+)
 
 __all__ = [
     # Config

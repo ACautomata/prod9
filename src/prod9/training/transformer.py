@@ -98,7 +98,7 @@ class TransformerLightning(pl.LightningModule):
         self.autoencoder: Optional[AutoencoderInferenceWrapper] = None
 
         # Store transformer if provided, otherwise will create in setup()
-        self.transformer: nn.Module = transformer  # type: ignore[assignment]
+        self.transformer: nn.Module | None = transformer
         self._transformer_config = {
             "latent_channels": latent_channels,
             "patch_size": patch_size,
@@ -140,16 +140,16 @@ class TransformerLightning(pl.LightningModule):
         self.scheduler = MaskGiTScheduler(steps=num_steps, mask_value=mask_value)
 
         # Metrics for validation
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric().to(device)
+        self.lpips = LPIPSMetric()
 
     def _get_autoencoder(self) -> AutoencoderInferenceWrapper:
         """Helper to get autoencoder wrapper with type assertion."""
         if self.autoencoder is None:
             raise RuntimeError("Autoencoder not loaded. Call setup() first.")
-        return self.autoencoder  # type: ignore
+        # Type guard: autoencoder is guaranteed non-None after the check
+        return self.autoencoder
 
     def setup(self, stage: str) -> None:
         """Load frozen autoencoder from checkpoint and wrap with SW."""
@@ -216,6 +216,8 @@ class TransformerLightning(pl.LightningModule):
         Returns:
             Reconstructed latent tokens [B, C, H, W, D]
         """
+        if self.transformer is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
         return self.transformer(x, cond)
 
     def prepare_condition(
@@ -299,6 +301,8 @@ class TransformerLightning(pl.LightningModule):
         masked_tokens, label_indices = self.scheduler.generate_pair(target_latent, mask_indices)
 
         # Forward through transformer
+        if self.transformer is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
         predicted_logits = self.transformer(masked_tokens, cond)
 
         # Compute cross-entropy loss on masked positions only
@@ -409,6 +413,8 @@ class TransformerLightning(pl.LightningModule):
 
     def configure_optimizers(self):
         """Configure Adam optimizer."""
+        if self.transformer is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
         return torch.optim.Adam(
             self.transformer.parameters(),
             lr=self.lr,

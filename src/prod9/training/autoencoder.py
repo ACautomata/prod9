@@ -8,7 +8,7 @@ This module implements VQGAN-style training with:
 - Commitment loss (FSQ codebook)
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
 import torch
 import pytorch_lightning as pl
@@ -177,11 +177,11 @@ class AutoencoderLightning(pl.LightningModule):
         """
         # Get optimizers
         optimizers = self.optimizers()
-        opt_g, opt_d = optimizers  # type: ignore[misc]
+        opt_g, opt_d = cast(tuple[torch.optim.Optimizer, torch.optim.Optimizer], optimizers)
 
         # Get images
         images = batch["image"]
-        modalities: list = batch["modality"]  # type: ignore[index]
+        modalities: list[str] = cast(list[str], batch["modality"])
 
         # Train discriminator
         disc_loss = self._train_discriminator(images, opt_d)
@@ -199,13 +199,13 @@ class AutoencoderLightning(pl.LightningModule):
         self.log("train/adv_weight", gen_losses.get("adv_weight", 0.0))
 
         # Log per-modality count
-        for modality in set(modalities):  # type: ignore[arg-type]
+        for modality in set(modalities):
             count = modalities.count(modality)
             self.log(f"train/{modality}_count", float(count))
 
         # Log samples periodically
         if batch_idx % self.sample_every_n_steps == 0:
-            first_modality = modalities[0] if modalities else "unknown"  # type: ignore[index]
+            first_modality = modalities[0] if modalities else "unknown"
             self._log_samples(images[0:1], first_modality)
 
         return {"loss": gen_losses["total"], "modalities": modalities}
@@ -313,7 +313,7 @@ class AutoencoderLightning(pl.LightningModule):
             Metrics dictionary
         """
         images = batch["image"]
-        modalities: list = batch["modality"]  # type: ignore[index]
+        modalities: list[str] = cast(list[str], batch["modality"])
 
         # Reconstruct - use SW if enabled
         wrapper = self._get_inference_wrapper()

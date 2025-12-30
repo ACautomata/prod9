@@ -2,18 +2,77 @@
 
 import argparse
 import os
-from typing import Dict, Any, Mapping
+from typing import Dict, Any, Mapping, cast
 
 import torch
 
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+from prod9.cli.shared import create_trainer, resolve_config_path, setup_environment
+from prod9.generator.maskgit import MaskGiTSampler
+from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.training.config import load_config
 from prod9.training.lightning_module import (
     TransformerLightning,
     TransformerLightningConfig,
 )
-from prod9.training.brats_data import BraTSDataModuleStage2
-from prod9.cli.shared import setup_environment, create_trainer, resolve_config_path
-from prod9.generator.maskgit import MaskGiTSampler
+
+
+def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None) -> AutoencoderFSQ:
+    """
+    Load autoencoder from exported file.
+
+    The exported file contains:
+        - state_dict: model weights
+        - config: initialization parameters
+
+    Args:
+        autoencoder_path: Path to exported autoencoder file
+        device: Device to load the model on (default: CPU)
+
+    Returns:
+        Loaded AutoencoderFSQ model in eval mode
+    """
+    if device is None:
+        device = torch.device("cpu")
+
+    # Load exported data
+    loaded_data = torch.load(autoencoder_path, map_location=device)
+
+    # Handle both dict format (from export_autoencoder) and direct state dict
+    if isinstance(loaded_data, dict):
+        if "state_dict" in loaded_data and "config" in loaded_data:
+            # Export format from export_autoencoder
+            state_dict = loaded_data["state_dict"]
+            config = loaded_data["config"]
+        else:
+            # Direct state dict (legacy format)
+            raise ValueError(
+                "Invalid autoencoder file format. "
+                "Expected state_dict and config keys from export_autoencoder."
+            )
+    else:
+        raise ValueError(f"Invalid autoencoder file format: {type(loaded_data)}")
+
+    # Recreate autoencoder from saved config
+    spatial_dims = config.get("spatial_dims", 3)
+    levels = config.get("levels")
+    if levels is None:
+        raise ValueError("Autoencoder config must include 'levels'")
+
+    # Remove keys that were already used or shouldn't be passed to __init__
+    init_kwargs = {k: v for k, v in config.items() if k not in ("spatial_dims", "levels")}
+
+    # Create model instance
+    autoencoder = AutoencoderFSQ(spatial_dims=spatial_dims, levels=levels, **init_kwargs)
+
+    # Load state dict
+    autoencoder.load_state_dict(state_dict)
+    autoencoder.eval()
+
+    # Move to device
+    autoencoder.to(device)
+
+    return autoencoder
 
 
 def train_transformer(config: str) -> None:
@@ -49,14 +108,14 @@ def train_transformer(config: str) -> None:
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder
-        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        autoencoder = _load_autoencoder(autoencoder_path)
         data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder
-        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        autoencoder = _load_autoencoder(autoencoder_path)
         data_module.set_autoencoder(autoencoder)
 
     # Create trainer
@@ -99,14 +158,14 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder
-        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        autoencoder = _load_autoencoder(autoencoder_path)
         data_module.set_autoencoder(autoencoder)
     else:
         # BraTS dataset (default)
         data_module = BraTSDataModuleStage2.from_config(cfg)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder
-        autoencoder = torch.load(autoencoder_path, map_location="cpu")
+        autoencoder = _load_autoencoder(autoencoder_path)
         data_module.set_autoencoder(autoencoder)
 
     # Create trainer for validation
@@ -155,7 +214,7 @@ def test_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
         train_val_split=data_config.get("train_val_split", 0.8),
     )
     # Load and set autoencoder
-    autoencoder = torch.load(cfg["autoencoder_path"], map_location="cpu")
+    autoencoder = _load_autoencoder(cfg["autoencoder_path"])
     data_module.set_autoencoder(autoencoder)
 
     # Create trainer for testing
@@ -216,9 +275,10 @@ def generate(
     sw_cfg = cfg.get("sliding_window", {})
 
     # Override SW config with CLI parameters if provided
-    final_sw_roi_size: tuple[int, int, int] = roi_size if roi_size is not None else tuple(sw_cfg.get("roi_size", (64, 64, 64)))  # type: ignore[assignment]
-    final_sw_overlap = overlap if overlap is not None else sw_cfg.get("overlap", 0.5)
-    final_sw_batch_size = sw_batch_size if sw_batch_size is not None else sw_cfg.get("sw_batch_size", 1)
+    default_roi_size = cast(tuple[int, int, int], tuple(sw_cfg.get("roi_size", (64, 64, 64))))
+    final_sw_roi_size: tuple[int, int, int] = roi_size if roi_size is not None else default_roi_size
+    final_sw_overlap: float = overlap if overlap is not None else cast(float, sw_cfg.get("overlap", 0.5))
+    final_sw_batch_size: int = sw_batch_size if sw_batch_size is not None else cast(int, sw_cfg.get("sw_batch_size", 1))
 
     # Create model with custom SW config
     # We need to pass the SW config to the model before calling setup
@@ -227,8 +287,8 @@ def generate(
     # Override SW config attributes if CLI params were provided
     if roi_size is not None or overlap is not None or sw_batch_size is not None:
         model.sw_roi_size = final_sw_roi_size
-        model.sw_overlap = final_sw_overlap  # type: ignore[assignment]
-        model.sw_batch_size = final_sw_batch_size  # type: ignore[assignment]
+        model.sw_overlap = final_sw_overlap
+        model.sw_batch_size = final_sw_batch_size
 
     # Load checkpoint weights
     checkpoint_data = torch.load(checkpoint, map_location="cpu")
