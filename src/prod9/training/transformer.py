@@ -17,7 +17,6 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
-from prod9.generator.utils import spatial_to_sequence, sequence_to_spatial
 from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 
 
@@ -211,9 +210,11 @@ class TransformerLightning(pl.LightningModule):
         """Update autoencoder wrapper device after Lightning moves everything.
 
         This is called after Lightning has moved all nn.Module attributes to the
-        correct device. We need to update the wrapper's sw_config.device to match.
+        correct device. We need to move the autoencoder and update sw_config.device.
         """
         if self.autoencoder is not None:
+            # Move the underlying autoencoder to the device (this also moves buffers)
+            self.autoencoder.autoencoder = self.autoencoder.autoencoder.to(self.device)
             # Update the wrapper's sw_config.device to match actual device
             self.autoencoder.sw_config.device = self.device
 
@@ -308,15 +309,13 @@ class TransformerLightning(pl.LightningModule):
             cond[drop_mask] = uncond[drop_mask]
 
         # Generate masked pairs via MaskGiTScheduler
-        # Convert target_latent from spatial to sequence format for scheduler
-        target_sequence, spatial_shape = spatial_to_sequence(target_latent)
-
+        # target_latent is already 5D spatial format [B, C, H, W, D]
         step = random.randint(1, self.num_steps)
-        mask_indices = self.scheduler.select_indices(target_sequence, step)
-        masked_tokens_sequence, _ = self.scheduler.generate_pair(target_sequence, mask_indices)
+        mask_indices = self.scheduler.select_indices(target_latent, step)
+        masked_tokens_spatial, _ = self.scheduler.generate_pair(target_latent, mask_indices)
 
         # Get token indices for masked positions from target_indices
-        # target_indices shape: [B, S] where S = H*W*D
+        # target_indices shape: [B, S] where S = H*W*D (flattened)
         # mask_indices shape: [B, num_masked]
         # Gather token indices for masked positions
         label_indices = torch.gather(
@@ -325,15 +324,7 @@ class TransformerLightning(pl.LightningModule):
             index=mask_indices[:, :, 0] if mask_indices.dim() == 3 else mask_indices
         )
 
-        # Convert masked tokens back to spatial format for transformer
-        masked_tokens_spatial = sequence_to_spatial(
-            masked_tokens_sequence,
-            spatial_shape,
-            patch_size=self._transformer_config["patch_size"],
-            validate_patch_size=True,
-        )
-
-        # Forward through transformer
+        # Forward through transformer (masked_tokens_spatial is already 5D)
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
         predicted_logits = self.transformer(masked_tokens_spatial, cond)
@@ -424,9 +415,9 @@ class TransformerLightning(pl.LightningModule):
             batch_size, channels, h, w, d = target_latent.shape
             seq_len = h * w * d
 
-            # Create masked tokens
+            # Create masked tokens in 5D spatial format
             z = torch.full(
-                (batch_size, seq_len, channels),
+                (batch_size, channels, h, w, d),
                 self.mask_value,
                 device=target_latent.device,
             )
@@ -435,9 +426,8 @@ class TransformerLightning(pl.LightningModule):
             # Single sampling step with both cond and uncond for CFG
             z, _ = sampler.step(0, self.transformer, autoencoder, z, cond, uncond, last_indices)
 
-            # Reconstruct
-            reconstructed_latent = z.view(batch_size, channels, h, w, d)
-            reconstructed_image = autoencoder.decode_stage_2_outputs(reconstructed_latent)
+            # z is already 5D spatial format, directly decode
+            reconstructed_image = autoencoder.decode_stage_2_outputs(z)
 
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)

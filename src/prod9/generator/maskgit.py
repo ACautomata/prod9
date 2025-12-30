@@ -5,11 +5,6 @@ import random
 import math
 
 from prod9.generator.transformer import TransformerDecoder
-from prod9.generator.utils import (
-    spatial_to_sequence,
-    sequence_to_spatial,
-    get_spatial_shape_from_sequence,
-)
 
 
 class MaskGiTSampler:
@@ -46,52 +41,52 @@ class MaskGiTSampler:
         Reference: Ho and Salimans, "Classifier-Free Diffusion Guidance", 2022
 
         Args:
-            x: Token sequence tensor [B, S, d]
-            cond: Conditioning tensor [B, C, H, W, D] (spatial) or [B, S, d] (sequence)
-            uncond: Unconditional conditioning tensor (same shape as cond)
+            step: Current step number
+            transformer: Transformer model for token prediction
+            vae: VAE model for embedding tokens
+            x: Token tensor [B, C, H, W, D] (5D spatial format)
+            cond: Conditioning tensor [B, C, H, W, D] (spatial format only)
+            uncond: Unconditional conditioning tensor [B, C, H, W, D] (same shape as cond)
             last_indices: Indices of remaining masked tokens [B, num_remaining]
             guidance_scale: Optional override for self.guidance_scale
                            Use 0.0 for unconditional, 1.0+ for stronger guidance
+
+        Returns:
+            x: Updated token tensor [B, C, H, W, D] (5D spatial format)
+            last_indices: Updated indices of remaining masked tokens
         """
-        s, d = x.shape[1], x.shape[2]
+        # Validate input format - both x and cond must be 5D spatial format
+        if cond.dim() != 5:
+            raise ValueError(
+                f"cond must be 5D spatial format [B, C, H, W, D], got {cond.ndim}D with shape {cond.shape}. "
+                "This indicates a bug in the calling code."
+            )
+        if x.dim() != 5:
+            raise ValueError(
+                f"x must be 5D spatial format [B, C, H, W, D], got {x.ndim}D with shape {x.shape}. "
+                "This indicates a bug in the calling code."
+            )
+
+        _, c, h, w, d = x.shape
+        seq_len = h * w * d
 
         # Use provided guidance_scale or fall back to default
-        w = guidance_scale if guidance_scale is not None else self.guidance_scale
+        guidance = guidance_scale if guidance_scale is not None else self.guidance_scale
 
-        # Determine input format and handle shape conversion
-        if cond.dim() == 5:  # Spatial format [B, C, H, W, D]
-            # Get spatial shape from condition
-            spatial_shape = cond.shape[2:]  # (H, W, D)
+        # Convert 5D x to sequence format for index operations
+        x_seq = rearrange(x, 'b c h w d -> b (h w d) c')
 
-            # Convert input sequence to spatial format for transformer
-            x_spatial = sequence_to_spatial(x, spatial_shape)
+        # Transformer expects spatial inputs (x is already 5D)
+        logits_cond = transformer(x, cond)
+        logits_uncond = transformer(x, uncond)
 
-            # Transformer expects spatial inputs
-            logits_cond = transformer(x_spatial, cond)
-            logits_uncond = transformer(x_spatial, uncond)
-
-            # Convert transformer outputs from spatial to sequence format
-            # logits shape: [B, codebook_size, H, W, D] -> [B, S, codebook_size]
-            logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
-            logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
-
-        else:  # Sequence format [B, S, d] (for backward compatibility)
-            # Assume cond and uncond are already sequence format
-            # Transformer expects spatial format, so we need spatial shape
-            # Try to infer spatial shape (assuming cubic)
-            spatial_shape = get_spatial_shape_from_sequence(x)
-            x_spatial = sequence_to_spatial(x, spatial_shape)
-            cond_spatial = sequence_to_spatial(cond, spatial_shape)
-            uncond_spatial = sequence_to_spatial(uncond, spatial_shape)
-
-            logits_cond = transformer(x_spatial, cond_spatial)
-            logits_uncond = transformer(x_spatial, uncond_spatial)
-
-            logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
-            logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
+        # Convert transformer outputs from spatial to sequence format
+        # logits shape: [B, codebook_size, H, W, D] -> [B, S, codebook_size]
+        logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
+        logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
 
         # Classifier-Free Guidance formula
-        logits = (1 + w) * logits_cond_sequence - w * logits_uncond_sequence  # [B, S, V]
+        logits = (1 + guidance) * logits_cond_sequence - guidance * logits_uncond_sequence  # [B, S, V]
 
         conf = logits.softmax(-1).amax(-1)                     # [B,S]
         # [B,S] 预测 token id
@@ -106,22 +101,26 @@ class MaskGiTSampler:
         sorted_pos = selected_conf.argsort(dim=1, descending=True)  # [B,S]
 
         # 根据 schedule 选出要更新的位置
-        pos = sorted_pos[:, :self.schedule(step, s)]  # [B,K]
+        pos = sorted_pos[:, :self.schedule(step, seq_len)]  # [B,K]
 
         # 对应的 token id
         tid = token_id.gather(1, pos)          # [B,K]
 
-        # embed 成向量并写回
-        vec = vae.embed(tid)                   # [B,K,d]
-        x.scatter_(1, pos.unsqueeze(-1).expand(-1, -1, d), vec)
+        # embed 成向量并写回 x_seq
+        vec = vae.embed(tid)                   # [B,K,c]
+        x_seq.scatter_(1, pos.unsqueeze(-1).expand(-1, -1, c), vec)
 
+        # Convert back to 5D spatial format
+        x_new = rearrange(x_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
+
+        # Update last_indices
         new_last_indices = []
         for b in range(last_indices.size(0)):
             diff = last_indices[b][~torch.isin(last_indices[b], pos[b])]
             new_last_indices.append(diff)
 
         last_indices = torch.stack(new_last_indices)
-        return x, last_indices
+        return x_new, last_indices
 
     @torch.no_grad()
     def sample(self, transformer, vae, shape, cond, uncond):
@@ -132,7 +131,8 @@ class MaskGiTSampler:
             transformer: Transformer model for token prediction
             vae: VAE model for decoding
             shape: Target shape (bs, c, h, w, d)
-            cond: Conditioning tensor. Use zero tensor for unconditional generation.
+            cond: Conditioning tensor [B, C, H, W, D]
+            uncond: Unconditional conditioning tensor [B, C, H, W, D]
 
         Returns:
             Generated image tensor
@@ -140,15 +140,19 @@ class MaskGiTSampler:
         bs, c, h, w, d = shape
         if transformer.device != vae.device:
             raise Exception(f'{transformer.device} != {vae.device}')
-        z = torch.full((bs, h * w * d, c), self.mask_value,
+
+        # Create 5D masked token tensor directly
+        z = torch.full((bs, c, h, w, d), self.mask_value,
                        device=transformer.device)
+        seq_len = h * w * d
         last_indices = torch.arange(
-            end=h * w * d, device=transformer.device)[None, :].repeat(bs, 1)
+            end=seq_len, device=transformer.device)[None, :].repeat(bs, 1)
 
         for step in range(self.steps):
             z, last_indices = self.step(
                 step, transformer, vae, z, cond, uncond, last_indices)
-        z = rearrange(z, 'bs (h w d) c -> bs c h w d', h=h, w=w, d=d)
+
+        # z is already 5D, directly decode
         return vae.decode(z)
 
     @torch.no_grad()
@@ -182,25 +186,64 @@ class MaskGiTScheduler:
 
     @torch.no_grad()
     def select_indices(self, z, step):
-        bs, s, d = z.shape
+        """
+        Select random indices to mask.
+
+        Args:
+            z: Token tensor [B, C, H, W, D] (5D spatial format)
+            step: Current step number
+
+        Returns:
+            indices: Selected indices [B, num_selected]
+        """
+        bs, _, h, w, d = z.shape
+        seq_len = h * w * d
         ratio = self.mask_ratio(step)
         indices = torch.stack(
-            [torch.randperm(s, device=z.device) for _ in range(bs)])
-        indices = indices[:, :math.ceil(ratio * s)]
+            [torch.randperm(seq_len, device=z.device) for _ in range(bs)])
+        indices = indices[:, :math.ceil(ratio * seq_len)]
         return indices
 
     @torch.no_grad()
     def generate_pair(self, z, indices):
-        # mask out the selected indices
-        indices = indices[:, :, None].repeat(1, 1, z.shape[2])
-        z_masked = torch.scatter(
-            input=z,
+        """
+        Generate masked pair for training.
+
+        Args:
+            z: Token tensor [B, C, H, W, D] (5D spatial format)
+            indices: Indices to mask [B, num_masked]
+
+        Returns:
+            z_masked: Masked token tensor [B, C, H, W, D] (5D spatial format)
+            label: Original token values at masked positions, zeros elsewhere [B, C, H, W, D]
+        """
+        _, c, h, w, d = z.shape
+        seq_len = h * w * d
+
+        # Convert 5D z to sequence format for masking operations
+        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
+
+        # Expand indices for all channels: [B, K] -> [B, K, C]
+        indices_expanded = indices[:, :, None].expand(-1, -1, c)
+
+        # Create masked version (scatter mask value at masked positions)
+        z_masked_seq = z_seq.clone()
+        z_masked_seq.scatter_(
             dim=1,
-            index=indices,
-            src=torch.full(z.shape, float(self.mask_value), device=z.device)
+            index=indices_expanded,
+            src=torch.full_like(z_masked_seq, float(self.mask_value), device=z.device)
         )
-        # generate the label
-        label = torch.gather(z, dim=1, index=indices)
+
+        # Create label with zeros everywhere, then put original values at masked positions
+        # First gather the values at masked positions from z_seq
+        gathered_values = torch.gather(z_seq, dim=1, index=indices_expanded)
+        # Then scatter these gathered values back at the same positions in a zero tensor
+        label_seq = torch.zeros_like(z_seq)
+        label_seq.scatter_(dim=1, index=indices_expanded, src=gathered_values)
+
+        # Convert back to 5D spatial format
+        z_masked = rearrange(z_masked_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
+        label = rearrange(label_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
 
         return z_masked, label
 

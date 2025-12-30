@@ -9,6 +9,7 @@ import pytest
 import torch
 import math
 from unittest.mock import Mock
+from einops import rearrange
 
 from prod9.generator.maskgit import MaskGiTSampler, MaskGiTScheduler, MaskGiTConditionGenerator
 
@@ -269,10 +270,11 @@ class TestMaskGiTSampler:
 
         mock_vae.embed = mock_embed
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        h, w, d = 2, 2, 1
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 2, 2, 1)  # Zero conditioning (2*2*1=4)
         uncond = torch.zeros_like(cond)  # Unconditional is also zeros
-        last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+        last_indices = torch.arange(h * w * d).unsqueeze(0).expand(batch_size, -1)
 
         # Use a late step where truncation will occur
         # At step 99 with log schedule, the difference will be <= 0
@@ -281,8 +283,8 @@ class TestMaskGiTSampler:
 
     def test_step_updates_selected_positions(self, sampler_log):
         """Test that step updates only selected positions."""
-        # Use linear scheduler to ensure tokens are updated
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        # Use the log scheduler (sampler_log) which works better with small seq_len
+        sampler = sampler_log
 
         # Setup mocks
         mock_transformer = Mock()
@@ -301,26 +303,27 @@ class TestMaskGiTSampler:
         mock_transformer.return_value = logits_spatial
         mock_transformer.device = torch.device('cpu')
 
+        # Create x first to get its dtype
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
+
         def mock_embed(tid):
             # tid shape: [B, K]
             B, K = tid.shape
-            # Return distinctive values to verify update
-            return torch.ones(B, K, embed_dim) * 99.0
+            # Return distinctive values to verify update, with same dtype as x
+            return torch.ones(B, K, embed_dim, dtype=x.dtype, device=x.device) * 99.0
 
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        # Initial state
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 2, 2, 2)  # Zero conditioning (2*2*2=8)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        # Execute step at middle step to ensure updates happen
-        new_x, _ = sampler.step(2, mock_transformer, mock_vae, x, cond, uncond, last_indices)
+        # Execute step at step=0 to ensure updates happen (log schedule needs small step for small seq_len)
+        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
         # Some positions should be updated (not equal to mask value)
-        updated_mask = (new_x != -1.0).any(dim=-1)
+        updated_mask = (new_x != -1.0).any(dim=[1, 2, 3, 4])
         assert updated_mask.any(), "At least some positions should be updated"
 
     def test_step_reduces_last_indices(self, sampler_log):
@@ -337,14 +340,17 @@ class TestMaskGiTSampler:
         mock_transformer.return_value = logits_spatial
         mock_transformer.device = torch.device('cpu')
 
+        # Create x first to get its dtype
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
+
         def mock_embed(tid):
             B, K = tid.shape
-            return torch.randn(B, K, embed_dim)
+            # Return tensor with same dtype as x
+            return torch.randn(B, K, embed_dim, dtype=x.dtype, device=x.device)
 
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 4, 2)  # Zero conditioning (4*4*2=32)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -491,8 +497,9 @@ class TestMaskGiTScheduler:
 
     def test_select_indices_shape(self, scheduler):
         """Test that select_indices returns correct shape."""
-        batch_size, seq_len = 4, 16
-        z = torch.randn(batch_size, seq_len, 8)
+        batch_size, seq_len, embed_dim = 4, 16, 8
+        h, w, d = 2, 2, 4  # seq_len = 16
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         indices = scheduler.select_indices(z, step=5)
 
@@ -503,8 +510,9 @@ class TestMaskGiTScheduler:
 
     def test_select_indices_valid_range(self, scheduler):
         """Test that selected indices are within valid range."""
-        batch_size, seq_len = 2, 32
-        z = torch.randn(batch_size, seq_len, 8)
+        batch_size, seq_len, embed_dim = 2, 32, 8
+        h, w, d = 4, 4, 2  # seq_len = 32
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         indices = scheduler.select_indices(z, step=3)
 
@@ -516,51 +524,68 @@ class TestMaskGiTScheduler:
     def test_generate_pair_masks_correctly(self, scheduler):
         """Test that generate_pair creates correct masking."""
         batch_size, seq_len, embed_dim = 2, 8, 4
-        z = torch.randn(batch_size, seq_len, embed_dim)
+        h, w, d = 2, 2, 2  # seq_len = 8
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         # Select first 3 positions to mask
         indices = torch.tensor([[0, 1, 2], [0, 1, 2]])
 
         z_masked, label = scheduler.generate_pair(z, indices)
 
-        # Check shapes
+        # Check shapes - both 5D
         assert z_masked.shape == z.shape
-        assert label.shape == (batch_size, 3, embed_dim)
+        assert label.shape == z.shape
 
         # Check that masked positions have mask value
+        # Convert to sequence format for checking
+        z_masked_seq = rearrange(z_masked, 'b c h w d -> b (h w d) c')
         for i in range(batch_size):
             for idx in indices[i]:
-                assert torch.allclose(z_masked[i, idx], torch.tensor(scheduler.mask_value))
+                assert torch.allclose(z_masked_seq[i, idx], torch.tensor(scheduler.mask_value))
 
     def test_generate_pair_preserves_labels(self, scheduler):
         """Test that generate_pair preserves original values in labels."""
         batch_size, seq_len, embed_dim = 2, 8, 4
-        z = torch.randn(batch_size, seq_len, embed_dim)
+        h, w, d = 2, 2, 2  # seq_len = 8
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         indices = torch.tensor([[1, 3, 5], [0, 2, 4]])
 
         _, label = scheduler.generate_pair(z, indices)
 
-        # Labels should contain original values
+        # Labels should contain original values at masked positions, zeros elsewhere
+        # Convert to sequence format for checking
+        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
+        label_seq = rearrange(label, 'b c h w d -> b (h w d) c')
         for i in range(batch_size):
-            for j, idx in enumerate(indices[i]):
-                assert torch.allclose(label[i, j], z[i, idx])
+            for idx in indices[i]:
+                # Check that masked positions have original values
+                assert torch.allclose(label_seq[i, idx], z_seq[i, idx])
+            # Check that unmasked positions are zero
+            masked_set = set(indices[i].tolist())
+            for pos in range(seq_len):
+                if pos not in masked_set:
+                    assert torch.allclose(label_seq[i, pos], torch.tensor(0.0))
 
     def test_generate_pair_non_masked_unchanged(self, scheduler):
         """Test that non-masked positions remain unchanged."""
         batch_size, seq_len, embed_dim = 2, 8, 4
-        z = torch.randn(batch_size, seq_len, embed_dim)
+        h, w, d = 2, 2, 2  # seq_len = 8
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         indices = torch.tensor([[1, 3], [0, 2]])
 
         z_masked, _ = scheduler.generate_pair(z, indices)
 
         # Non-masked positions should be unchanged
+        # Convert to sequence format for checking
+        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
+        z_masked_seq = rearrange(z_masked, 'b c h w d -> b (h w d) c')
         for i in range(batch_size):
             masked_set = set(indices[i].tolist())
             for pos in range(seq_len):
                 if pos not in masked_set:
-                    assert torch.allclose(z_masked[i, pos], z[i, pos])
+                    assert torch.allclose(z_masked_seq[i, pos], z_seq[i, pos])
 
     def test_mask_ratio_randomness(self, scheduler):
         """Test that mask_ratio produces values in [0, 1]."""
@@ -570,8 +595,9 @@ class TestMaskGiTScheduler:
 
     def test_select_indices_with_different_steps(self, scheduler):
         """Test select_indices behavior at different steps."""
-        batch_size, seq_len = 4, 16
-        z = torch.randn(batch_size, seq_len, 8)
+        batch_size, seq_len, embed_dim = 4, 16, 8
+        h, w, d = 2, 2, 4  # seq_len = 16
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         indices_step_1 = scheduler.select_indices(z, step=1)
         indices_step_5 = scheduler.select_indices(z, step=5)
@@ -669,30 +695,32 @@ class TestEdgeCases:
 
         mock_vae.embed = mock_embed
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 8, 8, 16), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 8, 8, 16)  # Zero conditioning (8*8*16=1024)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
-        assert new_x.shape == (batch_size, seq_len, embed_dim)
+        # new_x should be 5D spatial format
+        assert new_x.shape == (batch_size, embed_dim, 8, 8, 16)
 
     def test_scheduler_empty_indices(self):
         """Test scheduler with empty indices."""
         scheduler = MaskGiTScheduler(steps=10, mask_value=-1.0)
 
         batch_size, seq_len, embed_dim = 2, 8, 4
-        z = torch.randn(batch_size, seq_len, embed_dim)
+        h, w, d = 2, 2, 2  # seq_len = 8
+        z = torch.randn(batch_size, embed_dim, h, w, d)
 
         # Empty indices
         indices = torch.tensor([[], []], dtype=torch.long)
 
         z_masked, label = scheduler.generate_pair(z, indices)
 
-        # Should return unchanged z and empty label
+        # Should return unchanged z (5D) and label with same 5D shape
         assert torch.allclose(z_masked, z)
-        assert label.shape == (batch_size, 0, embed_dim)
+        assert label.shape == z.shape
 
     def test_sampler_with_batch_size_one(self):
         """Test sampler with batch size of 1."""
@@ -719,7 +747,7 @@ class TestEdgeCases:
 
         mock_vae.embed = mock_embed
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -804,7 +832,8 @@ class TestUnconditionalGeneration:
         mock_vae.device = torch.device('cpu')
 
         # Prepare inputs with zero conditioning (unconditional)
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        h, w, d = 4, 2, 2  # Spatial dimensions from cond shape below
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning for uncond
         uncond = torch.zeros_like(cond)  # Also zero
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -815,8 +844,8 @@ class TestUnconditionalGeneration:
         # Verify transformer was called twice (once with cond, once with uncond)
         assert call_count[0] == 2, "Transformer should be called twice for confidence computation"
 
-        # Verify outputs
-        assert new_x.shape == (batch_size, seq_len, embed_dim)
+        # Verify outputs - 5D format
+        assert new_x.shape == (batch_size, embed_dim, h, w, d)
         assert isinstance(new_indices, torch.Tensor)
 
     def test_step_with_none_conditioning_uses_zeros(self):
@@ -843,7 +872,7 @@ class TestUnconditionalGeneration:
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -853,7 +882,8 @@ class TestUnconditionalGeneration:
 
         # Verify transformer was called (twice - once for cond, once for uncond)
         assert mock_transformer.call_count == 2
-        assert new_x.shape == (batch_size, seq_len, embed_dim)
+        # new_x should be in 5D spatial format
+        assert new_x.shape == (batch_size, embed_dim, 4, 2, 2)
 
     def test_sample_with_unconditional_generation(self):
         """Test full sampling pipeline with unconditional generation."""
@@ -931,7 +961,8 @@ class TestUnconditionalGeneration:
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        h, w, d = 4, 2, 2  # Spatial dimensions
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -946,7 +977,7 @@ class TestUnconditionalGeneration:
         assert call_log[1][0] == 'zero'  # Second call with uncond (also zeros)
 
         # Some positions should be updated
-        updated_mask = (new_x != -1.0).any(dim=-1)
+        updated_mask = (new_x != -1.0).any(dim=[1, 2, 3, 4])
         assert updated_mask.any()
 
     def test_conditional_vs_unconditional_difference(self):
@@ -974,7 +1005,7 @@ class TestUnconditionalGeneration:
         mock_vae.embed = mock_embed
 
         # Test with conditional generation
-        x_cond = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x_cond = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond_cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # Non-zero conditioning
         uncond_cond = torch.zeros_like(cond_cond)
         last_indices_cond = torch.arange(seq_len).unsqueeze(0)
@@ -985,7 +1016,8 @@ class TestUnconditionalGeneration:
         mock_transformer.reset_mock()
 
         # Test with unconditional generation
-        x_uncond = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        h, w, d = 4, 2, 2
+        x_uncond = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond_uncond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning
         uncond_uncond = torch.zeros_like(cond_uncond)
         last_indices_uncond = torch.arange(seq_len).unsqueeze(0)
@@ -1024,7 +1056,7 @@ class TestNoGradDecorator:
 
         mock_vae.embed = mock_embed
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 2, 2, 2), -1.0)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         cond = torch.zeros(batch_size, embed_dim, 2, 2, 2)  # Zero conditioning (2*2*2=8)
@@ -1068,7 +1100,8 @@ class TestNoGradDecorator:
         """Test that scheduler methods don't create computation graph."""
         scheduler = MaskGiTScheduler(steps=10, mask_value=-1.0)
 
-        z = torch.randn(2, 16, 8, requires_grad=True)
+        # 5D input: [B, C, H, W, D] where H*W*D = 16
+        z = torch.randn(2, 8, 2, 2, 2, requires_grad=True)
         indices = scheduler.select_indices(z, step=5)
 
         # Should work without requiring grad
@@ -1123,7 +1156,7 @@ class TestGuidanceScaleParameter:
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -1134,7 +1167,8 @@ class TestGuidanceScaleParameter:
         # Verify transformer was called twice (once with cond, once with uncond)
         # This confirms CFG was applied with default guidance_scale=1.5
         assert call_count[0] == 2
-        assert new_x.shape == (batch_size, seq_len, embed_dim)
+        # new_x should be in 5D spatial format
+        assert new_x.shape == (batch_size, embed_dim, 4, 2, 2)
 
     def test_step_with_override_guidance_scale(self):
         """Test that step uses override guidance_scale when provided."""
@@ -1167,7 +1201,7 @@ class TestGuidanceScaleParameter:
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -1215,7 +1249,8 @@ class TestGuidanceScaleParameter:
         mock_vae.embed = mock_embed
         mock_vae.device = torch.device('cpu')
 
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        h, w, d = 4, 2, 2  # Spatial dimensions
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # Non-zero conditioning (4*2*2=16)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
@@ -1226,7 +1261,7 @@ class TestGuidanceScaleParameter:
 
         # Verify both calls were still made (CFG framework is used)
         assert len(call_log) == 2
-        assert new_x.shape == (batch_size, seq_len, embed_dim)
+        assert new_x.shape == (batch_size, embed_dim, h, w, d)
 
     def test_guidance_scale_affects_output(self):
         """Test that different guidance_scale values produce different outputs."""
@@ -1264,7 +1299,7 @@ class TestGuidanceScaleParameter:
 
         # Test with guidance_scale=0.0
         sampler_0 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=0.0)
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0)
@@ -1277,12 +1312,12 @@ class TestGuidanceScaleParameter:
         call_count[0] = 0
 
         sampler_1 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=1.0)
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         x_out_1, _ = sampler_1.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
-        # Both should produce valid outputs
-        assert x_out_0.shape == (batch_size, seq_len, embed_dim)
-        assert x_out_1.shape == (batch_size, seq_len, embed_dim)
+        # Both should produce valid outputs - 5D format
+        assert x_out_0.shape == (batch_size, embed_dim, h, w, d)
+        assert x_out_1.shape == (batch_size, embed_dim, h, w, d)
 
         # With different guidance scales, the CFG formula produces different logits
         # which may lead to different token selections (though this is probabilistic)
@@ -1348,7 +1383,7 @@ class TestTokenGenerationConsistency:
         mock_vae.embed = mock_embed
 
         # Initialize state
-        x = torch.full((batch_size, seq_len, embed_dim), -1.0)
+        x = torch.full((batch_size, embed_dim, 5, 5, 4), -1.0)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
         cond = torch.zeros(batch_size, embed_dim, 5, 5, 4)  # Zero conditioning (5*5*4=100)
         uncond = torch.zeros_like(cond)

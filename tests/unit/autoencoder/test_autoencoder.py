@@ -185,6 +185,8 @@ class TestAutoencoder(unittest.TestCase):
 
     def test_quantize_embed_roundtrip_consistency(self):
         """Test that quantize and embed preserve features (roundtrip test)"""
+        # Set seed for reproducibility
+        torch.manual_seed(42)
         x = torch.randn(2, 1, 16, 16, 16, device=self.device)
 
         # Encode to get latent representation

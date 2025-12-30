@@ -461,10 +461,10 @@ class TestValidationStep(unittest.TestCase):
         )
         model.setup(stage="fit")
 
-        # Mock sampler
+        # Mock sampler - returns z in 5D spatial format [B, C, H, W, D]
         mock_sampler = MagicMock()
         mock_sampler.step.return_value = (
-            torch.randn(1, 4, 8, 8, 8),  # z
+            torch.randn(1, 4, 8, 8, 8),  # z in 5D spatial format [B, C, H, W, D]
             torch.arange(8*8*8)[None, :].repeat(1, 1),  # last_indices
         )
         mock_sampler_class.return_value = mock_sampler
@@ -498,9 +498,10 @@ class TestValidationStep(unittest.TestCase):
         )
         model.setup(stage="fit")
 
+        # Mock sampler - returns z in 5D spatial format [B, C, H, W, D]
         mock_sampler = MagicMock()
         mock_sampler.step.return_value = (
-            torch.randn(1, 4, 8, 8, 8),
+            torch.randn(1, 4, 8, 8, 8),  # z in 5D spatial format [B, C, H, W, D]
             torch.arange(8*8*8)[None, :].repeat(1, 1),
         )
         mock_sampler_class.return_value = mock_sampler
