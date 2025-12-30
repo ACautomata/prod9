@@ -138,22 +138,22 @@ class MaskGiTSampler:
             Generated image tensor
         """
         bs, c, h, w, d = shape
-        if transformer.device != vae.device:
-            raise Exception(f'{transformer.device} != {vae.device}')
+
+        # Get device from cond tensor (already on correct device)
+        device = cond.device
 
         # Create 5D masked token tensor directly
-        z = torch.full((bs, c, h, w, d), self.mask_value,
-                       device=transformer.device)
+        z = torch.full((bs, c, h, w, d), self.mask_value, device=device)
         seq_len = h * w * d
         last_indices = torch.arange(
-            end=seq_len, device=transformer.device)[None, :].repeat(bs, 1)
+            end=seq_len, device=device)[None, :].repeat(bs, 1)
 
         for step in range(self.steps):
             z, last_indices = self.step(
                 step, transformer, vae, z, cond, uncond, last_indices)
 
         # z is already 5D, directly decode
-        return vae.decode(z)
+        return vae.decode_stage_2_outputs(z)
 
     @torch.no_grad()
     def schedule(self, step, seq_len):

@@ -410,22 +410,8 @@ class TransformerLightning(pl.LightningModule):
 
         # Sample target tokens
         with torch.no_grad():
-            batch_size, channels, h, w, d = target_latent.shape
-            seq_len = h * w * d
-
-            # Create masked tokens in 5D spatial format
-            z = torch.full(
-                (batch_size, channels, h, w, d),
-                self.mask_value,
-                device=target_latent.device,
-            )
-            last_indices = torch.arange(end=seq_len, device=target_latent.device)[None, :].repeat(batch_size, 1)
-
-            # Single sampling step with both cond and uncond for CFG
-            z, _ = sampler.step(0, self.transformer, autoencoder, z, cond, uncond, last_indices)
-
-            # z is already 5D spatial format, directly decode
-            reconstructed_image = autoencoder.decode_stage_2_outputs(z)
+            # Sample with both cond and uncond for CFG
+            reconstructed_image = sampler.sample(self.transformer, autoencoder, target_latent.shape, cond, uncond)
 
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)

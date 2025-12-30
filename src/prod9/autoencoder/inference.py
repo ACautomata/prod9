@@ -9,7 +9,7 @@ unpad_from_sliding_window() from prod9.autoencoder.padding for padding operation
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import torch
 from monai.inferers.inferer import SlidingWindowInferer
@@ -17,12 +17,62 @@ from monai.inferers.inferer import SlidingWindowInferer
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
 
+def _compute_scale_factor(autoencoder: AutoencoderFSQ) -> int:
+    """
+    Compute the encoder's downsampling factor from architecture.
+
+    For AutoencoderKlMaisi with num_res_blocks=[2,2,2,2],
+    each stage (except the last) has stride=2 downsampling.
+    Scale factor = 2^(num_stages - 1) = 2^3 = 8.
+
+    Args:
+        autoencoder: AutoencoderFSQ model
+
+    Returns:
+        Downsampling factor (e.g., 8 means spatial size is reduced by 8x)
+
+    Raises:
+        RuntimeError: If scale_factor cannot be determined from autoencoder architecture
+    """
+    # Try to get from num_res_blocks attribute (parent class)
+    if hasattr(autoencoder, 'num_res_blocks'):
+        from torch.nn import ModuleList
+        num_res_blocks = cast(ModuleList, autoencoder.num_res_blocks)
+        num_stages = len(num_res_blocks)
+        if num_stages == 0:
+            raise RuntimeError(
+                "Cannot compute scale_factor: num_res_blocks is empty. "
+                "Autoencoder architecture may be unsupported."
+            )
+        return 2 ** (num_stages - 1)
+
+    # Fallback: compute from encoder structure
+    # The encoder has a series of blocks, count them to get num_stages
+    if hasattr(autoencoder, 'encoder') and hasattr(autoencoder.encoder, 'blocks'):
+        from torch.nn import ModuleList
+        blocks = cast(ModuleList, autoencoder.encoder.blocks)
+        num_stages = len(blocks)
+        if num_stages == 0:
+            raise RuntimeError(
+                "Cannot compute scale_factor: encoder blocks is empty. "
+                "Autoencoder architecture may be unsupported."
+            )
+        return 2 ** (num_stages - 1)
+
+    raise RuntimeError(
+        "Cannot compute scale_factor: autoencoder missing 'num_res_blocks' attribute "
+        "and encoder.blocks is not accessible. "
+        "Autoencoder architecture may be unsupported."
+    )
+
+
 @dataclass
 class SlidingWindowConfig:
     """Configuration for sliding window inference."""
 
     roi_size: Tuple[int, int, int] = (64, 64, 64)
-    """Size of sliding window patches. Should match training ROI size or smaller."""
+    """Size of sliding window patches in IMAGE SPACE (for encode).
+    Decode operations automatically scale this by 1/scale_factor for latent space."""
 
     overlap: float = 0.5
     """Overlap between adjacent windows (0-1). Higher = smoother but slower."""
@@ -109,10 +159,24 @@ class AutoencoderInferenceWrapper:
             else:
                 self.sw_config.device = torch.device('cpu')
 
-    def _create_inferer(self) -> SlidingWindowInferer:
-        """Create SlidingWindowInferer with current config."""
+    def _create_inferer(self, for_decode: bool = False) -> SlidingWindowInferer:
+        """Create SlidingWindowInferer with current config.
+
+        Args:
+            for_decode: If True, roi_size is scaled to latent space (image_size / scale_factor)
+
+        Returns:
+            Configured SlidingWindowInferer
+        """
+        if for_decode:
+            # Compute scale_factor and adjust roi_size for latent space
+            scale_factor = _compute_scale_factor(self.autoencoder)
+            roi_size = tuple(max(1, r // scale_factor) for r in self.sw_config.roi_size)
+        else:
+            roi_size = self.sw_config.roi_size
+
         return SlidingWindowInferer(
-            roi_size=self.sw_config.roi_size,
+            roi_size=roi_size,
             sw_batch_size=self.sw_config.sw_batch_size,
             overlap=self.sw_config.overlap,
             mode=self.sw_config.mode,
@@ -162,7 +226,7 @@ class AutoencoderInferenceWrapper:
         Returns:
             Decoded image [B, C, H, W, D]
         """
-        inferer = self._create_inferer()
+        inferer = self._create_inferer(for_decode=True)
         result = inferer(z, self.autoencoder.decode)
 
         # Handle different return types
@@ -201,7 +265,7 @@ class AutoencoderInferenceWrapper:
         Returns:
             Decoded image [B, 1, H, W, D]
         """
-        inferer = self._create_inferer()
+        inferer = self._create_inferer(for_decode=True)
         result = inferer(latent, self.autoencoder.decode_stage_2_outputs)
 
         if isinstance(result, tuple):
@@ -266,7 +330,13 @@ class AutoencoderInferenceWrapper:
         Returns:
             Decoded image [B, C, H, W, D]
         """
-        return self.decode(z)
+        inferer = self._create_inferer(for_decode=True)
+        result = inferer(z, self.autoencoder.decode)
+        if isinstance(result, tuple):
+            return result[0]
+        elif isinstance(result, dict):
+            return result[list(result.keys())[0]]
+        return result
 
     def quantize_stage_2_inputs(self, x: torch.Tensor) -> torch.Tensor:
         """
