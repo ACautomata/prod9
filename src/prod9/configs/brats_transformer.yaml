@@ -117,7 +117,7 @@ loss:
 # =============================================================================
 callbacks:
   checkpoint:
-    monitor: "val/loss"
+    monitor: "val/fid"
     mode: "min"
     save_top_k: 3
     save_last: true
@@ -125,7 +125,7 @@ callbacks:
 
   early_stop:
     enabled: true
-    monitor: "val/loss"
+    monitor: "val/fid"
     patience: 10
     mode: "min"
     min_delta: 0.001

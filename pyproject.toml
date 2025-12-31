@@ -5,16 +5,17 @@ license = "GPL-3.0-or-later"
 requires-python = ">= 3.8"
 dynamic = ["version"]
 dependencies = [
-    "torch",
+    "torch>=2.0.0",
     "einops",
-    "monai[all]",
+    "monai[all]>=1.3.0",
     "pytorch-lightning>=2.0",
     "torchmetrics",
     "numpy",
     "pyyaml",
     "python-dotenv",
     "pydantic>=2.0",
-    "medmnist"
+    "medmnist",
+    "huggingface-hub>=0.23.0",
 ]
 
 [project.optional-dependencies]
@@ -43,4 +44,3 @@ include = ["src/prod9/configs/*.yaml"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/prod9"]
-

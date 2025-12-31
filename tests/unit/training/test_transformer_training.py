@@ -371,6 +371,40 @@ class TestTrainingStep(unittest.TestCase):
         mock_transformer.assert_called_once()
 
     @patch('random.randint')
+    def test_training_step_handles_5d_target_indices(self, mock_randint):
+        """Test training_step handles 5D target_indices from MedMNIST3D pipeline."""
+        mock_randint.return_value = 1  # Mock the random step
+
+        mock_transformer = MagicMock()
+        mock_transformer.return_value = torch.randn(1, 16, 8, 8, 8)
+
+        model = TransformerLightning(
+            autoencoder_path=self.checkpoint_path,
+            transformer=mock_transformer,
+            num_steps=12,
+        )
+
+        # Mock scheduler
+        model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1, 2, 3]]))
+        model.scheduler.generate_pair = MagicMock(
+            return_value=(torch.randn(1, 512, 4), torch.randint(0, 16, (1, 4)))
+        )
+
+        # Test with 5D target_indices [B, 1, H, W, D] from autoencoder.quantize()
+        batch = {
+            "cond_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "target_indices": torch.randint(0, 16, (1, 1, 8, 8, 8)),  # 5D from MedMNIST3D
+        }
+
+        result = model.training_step(batch, 0)
+
+        from typing import cast
+        result_dict = cast(dict, result)
+        self.assertIn("loss", result_dict)
+
+    @patch('random.randint')
     def test_training_step_uses_condition_generator(self, mock_randint):
         """Test training_step uses MaskGiTConditionGenerator."""
         mock_randint.return_value = 1

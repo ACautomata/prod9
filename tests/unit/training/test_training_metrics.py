@@ -1,7 +1,7 @@
 """
 Tests for training metrics module.
 
-Tests PSNR, SSIM, and LPIPS calculations.
+Tests PSNR, SSIM, LPIPS, FID, and IS calculations.
 """
 import unittest
 import torch
@@ -10,6 +10,8 @@ from prod9.training.metrics import (
     PSNRMetric,
     SSIMMetric,
     LPIPSMetric,
+    FIDMetric3D,
+    InceptionScore3D,
 )
 
 
@@ -241,6 +243,147 @@ class TestLPIPSMetric(unittest.TestCase):
         target_cpu = torch.randn(2, 1, 8, 8, 8)
         lpips_cpu = lpips_metric_cpu(pred_cpu, target_cpu)
         self.assertIsInstance(lpips_cpu, torch.Tensor)
+
+
+class TestFIDMetric3D(unittest.TestCase):
+    """Test suite for FID metric computation on 3D medical images."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.fid_metric = FIDMetric3D()
+
+    def test_fid_init(self):
+        """Initialization test: FID metric should initialize with feature extractor."""
+        self.assertIsNotNone(self.fid_metric.feature_extractor)
+        self.assertIsNotNone(self.fid_metric.fid_computer)
+
+    def test_fid_perfect_match(self):
+        """Value test: FID should be near 0 for identical distributions."""
+        x = torch.randn(2, 1, 32, 32, 32)
+        fid = self.fid_metric(x, x)
+
+        # FID should be very close to 0 for identical distributions
+        self.assertIsInstance(fid, torch.Tensor)
+        self.assertLess(fid.item(), 1.0)
+
+    def test_fid_different_distributions(self):
+        """Value test: FID should be higher for different distributions."""
+        x1 = torch.randn(4, 1, 32, 32, 32)
+        x2 = torch.randn(4, 1, 32, 32, 32) * 2.0  # Different scale
+
+        fid = self.fid_metric(x1, x2)
+
+        # FID should be non-negative
+        self.assertIsInstance(fid, torch.Tensor)
+        self.assertGreaterEqual(fid.item(), 0.0)
+
+    def test_fid_accumulation(self):
+        """Test that FID correctly accumulates features across batches."""
+        metric = FIDMetric3D()
+
+        # First batch
+        x1 = torch.randn(2, 1, 32, 32, 32)
+        y1 = x1.clone()
+        metric.update(x1, y1)
+
+        # Second batch
+        x2 = torch.randn(2, 1, 32, 32, 32)
+        y2 = x2.clone()
+        metric.update(x2, y2)
+
+        # Compute
+        fid = metric.compute()
+
+        self.assertIsInstance(fid, torch.Tensor)
+        self.assertLess(fid.item(), 1.0)  # Still should be low
+
+    def test_fid_reset(self):
+        """Test that FID reset clears accumulated features."""
+        metric = FIDMetric3D()
+
+        x = torch.randn(2, 1, 32, 32, 32)
+        metric.update(x, x)
+
+        self.assertGreater(len(metric.real_features), 0)
+        self.assertGreater(len(metric.fake_features), 0)
+
+        metric.reset()
+
+        self.assertEqual(len(metric.real_features), 0)
+        self.assertEqual(len(metric.fake_features), 0)
+
+    def test_fid_shape(self):
+        """Shape test: FID should work with different input shapes."""
+        shapes = [
+            (2, 1, 16, 16, 16),  # batch_size >= 2 required for FID
+            (4, 1, 32, 32, 32),
+        ]
+
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                pred = torch.randn(*shape)
+                target = torch.randn(*shape)
+
+                fid = self.fid_metric(pred, target)
+
+                self.assertIsInstance(fid, torch.Tensor)
+                self.assertEqual(fid.dim(), 0)
+
+
+class TestInceptionScore3D(unittest.TestCase):
+    """Test suite for Inception Score metric on 3D medical images."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.num_classes = 11  # OrganMNIST3D has 11 classes
+        self.is_metric = InceptionScore3D(num_classes=self.num_classes)
+
+    def test_is_init(self):
+        """Initialization test: IS metric should initialize with classifier."""
+        self.assertIsNotNone(self.is_metric.classifier)
+        self.assertEqual(self.is_metric.num_classes, self.num_classes)
+
+    def test_is_shape(self):
+        """Shape test: IS should return scalar tensor."""
+        x = torch.randn(2, 1, 32, 32, 32)
+        is_score = self.is_metric(x)
+
+        self.assertIsInstance(is_score, torch.Tensor)
+        self.assertEqual(is_score.dim(), 0)
+
+    def test_is_compute_returns_tuple(self):
+        """Test that IS compute returns (mean, std) tuple."""
+        x = torch.randn(4, 1, 32, 32, 32)
+        self.is_metric.update(x)
+        self.is_metric.update(x)
+
+        mean, std = self.is_metric.compute()
+
+        self.assertIsInstance(mean, torch.Tensor)
+        self.assertIsInstance(std, torch.Tensor)
+
+    def test_is_reset(self):
+        """Test that IS reset clears accumulated predictions."""
+        x = torch.randn(2, 1, 32, 32, 32)
+        self.is_metric.update(x)
+
+        self.assertGreater(len(self.is_metric.predictions), 0)
+
+        self.is_metric.reset()
+
+        self.assertEqual(len(self.is_metric.predictions), 0)
+
+    def test_is_different_num_classes(self):
+        """Test IS works with different num_classes values."""
+        for num_classes in [2, 3, 11]:
+            with self.subTest(num_classes=num_classes):
+                metric = InceptionScore3D(num_classes=num_classes)
+                x = torch.randn(2, 1, 32, 32, 32)
+                is_score = metric(x)
+                self.assertIsInstance(is_score, torch.Tensor)
+
 
 if __name__ == '__main__':
     unittest.main()

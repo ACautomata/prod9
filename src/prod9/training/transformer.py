@@ -17,7 +17,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
+from prod9.training.metrics import FIDMetric3D, InceptionScore3D
 
 
 class TransformerLightning(pl.LightningModule):
@@ -140,9 +140,8 @@ class TransformerLightning(pl.LightningModule):
         self.scheduler = MaskGiTScheduler(steps=num_steps, mask_value=mask_value)
 
         # Metrics for validation
-        self.psnr = PSNRMetric()
-        self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric()
+        self.fid = FIDMetric3D()
+        self.is_metric = InceptionScore3D(num_classes=num_classes)
 
     def _get_autoencoder(self) -> AutoencoderInferenceWrapper:
         """Helper to get autoencoder wrapper with type assertion."""
@@ -316,10 +315,37 @@ class TransformerLightning(pl.LightningModule):
         # target_indices shape: [B, S] where S = H*W*D (flattened)
         # mask_indices shape: [B, num_masked]
         # Gather token indices for masked positions
+
+        # Ensure target_indices is 2D [B, S] where S = H*W*D
+        # Handle different input shapes from the data pipeline:
+        # - 5D [B, 1, H, W, D] -> squeeze dim 1, flatten -> [B, H*W*D]
+        # - 4D [B, H, W, D] -> flatten -> [B, H*W*D]
+        # - 3D [B, S, 1] -> squeeze last dim -> [B, S]
+        # - 2D [B, S] -> already correct
+        if target_indices.dim() == 5:
+            # [B, 1, H, W, D] -> [B, H, W, D] -> [B, H*W*D]
+            target_indices = target_indices.squeeze(1)
+            b, h, w, d = target_indices.shape
+            target_indices = target_indices.view(b, h * w * d)
+        elif target_indices.dim() == 4:
+            # [B, H, W, D] -> [B, H*W*D]
+            b, h, w, d = target_indices.shape
+            target_indices = target_indices.view(b, h * w * d)
+        elif target_indices.dim() == 3:
+            # [B, S, 1] -> [B, S]
+            target_indices = target_indices.squeeze(-1)
+        # else: dim == 2, already [B, S], no change needed
+
+        # Ensure mask_indices is 2D [B, num_masked]
+        if mask_indices.dim() == 3:
+            mask_indices_for_gather = mask_indices[:, :, 0]
+        else:
+            mask_indices_for_gather = mask_indices
+
         label_indices = torch.gather(
             target_indices,
             dim=1,
-            index=mask_indices[:, :, 0] if mask_indices.dim() == 3 else mask_indices
+            index=mask_indices_for_gather
         )
 
         # Forward through transformer (masked_tokens_spatial is already 5D)
@@ -345,14 +371,8 @@ class TransformerLightning(pl.LightningModule):
                            device=predicted_flat.device, dtype=torch.long)
 
         # Fill masked positions with token indices
-        # Ensure mask_indices and label_indices have correct shapes
-        if mask_indices.dim() == 3:
-            mask_indices_flat = mask_indices[:, :, 0]  # [B, num_masked]
-        else:
-            mask_indices_flat = mask_indices  # [B, num_masked]
-
         # Scatter label_indices into target at masked positions
-        target.scatter_(dim=1, index=mask_indices_flat, src=label_indices)
+        target.scatter_(dim=1, index=mask_indices_for_gather, src=label_indices)
 
         # Cross-entropy loss (automatically ignores positions with ignore_index)
         loss_per_token = nn.functional.cross_entropy(
@@ -416,28 +436,30 @@ class TransformerLightning(pl.LightningModule):
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)
 
-            # Compute individual metrics
-            psnr_value = self.psnr(reconstructed_image, target_image)
-            ssim_value = self.ssim(reconstructed_image, target_image)
-            lpips_value = self.lpips(reconstructed_image, target_image)
+            # Update metric accumulators (computed at epoch end)
+            self.fid.update(reconstructed_image, target_image)
+            self.is_metric.update(reconstructed_image)
 
-            modality_metrics = {
-                "psnr": psnr_value,
-                "ssim": ssim_value,
-                "lpips": lpips_value,
-            }
-
-            # Log metrics
-            for metric_name, metric_value in modality_metrics.items():
-                self.log(f"val/{metric_name}", metric_value, prog_bar=True)
-
-            metrics["modality_metrics"] = modality_metrics
+            metrics["modality_metrics"] = {}  # Epoch-level metrics computed later
 
             # Log sample images to TensorBoard (only for first batch)
             if batch_idx == 0 and self.logger is not None:
                 self._log_samples(generated_images=reconstructed_image, modality="generated")
 
         return metrics
+
+    def on_validation_epoch_end(self) -> None:
+        """Compute epoch-level metrics (FID, IS)."""
+        fid_value = self.fid.compute()
+        is_mean, is_std = self.is_metric.compute()
+
+        self.log("val/fid", fid_value, prog_bar=True, sync_dist=True)
+        self.log("val/is_mean", is_mean, prog_bar=True, sync_dist=True)
+        self.log("val/is_std", is_std, sync_dist=True)
+
+        # Reset for next epoch
+        self.fid.reset()
+        self.is_metric.reset()
 
     def configure_optimizers(self):
         """Configure Adam optimizer."""
