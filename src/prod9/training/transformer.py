@@ -123,9 +123,6 @@ class TransformerLightning(pl.LightningModule):
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
 
-        # Unified class/condition embeddings (works for both BraTS and MedMNIST 3D)
-        self.label_embeddings = nn.Embedding(num_classes, contrast_embed_dim)
-        self.contrast_embeddings = None  # Deprecated, use label_embeddings
 
         # MaskGiTConditionGenerator for classifier-free guidance training
         # Note: uses latent_channels since we add embedding to the latent tensor
@@ -229,42 +226,6 @@ class TransformerLightning(pl.LightningModule):
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
         return self.transformer(x, cond)
-
-    def prepare_condition(
-        self,
-        source_latent: torch.Tensor,
-        target_modality_idx: torch.Tensor,
-        is_unconditional: bool,
-    ) -> Optional[torch.Tensor]:
-        """
-        Prepare condition for transformer.
-
-        IMPORTANT: cond spatial dimensions MUST match x spatial dimensions
-
-        Args:
-            source_latent: Encoded source modality [B, C, H, W, D]
-            target_modality_idx: Target modality index [B]
-            is_unconditional: Whether to generate unconditionally
-
-        Returns:
-            condition: Concatenated [source_latent, contrast_embed] or None
-                      Shape: [B, C + contrast_embed_dim, H, W, D]
-        """
-        if is_unconditional:
-            return None
-
-        batch_size = source_latent.shape[0]
-
-        # Get contrast embedding for target modality
-        contrast_embed = self.label_embeddings(target_modality_idx)  # [B, contrast_embed_dim]
-
-        # Spatially broadcast to match latent spatial dimensions
-        contrast_embed = contrast_embed.view(batch_size, -1, 1, 1, 1)
-        contrast_embed = contrast_embed.expand(-1, -1, *source_latent.shape[2:])
-
-        # Concatenate source latent and contrast embedding
-        condition = torch.cat([source_latent, contrast_embed], dim=1)
-        return condition
 
     def training_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
@@ -465,8 +426,8 @@ class TransformerLightning(pl.LightningModule):
         """Configure Adam optimizer."""
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
-        return torch.optim.Adam(
-            self.transformer.parameters(),
+        return torch.optim.AdamW(
+            [*self.transformer.parameters(), *self.condition_generator.parameters()],
             lr=self.lr,
             betas=(0.9, 0.999),
         )

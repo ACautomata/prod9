@@ -2,7 +2,7 @@
 Unit tests for TransformerLightning training methods.
 
 Tests for training_step, validation_step, configure_optimizers, sample,
-prepare_condition, _log_samples, and error paths.
+_log_samples, and error paths.
 """
 
 import tempfile
@@ -221,71 +221,6 @@ class TestForward(unittest.TestCase):
 
         mock_transformer.assert_called_once_with(x, cond)
         self.assertEqual(result.shape, (1, 4, 8, 8, 8))
-
-
-class TestPrepareCondition(unittest.TestCase):
-    """Test prepare_condition method."""
-
-    def setUp(self):
-        self.temp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
-        torch.save({"state_dict": {}, "config": {
-            "spatial_dims": 3,
-            "in_channels": 1,
-            "out_channels": 1,
-            "levels": (2, 2, 2, 2),
-        }}, self.temp_file.name)
-        self.checkpoint_path = self.temp_file.name
-
-        self.model = TransformerLightning(
-            autoencoder_path=self.checkpoint_path,
-            contrast_embed_dim=32,
-        )
-
-    def tearDown(self):
-        import os
-        if hasattr(self, 'temp_file'):
-            os.unlink(self.temp_file.name)
-
-    def test_prepare_condition_returns_none_for_unconditional(self):
-        """Test prepare_condition returns None when is_unconditional=True."""
-        source_latent = torch.randn(1, 4, 8, 8, 8)
-        target_idx = torch.tensor([0])
-
-        result = self.model.prepare_condition(source_latent, target_idx, is_unconditional=True)
-
-        self.assertIsNone(result)
-
-    def test_prepare_condition_broadcasts_contrast_embed(self):
-        """Test prepare_condition spatially broadcasts contrast embedding."""
-        from typing import cast
-
-        source_latent = torch.randn(1, 4, 16, 16, 16)
-        target_idx = torch.tensor([2])
-
-        result = self.model.prepare_condition(source_latent, target_idx, is_unconditional=False)
-
-        # Should not be None for conditional generation
-        self.assertIsNotNone(result)
-        result_tensor = cast(torch.Tensor, result)
-
-        # Should concatenate: [1, 4, 16, 16, 16] + [1, 32, 16, 16, 16] = [1, 36, 16, 16, 16]
-        self.assertEqual(result_tensor.shape, (1, 36, 16, 16, 16))
-
-    def test_prepare_condition_with_batch(self):
-        """Test prepare_condition handles batch dimension."""
-        from typing import cast
-
-        source_latent = torch.randn(4, 4, 8, 8, 8)
-        target_idx = torch.tensor([0, 1, 2, 3])
-
-        result = self.model.prepare_condition(source_latent, target_idx, is_unconditional=False)
-
-        # Should not be None for conditional generation
-        self.assertIsNotNone(result)
-        result_tensor = cast(torch.Tensor, result)
-
-        self.assertEqual(result_tensor.shape[0], 4)
-        self.assertEqual(result_tensor.shape[1], 36)  # 4 + 32
 
 
 class TestTrainingStep(unittest.TestCase):
@@ -583,8 +518,8 @@ class TestConfigureOptimizers(unittest.TestCase):
 
         self.assertIn("Transformer not initialized", str(ctx.exception))
 
-    def test_configure_optimizers_returns_adam(self):
-        """Test configure_optimizers returns Adam optimizer."""
+    def test_configure_optimizers_returns_adamw(self):
+        """Test configure_optimizers returns AdamW optimizer with condition_generator parameters."""
         mock_transformer = MagicMock()
         mock_transformer.parameters.return_value = [torch.randn(1, requires_grad=True)]
 
@@ -594,9 +529,11 @@ class TestConfigureOptimizers(unittest.TestCase):
             lr=2e-4,
         )
 
-        optimizer = model.configure_optimizers()
+        # Patch condition_generator.parameters to return parameters
+        with patch.object(model.condition_generator, 'parameters', return_value=[torch.randn(1, requires_grad=True)]):
+            optimizer = model.configure_optimizers()
 
-        self.assertIsInstance(optimizer, torch.optim.Adam)
+        self.assertIsInstance(optimizer, torch.optim.AdamW)
         self.assertEqual(optimizer.param_groups[0]["lr"], 2e-4)
         self.assertEqual(optimizer.param_groups[0]["betas"], (0.9, 0.999))
 

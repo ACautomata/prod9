@@ -101,7 +101,7 @@ class TestTransformerTraining:
         # This would normally call the sample method, but for testing we just verify
         # the model structure is correct
         assert model.transformer is not None
-        assert hasattr(model, "prepare_condition")
+        assert hasattr(model, "condition_generator")
 
     def test_unconditional_generation(self, minimal_config: Dict[str, Any]):
         """Test that unconditional generation setup works."""
@@ -111,7 +111,7 @@ class TestTransformerTraining:
         config = minimal_config.copy()
         model = TransformerLightningConfig.from_config(config)
 
-        # Verify label embeddings exist (refactored from contrast_embeddings)
-        assert model.label_embeddings is not None
-        assert model.label_embeddings.num_embeddings == 4
-        assert model.label_embeddings.embedding_dim == 64  # Match cond_dim in config
+        # Verify condition_generator exists (replaces label_embeddings)
+        assert model.condition_generator is not None
+        assert model.condition_generator.num_classes == 4
+        assert model.condition_generator.contrast_embedding.embedding_dim == 192  # Match cond_dim in config
