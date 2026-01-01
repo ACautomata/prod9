@@ -28,10 +28,10 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 1
-    num_d: 2  # Single discriminator to reduce memory usage
-    channels: 64  # Reduced base channel count for memory efficiency
-    num_layers_d: 3  # Layers per discriminator (reduced for 64^3 input)
-    kernel_size: 3  # Smaller kernel for small inputs
+    num_d: 1           
+    channels: 64       
+    num_layers_d: 3    
+    kernel_size: 4              
     activation: ["LEAKYRELU", {"negative_slope": 0.2}]
     norm: "BATCH"
     minimum_size_im: 64
