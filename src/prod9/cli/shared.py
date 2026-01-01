@@ -143,10 +143,11 @@ def create_trainer(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Checkpoint callback
+    # Checkpoint callback - replace '/' in metric name to avoid directory creation
+    monitor_metric = checkpoint_config.get('monitor', 'val/lpips').replace('/', '-')
     checkpoint_callback = ModelCheckpoint(
         dirpath=output_dir,
-        filename=f"{stage_name}-{{epoch:02d}}-{{{checkpoint_config.get('monitor', 'val/lpips')}:.4f}}",
+        filename=f"{stage_name}-{{epoch:02d}}-{{{monitor_metric}:.4f}}",
         monitor=checkpoint_config.get("monitor", "val/lpips"),
         mode=checkpoint_config.get("mode", "min"),
         save_top_k=checkpoint_config.get("save_top_k", 3),
