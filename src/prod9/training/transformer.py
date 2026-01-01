@@ -414,9 +414,9 @@ class TransformerLightning(pl.LightningModule):
         fid_value = self.fid.compute()
         is_mean, is_std = self.is_metric.compute()
 
-        self.log("val/fid", fid_value, prog_bar=True, sync_dist=True)
-        self.log("val/is_mean", is_mean, prog_bar=True, sync_dist=True)
-        self.log("val/is_std", is_std, sync_dist=True)
+        self.log("val/fid", fid_value, prog_bar=True, logger=True, sync_dist=True)
+        self.log("val/is_mean", is_mean, prog_bar=True, logger=True, sync_dist=True)
+        self.log("val/is_std", is_std, logger=True, sync_dist=True)
 
         # Reset for next epoch
         self.fid.reset()

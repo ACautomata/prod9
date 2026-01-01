@@ -347,9 +347,9 @@ class AutoencoderLightning(pl.LightningModule):
         lpips_value = self.lpips(reconstructed, images)
 
         # Log individually
-        self.log("val/psnr", psnr_value, prog_bar=False)
-        self.log("val/ssim", ssim_value, prog_bar=False)
-        self.log("val/lpips", lpips_value, prog_bar=True)
+        self.log("val/psnr", psnr_value, prog_bar=False, logger=True)
+        self.log("val/ssim", ssim_value, prog_bar=False, logger=True)
+        self.log("val/lpips", lpips_value, prog_bar=True, logger=True)
 
         # Return metrics dictionary (no combined metric)
         return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}

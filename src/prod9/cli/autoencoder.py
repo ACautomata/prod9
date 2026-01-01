@@ -58,6 +58,18 @@ def train_autoencoder(config: str) -> None:
     # Train
     trainer.fit(model, datamodule=data_module)
 
+    # Load best checkpoint before export (if available)
+    best_model_path = getattr(trainer.checkpoint_callback, 'best_model_path', '')
+    if best_model_path:
+        print(f"Loading best checkpoint: {best_model_path}")
+        best_checkpoint = torch.load(best_model_path, map_location="cpu")
+        if "state_dict" in best_checkpoint:
+            model.load_state_dict(best_checkpoint["state_dict"])
+        else:
+            model.load_state_dict(best_checkpoint)
+    else:
+        print("Warning: No best checkpoint found, using current model state")
+
     # Export final model
     export_path = cfg.get("autoencoder_export_path", "outputs/autoencoder_final.pt")
     model.export_autoencoder(export_path)
