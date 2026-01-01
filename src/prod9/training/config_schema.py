@@ -532,3 +532,124 @@ class MedMNIST3DTransformerFullConfig(BaseModel):
     sliding_window: SlidingWindowConfig = Field(
         default_factory=lambda: SlidingWindowConfig(enabled=True)
     )
+
+
+# =============================================================================
+# MAISI Configuration Models
+# =============================================================================
+
+
+class MAISIVAEModelConfig(BaseModel):
+    """Configuration for MAISI VAE model (KL divergence, no FSQ)."""
+
+    spatial_dims: int = Field(default=3, ge=1, le=3)
+    latent_channels: int = Field(default=4, ge=1, description="Latent channels for MAISI VAE")
+    in_channels: int = Field(default=1, ge=1)
+    out_channels: int = Field(default=1, ge=1)
+    num_channels: Tuple[int, ...] = Field(default=(32, 64, 64, 64))
+    attention_levels: Tuple[bool, ...] = Field(default=(False, False, True, True))
+    num_res_blocks: Tuple[int, ...] = Field(default=(1, 1, 1, 1))
+    norm_num_groups: int = Field(default=32, ge=1)
+    num_splits: int = Field(default=4, ge=1)
+
+
+class MAISIVAELossConfig(BaseModel):
+    """Configuration for MAISI VAE loss (no discriminator, no perceptual)."""
+
+    recon_weight: float = Field(default=1.0, ge=0, description="Reconstruction loss weight")
+    kl_weight: float = Field(default=1e-6, ge=0, description="KL divergence loss weight")
+
+
+class DiffusionModelConfig(BaseModel):
+    """Configuration for Rectified Flow diffusion model."""
+
+    spatial_dims: int = Field(default=3, ge=1, le=3)
+    in_channels: int = Field(default=4, ge=1)
+    num_channels: Tuple[int, ...] = Field(default=(32, 64, 64, 64))
+    attention_levels: Tuple[bool, ...] = Field(default=(False, False, True, True))
+    num_res_blocks: Tuple[int, ...] = Field(default=(1, 1, 1, 1))
+    num_head_channels: Tuple[int, ...] = Field(default=(0, 0, 32, 32))
+    norm_num_groups: int = Field(default=32, ge=1)
+
+
+class RectifiedFlowConfig(BaseModel):
+    """Configuration for Rectified Flow scheduler."""
+
+    num_train_timesteps: int = Field(default=1000, ge=1)
+    num_inference_steps: int = Field(default=10, ge=1)
+
+
+class ControlNetConditionConfig(BaseModel):
+    """Configuration for ControlNet conditioning."""
+
+    condition_type: Literal["mask", "modality_image", "both"] = Field(
+        default="mask",
+        description="Type of conditioning for ControlNet",
+    )
+    source_modality: str = Field(default="T1", description="Source modality name")
+    target_modality: str = Field(default="T2", description="Target modality name")
+
+
+class ControlNetModelConfig(BaseModel):
+    """Configuration for ControlNet model."""
+
+    spatial_dims: int = Field(default=3, ge=1, le=3)
+    in_channels: int = Field(default=4, ge=1)
+    num_channels: Tuple[int, ...] = Field(default=(32, 64, 64, 64))
+    attention_levels: Tuple[bool, ...] = Field(default=(False, False, True, True))
+    num_res_blocks: Tuple[int, ...] = Field(default=(1, 1, 1, 1))
+    condition_dim: int = Field(default=4, ge=1)
+
+
+# =============================================================================
+# MAISI Full Configuration Models
+# =============================================================================
+
+
+class MAISIVAEFullConfig(BaseModel):
+    """Complete configuration for MAISI Stage 1 VAE training."""
+
+    output_dir: str
+    vae_export_path: Optional[str] = Field(default=None, description="Path to export trained VAE")
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    data: Union[DataConfig, MedMNIST3DDataConfig]
+    loss: MAISIVAELossConfig = Field(default_factory=MAISIVAELossConfig)
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+
+
+class MAISIDiffusionFullConfig(BaseModel):
+    """Complete configuration for MAISI Stage 2 Rectified Flow training."""
+
+    output_dir: str
+    vae_path: str = Field(description="Path to trained Stage 1 VAE checkpoint")
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    scheduler: RectifiedFlowConfig = Field(default_factory=RectifiedFlowConfig)
+    data: Union[DataConfig, MedMNIST3DDataConfig]
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    sliding_window: SlidingWindowConfig = Field(
+        default_factory=lambda: SlidingWindowConfig(enabled=True)
+    )
+
+
+class MAISIControlNetFullConfig(BaseModel):
+    """Complete configuration for MAISI Stage 3 ControlNet training."""
+
+    output_dir: str
+    vae_path: str = Field(description="Path to trained Stage 1 VAE checkpoint")
+    diffusion_path: str = Field(description="Path to trained Stage 2 diffusion checkpoint")
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    scheduler: RectifiedFlowConfig = Field(default_factory=RectifiedFlowConfig)
+    controlnet: ControlNetConditionConfig = Field(default_factory=ControlNetConditionConfig)
+    data: DataConfig  # Only BraTS (requires segmentation masks)
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    sliding_window: SlidingWindowConfig = Field(
+        default_factory=lambda: SlidingWindowConfig(enabled=True)
+    )
