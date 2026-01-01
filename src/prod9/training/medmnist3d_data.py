@@ -482,8 +482,8 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                 label_int = int(label) if np.ndim(label) == 0 else int(label.item())
                 encoded_data.append(
                     {
-                        "latent": latent.squeeze(0),  # Remove batch dimension
-                        "indices": indices_tensor,
+                        "latent": latent.squeeze(0).cpu(),  # Move to CPU before caching
+                        "indices": indices_tensor.cpu(),  # Move to CPU before caching
                         "label": label_int,
                     }
                 )

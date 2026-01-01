@@ -749,8 +749,8 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                         indices = autoencoder.quantize(latent)
                         # indices: [1, H'*W'*D']
 
-                        patient_data[f"{modality}_latent"] = latent.squeeze(0)
-                        patient_data[f"{modality}_indices"] = indices.squeeze(0)
+                        patient_data[f"{modality}_latent"] = latent.squeeze(0).cpu()
+                        patient_data[f"{modality}_indices"] = indices.squeeze(0).cpu()
 
                     encoded_data.append(patient_data)
 
