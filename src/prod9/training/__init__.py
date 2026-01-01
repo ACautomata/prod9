@@ -4,6 +4,9 @@ Training module for prod-9 MaskGiT pipeline.
 This module provides training utilities for:
 - Stage 1: Autoencoder training (VQGAN-style)
 - Stage 2: Transformer training (any-to-any generation)
+- MAISI Stage 1: VAE training with KL divergence
+- MAISI Stage 2: Rectified Flow diffusion training
+- MAISI Stage 3: ControlNet conditional generation
 """
 
 from prod9.training.config import load_config
@@ -28,6 +31,19 @@ from prod9.training.lightning_module import (
     TransformerLightningConfig,
 )
 
+# MAISI modules
+try:
+    from prod9.training.maisi_vae import MAISIVAELightning
+    from prod9.training.maisi_vae_config import MAISIVAELightningConfig
+    from prod9.training.maisi_diffusion import MAISIDiffusionLightning
+    from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
+    from prod9.training.controlnet_lightning import ControlNetLightning
+    from prod9.training.maisi_controlnet_config import ControlNetLightningConfig
+    from prod9.training.brats_controlnet_data import BraTSControlNetDataModule
+    MAISI_AVAILABLE = True
+except ImportError:
+    MAISI_AVAILABLE = False
+
 __all__ = [
     # Config
     "load_config",
@@ -48,6 +64,18 @@ __all__ = [
     "TransformerLightning",
     "TransformerLightningConfig",
 ]
+
+# MAISI exports
+if MAISI_AVAILABLE:
+    __all__.extend([
+        "MAISIVAELightning",
+        "MAISIVAELightningConfig",
+        "MAISIDiffusionLightning",
+        "MAISIDiffusionLightningConfig",
+        "ControlNetLightning",
+        "ControlNetLightningConfig",
+        "BraTSControlNetDataModule",
+    ])
 
 # CLI imports (optional, may not be available in all contexts)
 # CLI main functions are now in prod9.cli.autoencoder and prod9.cli.transformer

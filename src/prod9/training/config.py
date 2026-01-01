@@ -124,7 +124,7 @@ def load_validated_config(
 
     Args:
         config_path: Path to YAML configuration file
-        stage: "autoencoder" or "transformer"
+        stage: "autoencoder", "transformer", "maisi_vae", "maisi_diffusion", or "maisi_controlnet"
 
     Returns:
         Validated configuration dictionary
@@ -146,6 +146,16 @@ def load_validated_config(
             AutoencoderFullConfig,
             TransformerFullConfig,
         )
+        # MAISI schemas - optional import
+        try:
+            from prod9.training.config_schema import (
+                MAISIVAEFullConfig,
+                MAISIDiffusionFullConfig,
+                MAISIControlNetFullConfig,
+            )
+            MAISI_SCHEMAS_AVAILABLE = True
+        except ImportError:
+            MAISI_SCHEMAS_AVAILABLE = False
     except ImportError as e:
         raise ImportError(
             f"Failed to import config schema: {e}\n"
@@ -157,8 +167,23 @@ def load_validated_config(
         validated = AutoencoderFullConfig(**config)
     elif stage == "transformer":
         validated = TransformerFullConfig(**config)
+    elif stage == "maisi_vae":
+        if not MAISI_SCHEMAS_AVAILABLE:
+            raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
+        validated = MAISIVAEFullConfig(**config)
+    elif stage == "maisi_diffusion":
+        if not MAISI_SCHEMAS_AVAILABLE:
+            raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
+        validated = MAISIDiffusionFullConfig(**config)
+    elif stage == "maisi_controlnet":
+        if not MAISI_SCHEMAS_AVAILABLE:
+            raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
+        validated = MAISIControlNetFullConfig(**config)
     else:
-        raise ValueError(f"Unknown stage: {stage}. Must be 'autoencoder' or 'transformer'")
+        raise ValueError(
+            f"Unknown stage: {stage}. Must be 'autoencoder', 'transformer', "
+            "'maisi_vae', 'maisi_diffusion', or 'maisi_controlnet'"
+        )
 
     # Return as dict (validated)
     return validated.model_dump()
@@ -169,7 +194,7 @@ def get_default_config(stage: str = "autoencoder") -> Dict[str, Any]:
     Get default configuration for a stage.
 
     Args:
-        stage: "autoencoder" or "transformer"
+        stage: "autoencoder", "transformer", "maisi_vae", "maisi_diffusion", or "maisi_controlnet"
 
     Returns:
         Default configuration dictionary
@@ -184,15 +209,24 @@ def get_default_config(stage: str = "autoencoder") -> Dict[str, Any]:
         default_config = AutoencoderFullConfig(
             output_dir="outputs/stage1",
             autoencoder_export_path="outputs/autoencoder_final.pt",
-            data=DataConfig(data_dir="data"), 
+            data=DataConfig(data_dir="data"),
         )
     elif stage == "transformer":
         default_config = TransformerFullConfig(
             output_dir="outputs/stage2",
             autoencoder_path="outputs/autoencoder_final.pt",
-            data=DataConfig(data_dir="data"),  
+            data=DataConfig(data_dir="data"),
         )
+    elif stage in ("maisi_vae", "maisi_diffusion", "maisi_controlnet"):
+        # MAISI configs require specific schemas, return minimal config
+        return {
+            "output_dir": f"outputs/maisi_{stage}",
+            "data": {"data_dir": "data"},
+        }
     else:
-        raise ValueError(f"Unknown stage: {stage}. Must be 'autoencoder' or 'transformer'")
+        raise ValueError(
+            f"Unknown stage: {stage}. Must be 'autoencoder', 'transformer', "
+            "'maisi_vae', 'maisi_diffusion', or 'maisi_controlnet'"
+        )
 
     return default_config.model_dump()

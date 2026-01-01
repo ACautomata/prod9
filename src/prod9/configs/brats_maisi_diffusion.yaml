@@ -1,0 +1,110 @@
+# =============================================================================
+# prod9 MAISI Stage 2 Configuration (BraTS)
+# Rectified Flow diffusion training
+# =============================================================================
+
+vae_path: "outputs/maisi_vae_final.pt"
+output_dir: "outputs/maisi_stage2"
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  diffusion:
+    spatial_dims: 3
+    in_channels: 4
+    num_channels: [32, 64, 64, 64]
+    attention_levels: [False, False, True, True]
+    num_res_blocks: [1, 1, 1, 1]
+    num_head_channels: [0, 0, 32, 32]
+    norm_num_groups: 32
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  optimizer:
+    lr_g: 1e-4
+    b1: 0.9
+    b2: 0.999
+    weight_decay: 1e-5
+
+# =============================================================================
+# Scheduler Configuration (Rectified Flow)
+# =============================================================================
+scheduler:
+  num_train_timesteps: 1000
+  num_inference_steps: 10
+
+# =============================================================================
+# Data Configuration (BraTS)
+# =============================================================================
+data:
+  data_dir: "${BRATS_DATA_DIR:data/BraTS}"
+  batch_size: 2
+  num_workers: 4
+  roi_size: [64, 64, 64]
+  cache_rate: 0.5
+  pin_memory: true
+
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]
+    orientation: "RAS"
+    intensity_a_min: 0.0
+    intensity_a_max: 500.0
+    intensity_b_min: -1.0
+    intensity_b_max: 1.0
+    clip: true
+
+  augmentation:
+    flip_prob: 0.5
+    flip_axes: [0, 1, 2]
+    rotate_prob: 0.5
+    rotate_max_k: 3
+    rotate_axes: [0, 1]
+    shift_intensity_prob: 0.5
+    shift_intensity_offset: 0.1
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
+callbacks:
+  checkpoint:
+    monitor: "val/loss"
+    mode: "min"
+    save_top_k: 3
+    save_last: true
+
+  early_stop:
+    enabled: true
+    monitor: "val/loss"
+    patience: 15
+    mode: "min"
+
+  lr_monitor: true
+
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
+trainer:
+  max_epochs: 50
+
+  hardware:
+    accelerator: "auto"
+    devices: "auto"
+    precision: "bf16-mixed"
+
+  logging:
+    log_every_n_steps: 10
+    val_check_interval: 1.0
+    limit_val_batches: 5
+
+# =============================================================================
+# Sliding Window Inference (for VAE encoding)
+# =============================================================================
+sliding_window:
+  enabled: true
+  roi_size: [64, 64, 64]
+  overlap: 0.5
+  sw_batch_size: 1
+  mode: "gaussian"
