@@ -55,7 +55,7 @@ class ControlNetLightning(pl.LightningModule):
         diffusion_path: str,
         controlnet: Optional[ControlNetRF] = None,
         condition_encoder: Optional[nn.Module] = None,
-        condition_type: Literal["mask", "modality_image", "both"] = "mask",
+        condition_type: Literal["mask", "image", "label", "both"] = "mask",
         num_train_timesteps: int = 1000,
         num_inference_steps: int = 10,
         lr: float = 1e-4,
@@ -152,7 +152,7 @@ class ControlNetLightning(pl.LightningModule):
         # Create condition encoder if not provided
         if self.condition_encoder is None:
             self.condition_encoder = ConditionEncoder(
-                condition_type=self.condition_type,
+                condition_type=cast(Literal["mask", "image", "label", "both"], self.condition_type),
                 in_channels=1,
                 latent_channels=latent_channels,
                 num_labels=4,
@@ -226,16 +226,16 @@ class ControlNetLightning(pl.LightningModule):
         # Prepare condition
         if self.condition_type == "mask":
             condition_input = batch.get("mask", source_image)
-        elif self.condition_type == "modality_image":
+        elif self.condition_type == "image":
             condition_input = source_image
-        else:  # both
+        else:  # both or label
             condition_input = {
                 "mask": batch.get("mask", source_image),
                 "label": batch.get("label", torch.zeros(source_image.shape[0], dtype=torch.long)),
             }
 
         with torch.no_grad():
-            condition = self.condition_encoder(condition_input)
+            condition = cast(nn.Module, self.condition_encoder)(condition_input)
 
         # Sample random timesteps
         batch_size = target_latent.shape[0]
@@ -291,15 +291,15 @@ class ControlNetLightning(pl.LightningModule):
             # Prepare condition
             if self.condition_type == "mask":
                 condition_input = batch.get("mask", source_image)
-            elif self.condition_type == "modality_image":
+            elif self.condition_type == "image":
                 condition_input = source_image
-            else:  # both
+            else:  # both or label
                 condition_input = {
                     "mask": batch.get("mask", source_image),
                     "label": batch.get("label", torch.zeros(source_image.shape[0], dtype=torch.long)),
                 }
 
-            condition = self.condition_encoder(condition_input)
+            condition = cast(nn.Module, self.condition_encoder)(condition_input)
 
             # Get target shape
             latent_shape = vae.encode_stage_2_inputs(target_image).shape
@@ -337,8 +337,10 @@ class ControlNetLightning(pl.LightningModule):
         """Configure Adam optimizer (only for ControlNet parameters)."""
         if self.controlnet is None:
             raise RuntimeError("ControlNet not initialized.")
+        if self.condition_encoder is None:
+            raise RuntimeError("Condition encoder not initialized.")
         return torch.optim.AdamW(
-            list(self.controlnet.parameters()) + list(self.condition_encoder.parameters()),
+            list(self.controlnet.parameters()) + list(cast(nn.Module, self.condition_encoder).parameters()),
             lr=self.lr,
             betas=(0.9, 0.999),
             weight_decay=1e-5,
@@ -366,7 +368,7 @@ class ControlNetLightning(pl.LightningModule):
 
         with torch.no_grad():
             # Encode condition
-            condition = self.condition_encoder(condition_input)
+            condition = cast(nn.Module, self.condition_encoder)(condition_input)
 
             if shape is None:
                 shape = (num_samples, 4, 32, 32, 32)
@@ -417,10 +419,10 @@ def _sample_with_controlnet(
 
         # Combine
         model_output = diffusion_output + controlnet_output
-        sample = self.scheduler.step(model_output, t.item(), sample)
+        sample = self.scheduler.step(model_output, int(t.item()), sample)
 
     return sample
 
 
 # Monkey patch the sampler
-RectifiedFlowSampler.sample_with_controlnet = _sample_with_controlnet
+RectifiedFlowSampler.sample_with_controlnet = _sample_with_controlnet  # type: ignore[attr-defined]

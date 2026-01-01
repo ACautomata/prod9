@@ -1,5 +1,5 @@
 """
-Sliding window inference wrapper for AutoencoderFSQ.
+Sliding window inference wrapper for AutoencoderFSQ and AutoencoderMAISI.
 
 Provides memory-safe inference for large 3D volumes using MONAI's SlidingWindowInferer.
 Training should use direct autoencoder calls for efficiency (data loader crops to ROI).
@@ -9,15 +9,23 @@ unpad_from_sliding_window() from prod9.autoencoder.padding for padding operation
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, cast
+from typing import TYPE_CHECKING, Optional, Tuple, Union, cast
 
 import torch
 from monai.inferers.inferer import SlidingWindowInferer
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
+if TYPE_CHECKING:
+    from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
+else:
+    try:
+        from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
+    except ImportError:
+        AutoencoderMAISI = None  # type: ignore
 
-def _compute_scale_factor(autoencoder: AutoencoderFSQ) -> int:
+
+def _compute_scale_factor(autoencoder: Union[AutoencoderFSQ, "AutoencoderMAISI"]) -> int:
     """
     Compute the encoder's downsampling factor from architecture.
 
@@ -89,7 +97,7 @@ class SlidingWindowConfig:
 
 class AutoencoderInferenceWrapper:
     """
-    Wrapper for AutoencoderFSQ with sliding window inference.
+    Wrapper for AutoencoderFSQ/AutoencoderMAISI with sliding window inference.
 
     This wrapper applies SlidingWindowInferer for memory-safe processing of large volumes.
     Padding should be handled externally using pad_for_sliding_window() and
@@ -99,7 +107,7 @@ class AutoencoderInferenceWrapper:
     - SW application for encode/decode operations
     - Configurable via SlidingWindowConfig
     - Device handling (MPS/CUDA/CPU)
-    - Preserves AutoencoderFSQ interface
+    - Preserves AutoencoderFSQ/AutoencoderMAISI interface
 
     Usage:
         # Create wrapper
@@ -123,14 +131,14 @@ class AutoencoderInferenceWrapper:
 
     def __init__(
         self,
-        autoencoder: AutoencoderFSQ,
+        autoencoder: Union[AutoencoderFSQ, "AutoencoderMAISI"],
         sw_config: SlidingWindowConfig,
     ):
         """
         Initialize wrapper with autoencoder and SW configuration.
 
         Args:
-            autoencoder: Trained AutoencoderFSQ model
+            autoencoder: Trained AutoencoderFSQ or AutoencoderMAISI model
             sw_config: Sliding window config (device is auto-detected if None)
         """
         self.autoencoder = autoencoder
@@ -200,7 +208,7 @@ class AutoencoderInferenceWrapper:
 
         # Wrap encode method for SW
         def _encode_fn(x: torch.Tensor) -> torch.Tensor:
-            z_mu, _ = self.autoencoder.encode(x)
+            z_mu, _ = self.autoencoder.encode(x)  # type: ignore[misc]
             return z_mu
 
         # Apply SW - handle different return types
@@ -227,7 +235,7 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, C, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(z, self.autoencoder.decode)
+        result = inferer(z, self.autoencoder.decode)  # type: ignore[arg-type]
 
         # Handle different return types
         if isinstance(result, tuple):
@@ -251,7 +259,7 @@ class AutoencoderInferenceWrapper:
         # First encode with sliding window to get continuous latent
         z_mu, _ = self.encode(x)
         # Then quantize to discrete indices
-        return self.autoencoder.quantize(z_mu)
+        return self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """
@@ -266,7 +274,7 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, 1, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(latent, self.autoencoder.decode_stage_2_outputs)
+        result = inferer(latent, self.autoencoder.decode_stage_2_outputs)  # type: ignore[arg-type]
 
         if isinstance(result, tuple):
             result = result[0]
@@ -287,7 +295,7 @@ class AutoencoderInferenceWrapper:
         Returns:
             Embedded continuous vectors [B, C, H, W, D]
         """
-        return self.autoencoder.embed(indices)
+        return self.autoencoder.embed(indices)  # type: ignore[return-value]
 
     def quantize(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -301,7 +309,7 @@ class AutoencoderInferenceWrapper:
         Returns:
             Token indices [B, H, W, D]
         """
-        return self.autoencoder.quantize(z)
+        return self.autoencoder.quantize(z)  # type: ignore[return-value]
 
     def encode_with_sw(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -331,7 +339,7 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, C, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(z, self.autoencoder.decode)
+        result = inferer(z, self.autoencoder.decode)  # type: ignore[arg-type]
         if isinstance(result, tuple):
             return result[0]
         elif isinstance(result, dict):
@@ -352,7 +360,7 @@ class AutoencoderInferenceWrapper:
             Token indices [B, H'*W'*D']
         """
         z_mu, _ = self.encode(x)
-        return self.autoencoder.quantize(z_mu)
+        return self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -368,8 +376,8 @@ class AutoencoderInferenceWrapper:
             Reconstructed image [B, C, H, W, D]
         """
         z_mu, _ = self.encode(x)
-        z_quantized = self.autoencoder.quantize(z_mu)
-        z_embedded = self.autoencoder.embed(z_quantized)
+        z_quantized = self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
+        z_embedded = self.autoencoder.embed(z_quantized)  # type: ignore[return-value]
         return self.decode(z_embedded)
 
     def to(self, device: torch.device) -> "AutoencoderInferenceWrapper":

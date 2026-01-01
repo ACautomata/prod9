@@ -7,7 +7,7 @@ This module provides encoding for different types of conditions:
 - Modality labels (as embeddings)
 """
 
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Sequence, Union, cast
 
 import torch
 import torch.nn as nn
@@ -79,11 +79,11 @@ class ConditionEncoder(nn.Module):
         """
         if self.condition_type == "mask":
             # Encode segmentation mask
-            return self._encode_spatial(condition)
+            return self._encode_spatial(cast(torch.Tensor, condition))
 
         elif self.condition_type == "image":
             # Encode source image
-            return self._encode_spatial(condition)
+            return self._encode_spatial(cast(torch.Tensor, condition))
 
         elif self.condition_type == "label":
             # Encode modality label
@@ -142,7 +142,7 @@ class MultiConditionEncoder(nn.Module):
 
     def __init__(
         self,
-        condition_types: list[Literal["mask", "image", "label"]] = ("mask",),
+        condition_types: Sequence[Literal["mask", "image", "label"]] = ("mask",),
         in_channels: int = 1,
         latent_channels: int = 4,
         spatial_dims: int = 3,

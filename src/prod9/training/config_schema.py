@@ -582,9 +582,9 @@ class RectifiedFlowConfig(BaseModel):
 class ControlNetConditionConfig(BaseModel):
     """Configuration for ControlNet conditioning."""
 
-    condition_type: Literal["mask", "modality_image", "both"] = Field(
+    condition_type: Literal["mask", "image", "label", "both"] = Field(
         default="mask",
-        description="Type of conditioning for ControlNet",
+        description="Type of conditioning for ControlNet. Options: mask, image, label, both",
     )
     source_modality: str = Field(default="T1", description="Source modality name")
     target_modality: str = Field(default="T2", description="Target modality name")

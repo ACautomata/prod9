@@ -5,10 +5,13 @@ This module provides sampling functionality for generating images using
 the trained Rectified Flow diffusion model.
 """
 
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import torch
 import torch.nn as nn
+
+if TYPE_CHECKING:
+    from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
 
 
 class RectifiedFlowSampler:
@@ -71,9 +74,25 @@ class RectifiedFlowSampler:
             model_output = diffusion_model(sample, t_batch, condition)
 
             # Denoise step
-            sample = self.scheduler.step(model_output, t.item(), sample)
+            sample = self.scheduler.step(model_output, int(t.item()), sample)
 
         return sample
+
+    def sample_with_controlnet(
+        self,
+        diffusion_model: nn.Module,
+        controlnet: nn.Module,
+        shape: tuple[int, ...],
+        condition: torch.Tensor,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        Sample with ControlNet conditioning.
+
+        This method is monkey-patched at runtime by controlnet_lightning.
+        It's declared here for type checking purposes.
+        """
+        raise NotImplementedError("Method is monkey-patched at runtime")
 
     @torch.no_grad()
     def sample_with_progress(
@@ -106,7 +125,7 @@ class RectifiedFlowSampler:
         for i, t in enumerate(timesteps):
             t_batch = t.expand(sample.shape[0])
             model_output = diffusion_model(sample, t_batch, condition)
-            sample = self.scheduler.step(model_output, t.item(), sample)
+            sample = self.scheduler.step(model_output, int(t.item()), sample)
 
             if progress_callback is not None:
                 progress_callback(i + 1, sample)

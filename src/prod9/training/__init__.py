@@ -38,7 +38,7 @@ try:
     from prod9.training.maisi_diffusion import MAISIDiffusionLightning
     from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
     from prod9.training.controlnet_lightning import ControlNetLightning
-    from prod9.training.maisi_controlnet_config import ControlNetLightningConfig
+    from prod9.training.maisi_controlnet_config import MAISIControlNetLightningConfig
     from prod9.training.brats_controlnet_data import BraTSControlNetDataModule
     MAISI_AVAILABLE = True
 except ImportError:
@@ -73,7 +73,7 @@ if MAISI_AVAILABLE:
         "MAISIDiffusionLightning",
         "MAISIDiffusionLightningConfig",
         "ControlNetLightning",
-        "ControlNetLightningConfig",
+        "MAISIControlNetLightningConfig",
         "BraTSControlNetDataModule",
     ])
 

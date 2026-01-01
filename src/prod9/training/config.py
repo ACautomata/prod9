@@ -7,7 +7,7 @@ with environment variable substitution and Pydantic validation.
 
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -146,21 +146,26 @@ def load_validated_config(
             AutoencoderFullConfig,
             TransformerFullConfig,
         )
-        # MAISI schemas - optional import
-        try:
-            from prod9.training.config_schema import (
-                MAISIVAEFullConfig,
-                MAISIDiffusionFullConfig,
-                MAISIControlNetFullConfig,
-            )
-            MAISI_SCHEMAS_AVAILABLE = True
-        except ImportError:
-            MAISI_SCHEMAS_AVAILABLE = False
     except ImportError as e:
         raise ImportError(
             f"Failed to import config schema: {e}\n"
             "Ensure pydantic is installed: pip install pydantic"
         ) from e
+
+    # MAISI schemas - optional import
+    MAISI_SCHEMAS_AVAILABLE = False  # type: ignore[assignment]
+    MAISIVAEFullConfig = None  # type: ignore[assignment]
+    MAISIDiffusionFullConfig = None  # type: ignore[assignment]
+    MAISIControlNetFullConfig = None  # type: ignore[assignment]
+    try:
+        from prod9.training.config_schema import (
+            MAISIVAEFullConfig,
+            MAISIDiffusionFullConfig,
+            MAISIControlNetFullConfig,
+        )
+        MAISI_SCHEMAS_AVAILABLE = True  # type: ignore[assignment]
+    except ImportError:
+        pass
 
     # Validate with appropriate schema
     if stage == "autoencoder":
@@ -170,15 +175,15 @@ def load_validated_config(
     elif stage == "maisi_vae":
         if not MAISI_SCHEMAS_AVAILABLE:
             raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
-        validated = MAISIVAEFullConfig(**config)
+        validated = cast(Any, MAISIVAEFullConfig)(**config)
     elif stage == "maisi_diffusion":
         if not MAISI_SCHEMAS_AVAILABLE:
             raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
-        validated = MAISIDiffusionFullConfig(**config)
+        validated = cast(Any, MAISIDiffusionFullConfig)(**config)
     elif stage == "maisi_controlnet":
         if not MAISI_SCHEMAS_AVAILABLE:
             raise ValueError(f"MAISI schemas not available. Check config_schema.py for MAISI configuration classes.")
-        validated = MAISIControlNetFullConfig(**config)
+        validated = cast(Any, MAISIControlNetFullConfig)(**config)
     else:
         raise ValueError(
             f"Unknown stage: {stage}. Must be 'autoencoder', 'transformer', "

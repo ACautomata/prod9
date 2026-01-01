@@ -40,7 +40,7 @@ class _ControlNetDataset(Dataset):
         self,
         data_files: List[Dict[str, str]],
         transforms: Compose,
-        condition_type: Literal["mask", "modality_image", "both"] = "mask",
+        condition_type: Literal["mask", "image", "label", "both"] = "mask",
         source_modality: str = "T1",
         target_modality: str = "T2",
         target_modality_idx: int = 1,
@@ -49,7 +49,7 @@ class _ControlNetDataset(Dataset):
         Args:
             data_files: List of dictionaries mapping modality names to file paths
             transforms: MONAI transforms to apply
-            condition_type: Type of conditioning ("mask", "modality_image", "both")
+            condition_type: Type of conditioning ("mask", "image", "label", "both")
             source_modality: Source modality name (e.g., "T1")
             target_modality: Target modality name (e.g., "T2")
             target_modality_idx: Target modality index (0-3 for BraTS)
@@ -103,7 +103,7 @@ class BraTSControlNetDataModule(pl.LightningDataModule):
 
     Supports three condition types:
         - mask: Segmentation mask (organ/tumor from BraTS seg files)
-        - modality_image: Source modality image (e.g., T1 -> T2 generation)
+        - image: Source modality image (e.g., T1 -> T2 generation)
         - both: Both mask and source image as conditions
 
     Only supports BraTS dataset (requires segmentation masks for mask conditioning).
@@ -114,7 +114,7 @@ class BraTSControlNetDataModule(pl.LightningDataModule):
         num_workers: Number of dataloader workers
         roi_size: Size of random crops for training
         train_val_split: Train/validation split ratio
-        condition_type: Type of conditioning ("mask", "modality_image", "both")
+        condition_type: Type of conditioning ("mask", "image", "label", "both")
         source_modality: Source modality name (e.g., "T1")
         target_modality: Target modality name (e.g., "T2")
         spacing: Pixel dimensions for spacing transform
@@ -133,7 +133,7 @@ class BraTSControlNetDataModule(pl.LightningDataModule):
         num_workers: int = 4,
         roi_size: Tuple[int, int, int] = (64, 64, 64),
         train_val_split: float = 0.8,
-        condition_type: Literal["mask", "modality_image", "both"] = "mask",
+        condition_type: Literal["mask", "image", "label", "both"] = "mask",
         source_modality: str = "T1",
         target_modality: str = "T2",
         # Preprocessing parameters
@@ -262,7 +262,7 @@ class BraTSControlNetDataModule(pl.LightningDataModule):
             self.train_dataset = _ControlNetDataset(
                 data_files=train_files_filtered,
                 transforms=train_transforms,
-                condition_type=self.condition_type,
+                condition_type=cast(Literal["mask", "image", "label", "both"], self.condition_type),
                 source_modality=self.source_modality,
                 target_modality=self.target_modality,
                 target_modality_idx=self.target_modality_idx,
@@ -270,7 +270,7 @@ class BraTSControlNetDataModule(pl.LightningDataModule):
             self.val_dataset = _ControlNetDataset(
                 data_files=val_files_filtered,
                 transforms=val_transforms,
-                condition_type=self.condition_type,
+                condition_type=cast(Literal["mask", "image", "label", "both"], self.condition_type),
                 source_modality=self.source_modality,
                 target_modality=self.target_modality,
                 target_modality_idx=self.target_modality_idx,

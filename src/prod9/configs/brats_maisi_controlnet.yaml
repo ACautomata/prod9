@@ -24,7 +24,7 @@ model:
 # ControlNet Configuration
 # =============================================================================
 controlnet:
-  condition_type: "mask"  # Options: mask, modality_image, both
+  condition_type: "mask"  # Options: mask, image, label, both
   source_modality: "T1"
   target_modality: "T2"
 
