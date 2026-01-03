@@ -21,6 +21,18 @@ from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
+def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
+    """Convert images from [-1, 1] to [0, 1] for visualization.
+
+    Args:
+        tensor: Image tensor in [-1, 1] range.
+
+    Returns:
+        Image tensor in [0, 1] range.
+    """
+    return (tensor + 1.0) / 2.0
+
+
 class AutoencoderLightning(pl.LightningModule):
     """
     Lightning module for Stage 1 autoencoder training.
@@ -370,8 +382,8 @@ class AutoencoderLightning(pl.LightningModule):
         if experiment and hasattr(experiment, 'add_image'):
             # Get middle slice for 3D images (D dimension)
             d_mid = images.shape[4] // 2  # Shape: [B, C, H, W, D]
-            real_2d = images[0, 0, :, :, d_mid]  # Shape: [H, W]
-            recon_2d = reconstructed[0, 0, :, :, d_mid]  # Shape: [H, W]
+            real_2d = _denormalize(images[0, 0, :, :, d_mid])  # Shape: [H, W], [-1,1] -> [0,1]
+            recon_2d = _denormalize(reconstructed[0, 0, :, :, d_mid])  # Shape: [H, W]
 
             # Add channel dimension for tensorboard (HWC format)
             real_2d = real_2d.unsqueeze(-1)  # Shape: [H, W, 1]

@@ -20,6 +20,18 @@ from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWind
 from prod9.training.metrics import FIDMetric3D, InceptionScore3D
 
 
+def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
+    """Convert images from [-1, 1] to [0, 1] for visualization.
+
+    Args:
+        tensor: Image tensor in [-1, 1] range.
+
+    Returns:
+        Image tensor in [0, 1] range.
+    """
+    return (tensor + 1.0) / 2.0
+
+
 class TransformerLightning(pl.LightningModule):
     """
     Lightning module for Stage 2: Any-to-any cross-modality generation.
@@ -512,8 +524,8 @@ class TransformerLightning(pl.LightningModule):
             # Get middle slice along depth dimension
             mid_slice = generated_images.shape[-1] // 2
 
-            # Generated image
-            generated_slice = generated_images[i, 0, :, :, mid_slice]  # [H, W]
+            # Generated image (denormalize from [-1,1] to [0,1] for visualization)
+            generated_slice = _denormalize(generated_images[i, 0, :, :, mid_slice])  # [H, W]
             if experiment and hasattr(experiment, 'add_image'):
                 experiment.add_image(
                     f"val/samples/{modality}_{i}",
