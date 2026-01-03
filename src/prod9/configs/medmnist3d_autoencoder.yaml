@@ -46,11 +46,11 @@ model:
 training:
   # Optimizer settings
   optimizer:
-    lr_g: 1e-4  # Generator (autoencoder) learning rate
+    lr_g: 1e-5  # Generator (autoencoder) learning rate
     lr_d: 4e-4  # Discriminator learning rate
     b1: 0.5  # Adam beta1
     b2: 0.999  # Adam beta2
-    weight_decay: 1e-5
+    weight_decay: 1e-3
 
   # Learning rate scheduler (optional, currently constant)
   scheduler:
@@ -96,7 +96,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 0  # Discriminator warmup
+  discriminator_iter_start: 3000  # Discriminator warmup
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -111,7 +111,7 @@ loss:
   # Adversarial loss
   adversarial:
     weight: 0.1  # Base weight (scaled adaptively)
-    criterion: "least_squares"  # hinge, least_squares, bce
+    criterion: "hinge"  # hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:
@@ -119,7 +119,7 @@ loss:
 
   # Adaptive weight calculation
   adaptive:
-    max_weight: 10000.0  # Clamp adaptive weight
+    max_weight: 100.0  # Clamp adaptive weight
     grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
 
 # =============================================================================
@@ -150,13 +150,13 @@ callbacks:
 # =============================================================================
 trainer:
   # Training settings
-  max_epochs: 10
+  max_epochs: 100
 
   # Hardware
   hardware:
     accelerator: "auto"  # auto, gpu, cpu, mps (Apple Silicon)
     devices: "auto"  # auto, 1, 2, 4, etc.
-    precision: "16-mixed"  # 32, 16, bf16
+    precision: "bf16-mixed"  # 32, 16, bf16
 
   # Logging
   logging:
