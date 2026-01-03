@@ -248,7 +248,7 @@ class AutoencoderLightning(pl.LightningModule):
 
         # Backward and optimize
         self.manual_backward(disc_loss)
-        self._optimizer_step(opt_d)
+        self._optimizer_step(opt_d, optimizer_idx=1)
         self._optimizer_zero_grad(opt_d)
 
         return disc_loss
@@ -286,17 +286,25 @@ class AutoencoderLightning(pl.LightningModule):
 
         # Backward and optimize
         self.manual_backward(losses["total"])
-        self._optimizer_step(opt_g)
+        self._optimizer_step(opt_g, optimizer_idx=0)
         self._optimizer_zero_grad(opt_g)
 
         return losses
 
-    def _optimizer_step(self, optimizer) -> None:
-        """Helper to step optimizer, handling both LightningOptimizer and raw optimizers."""
-        if hasattr(optimizer, 'optimizer'):
-            optimizer.optimizer.step()
-        else:
-            optimizer.step()
+    def _optimizer_step(self, optimizer: torch.optim.Optimizer, optimizer_idx: int) -> None:
+        """Helper to step optimizer with Lightning step tracking.
+
+        Args:
+            optimizer: The optimizer to step.
+            optimizer_idx: Index of the optimizer (0 for generator, 1 for discriminator).
+        """
+        # Step the optimizer
+        optimizer.step()
+
+        # Manually increment global_step since we're using manual optimization
+        # Only increment once per training step (after generator optimizer)
+        if optimizer_idx == 0:
+            self.trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.increment_completed()
 
     def _optimizer_zero_grad(self, optimizer) -> None:
         """Helper to zero grad, handling both LightningOptimizer and raw optimizers."""
