@@ -274,7 +274,10 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         data_dir: Root directory containing BraTS data
         batch_size: Batch size
         num_workers: Number of dataloader workers
-        cache_rate: Cache rate for MONAI CacheDataset
+        cache_rate: Cache rate for MONAI CacheDataset (1.0 = full cache for faster training)
+        val_batch_size: Validation batch size (increase to utilize GPU better)
+        prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
+        persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         roi_size: Size of random crops for training
         train_val_split: Train/validation split ratio
         fold: Cross-validation fold
@@ -300,7 +303,10 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         data_dir: str,
         batch_size: int = 2,
         num_workers: int = 4,
-        cache_rate: float = 0.5,
+        cache_rate: float = 1.0,
+        val_batch_size: int = 1,
+        prefetch_factor: int = 2,
+        persistent_workers: bool = True,
         roi_size: Tuple[int, int, int] = (128, 128, 128),
         train_val_split: float = 0.8,
         fold: int = 0,
@@ -327,6 +333,9 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.cache_rate = cache_rate
+        self.val_batch_size = val_batch_size
+        self.prefetch_factor = prefetch_factor
+        self.persistent_workers = persistent_workers
         self.roi_size = roi_size
         self.train_val_split = train_val_split
         self.fold = fold
@@ -373,7 +382,10 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             data_dir=data_config["data_dir"],
             batch_size=data_config.get("batch_size", 2),
             num_workers=data_config.get("num_workers", 4),
-            cache_rate=data_config.get("cache_rate", 0.5),
+            cache_rate=data_config.get("cache_rate", 1.0),
+            val_batch_size=data_config.get("val_batch_size", 1),
+            prefetch_factor=data_config.get("prefetch_factor", 2),
+            persistent_workers=data_config.get("persistent_workers", True),
             roi_size=tuple(data_config.get("roi_size", (64, 64, 64))),
             train_val_split=data_config.get("train_val_split", 0.8),
             modalities=data_config.get("modalities"),
@@ -495,6 +507,8 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             # No custom collate_fn needed - PyTorch default works fine
             # Default collate will:
             #   - Stack tensors: List[Tensor[1,1,H,W,D]] → Tensor[B,1,H,W,D]
@@ -508,10 +522,12 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
 
         return DataLoader(
             self.val_dataset,
-            batch_size=1,
+            batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             # No custom collate_fn needed
         )
 
@@ -538,7 +554,10 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         autoencoder_path: Path to autoencoder checkpoint (if autoencoder not provided)
         batch_size: Batch size
         num_workers: Number of dataloader workers
-        cache_rate: Cache rate for MONAI CacheDataset
+        cache_rate: Cache rate for MONAI CacheDataset (1.0 = full cache for faster training)
+        val_batch_size: Validation batch size (increase to utilize GPU better)
+        prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
+        persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         roi_size: Size of random crops for training
         train_val_split: Train/validation split ratio
         modalities: List of modality names
@@ -562,7 +581,10 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         autoencoder_path: Optional[str] = None,
         batch_size: int = 2,
         num_workers: int = 4,
-        cache_rate: float = 0.5,
+        cache_rate: float = 1.0,
+        val_batch_size: int = 1,
+        prefetch_factor: int = 2,
+        persistent_workers: bool = True,
         roi_size: Tuple[int, int, int] = (128, 128, 128),
         train_val_split: float = 0.8,
         modalities: Optional[List[str]] = None,
@@ -589,6 +611,9 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.cache_rate = cache_rate
+        self.val_batch_size = val_batch_size
+        self.prefetch_factor = prefetch_factor
+        self.persistent_workers = persistent_workers
         self.roi_size = roi_size
         self.train_val_split = train_val_split
         self.modalities = modalities or MODALITY_KEYS
@@ -633,7 +658,10 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             data_dir=data_config["data_dir"],
             batch_size=data_config.get("batch_size", 2),
             num_workers=data_config.get("num_workers", 4),
-            cache_rate=data_config.get("cache_rate", 0.5),
+            cache_rate=data_config.get("cache_rate", 1.0),
+            val_batch_size=data_config.get("val_batch_size", 1),
+            prefetch_factor=data_config.get("prefetch_factor", 2),
+            persistent_workers=data_config.get("persistent_workers", True),
             roi_size=tuple(data_config.get("roi_size", (64, 64, 64))),
             train_val_split=data_config.get("train_val_split", 0.8),
             modalities=data_config.get("modalities"),
@@ -801,6 +829,8 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -810,8 +840,10 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
 
         return DataLoader(
             self.val_dataset,
-            batch_size=1,
+            batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )

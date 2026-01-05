@@ -121,6 +121,9 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         download: Whether to download data if not present
         batch_size: Batch size for DataLoader
         num_workers: Number of workers for DataLoader
+        val_batch_size: Validation batch size (increase to utilize GPU better)
+        prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
+        persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
         augmentation: Optional augmentation configuration
     """
@@ -144,6 +147,9 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         download: bool = True,
         batch_size: int = 8,
         num_workers: int = 4,
+        val_batch_size: int = 8,
+        prefetch_factor: int = 2,
+        persistent_workers: bool = True,
         train_val_split: float = 0.9,
         augmentation=None,
     ):
@@ -154,6 +160,9 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.download = download
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.val_batch_size = val_batch_size
+        self.prefetch_factor = prefetch_factor
+        self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
         self.augmentation = augmentation
 
@@ -267,7 +276,6 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         from monai.transforms.intensity.dictionary import RandShiftIntensityd
 
         transforms = []
-
         # Spatial transforms
         if train and self.augmentation.get("flip_prob", 0) > 0:
             transforms.append(
@@ -327,6 +335,8 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
     def val_dataloader(self):
@@ -337,10 +347,12 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
 
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
     @classmethod
@@ -362,6 +374,9 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             download=data_config.get("download", True),
             batch_size=data_config.get("batch_size", 8),
             num_workers=data_config.get("num_workers", 4),
+            val_batch_size=data_config.get("val_batch_size", 8),
+            prefetch_factor=data_config.get("prefetch_factor", 2),
+            persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
             augmentation=augmentation,
         )
@@ -383,6 +398,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         cache_dir: Directory for pre-encoded data cache
         batch_size: Batch size for DataLoader
         num_workers: Number of workers for DataLoader
+        val_batch_size: Validation batch size (increase to utilize GPU better)
+        prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
+        persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
     """
 
@@ -398,6 +416,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         cache_dir: str = "outputs/medmnist3d_encoded",
         batch_size: int = 8,
         num_workers: int = 4,
+        val_batch_size: int = 8,
+        prefetch_factor: int = 2,
+        persistent_workers: bool = True,
         train_val_split: float = 0.9,
     ):
         super().__init__()  # Required by LightningDataModule
@@ -412,6 +433,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         self.cache_dir = cache_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.val_batch_size = val_batch_size
+        self.prefetch_factor = prefetch_factor
+        self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
 
         # Dynamically get dataset class
@@ -543,6 +567,8 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
     def val_dataloader(self):
@@ -553,10 +579,12 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
 
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
     @classmethod
@@ -575,5 +603,8 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             cache_dir=data_config.get("cache_dir", "outputs/medmnist3d_encoded"),
             batch_size=data_config.get("batch_size", 8),
             num_workers=data_config.get("num_workers", 4),
+            val_batch_size=data_config.get("val_batch_size", 8),
+            prefetch_factor=data_config.get("prefetch_factor", 2),
+            persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
         )

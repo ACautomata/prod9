@@ -266,11 +266,14 @@ class DataConfig(BaseModel):
     data_dir: Optional[str] = Field(default=None)
     batch_size: int = Field(default=2, ge=1)
     num_workers: int = Field(default=4, ge=0)
+    val_batch_size: int = Field(default=1, ge=1, description="Validation batch size")
+    prefetch_factor: int = Field(default=2, ge=1, description="Batches to prefetch per worker")
+    persistent_workers: bool = Field(default=True, description="Keep workers alive between epochs")
     train_val_split: float = Field(default=0.8, gt=0, lt=1)
 
     # BraTS-specific fields (optional)
     modalities: List[str] = Field(default=["T1", "T1ce", "T2", "FLAIR"])
-    cache_rate: float = Field(default=0.5, ge=0, le=1)
+    cache_rate: float = Field(default=1.0, ge=0, le=1)
     pin_memory: bool = Field(default=True)
     roi_size: List[int] = Field(default=[64, 64, 64])
     preprocessing: Optional[PreprocessingConfig] = Field(default=None)
@@ -572,6 +575,9 @@ class MedMNIST3DDataConfig(BaseModel):
 
     batch_size: int = Field(default=8, ge=1)
     num_workers: int = Field(default=4, ge=0)
+    val_batch_size: int = Field(default=8, ge=1, description="Validation batch size")
+    prefetch_factor: int = Field(default=2, ge=1, description="Batches to prefetch per worker")
+    persistent_workers: bool = Field(default=True, description="Keep workers alive between epochs")
     train_val_split: float = Field(default=0.9, gt=0, lt=1)
 
     # Optional augmentation
