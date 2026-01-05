@@ -56,6 +56,13 @@ training:
   unconditional:
     unconditional_prob: 0.1
 
+  # Training stability settings
+  stability:
+    grad_norm_logging: true  # Log gradient norms for monitoring training health
+    warmup_enabled: true  # Enable learning rate warmup
+    warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
+    warmup_ratio: 0.02  # 2% of total training steps for warmup
+
 # =============================================================================
 # MaskGiT Sampler Configuration
 # =============================================================================

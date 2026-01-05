@@ -119,6 +119,35 @@ class OptimizerConfig(BaseModel):
     weight_decay: float = Field(default=1e-5, ge=0)
 
 
+class WarmupConfig(BaseModel):
+    """Warmup configuration for stable training start.
+
+    Warmup gradually increases learning rate from 0 to base_lr over the first
+    N steps, preventing early training instability caused by large updates
+    to randomly initialized parameters.
+
+    Recommended: warmup_ratio of 0.01-0.05 (1-5% of total training steps).
+    """
+
+    enabled: bool = Field(default=True, description="Enable learning rate warmup")
+    warmup_steps: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Explicit warmup steps (overrides warmup_ratio if set)",
+    )
+    warmup_ratio: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=0.5,
+        description="Ratio of total_steps for warmup (default: 2%)",
+    )
+    eta_min: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Minimum learning rate after cosine decay (as ratio of base_lr)",
+    )
+
+
 class LearningRateSchedulerConfig(BaseModel):
     """Learning rate scheduler configuration."""
 
@@ -128,12 +157,47 @@ class LearningRateSchedulerConfig(BaseModel):
     step_size: Optional[int] = Field(default=None, ge=1)
     gamma: Optional[float] = Field(default=None, gt=0)
     eta_min: Optional[float] = Field(default=None, ge=0)
+    # Warmup configuration
+    warmup: Optional[WarmupConfig] = Field(default_factory=WarmupConfig)
 
 
 class TrainingLoopConfig(BaseModel):
     """Training loop configuration for Lightning module settings."""
 
     sample_every_n_steps: int = Field(default=100, ge=1)
+
+
+class StabilityConfig(BaseModel):
+    """Training stability configuration.
+
+    Controls gradient norm logging, warmup, and gradient clipping
+    for monitoring and stabilizing training dynamics.
+    """
+
+    grad_norm_logging: bool = Field(
+        default=True,
+        description="Enable gradient norm logging callback",
+    )
+    warmup_enabled: bool = Field(
+        default=True,
+        description="Enable learning rate warmup (overrides scheduler.warmup.enabled if True)",
+    )
+    warmup_steps: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Explicit warmup steps (overrides auto-calculation)",
+    )
+    warmup_ratio: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=0.5,
+        description="Ratio of total_steps for warmup (default: 2%)",
+    )
+    manual_optimization_clip_val: Optional[float] = Field(
+        default=1.0,
+        ge=0.0,
+        description="Gradient clip value for manual optimization (GAN training)",
+    )
 
 
 class UnconditionalConfig(BaseModel):
@@ -150,6 +214,8 @@ class TrainingConfig(BaseModel):
         default_factory=LearningRateSchedulerConfig
     )
     loop: TrainingLoopConfig = Field(default_factory=TrainingLoopConfig)
+    # Training stability controls
+    stability: StabilityConfig = Field(default_factory=StabilityConfig)
     # For transformer
     unconditional: Optional[UnconditionalConfig] = None
 

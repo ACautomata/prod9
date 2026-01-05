@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 from medmnist import INFO
-from torch.utils.data import DataLoader, Dataset as TorchDataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset as TorchDataset
 
 import prod9.training.brats_data as brats_data
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
@@ -138,6 +138,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
     def __init__(
         self,
         dataset_name: str = "organmnist3d",
+        dataset_names: list[str] | None = None,
         size: Literal[28, 64] = 64,
         root: str = "./.medmnist",
         download: bool = True,
@@ -148,13 +149,6 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
     ):
         super().__init__()  # Required by LightningDataModule
 
-        if dataset_name not in self.DATASETS:
-            raise ValueError(
-                f"Unknown dataset: {dataset_name}. "
-                f"Available datasets: {self.DATASETS}"
-            )
-
-        self.dataset_name = dataset_name
         self.size = size
         self.root = root
         self.download = download
@@ -163,51 +157,94 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.train_val_split = train_val_split
         self.augmentation = augmentation
 
-        # Dynamically get dataset class from INFO
-        info = INFO[dataset_name]
-        class_name = info["python_class"]
-        self.dataset_class = getattr(medmnist, class_name)
+        # Handle "all" shortcut for combining all datasets
+        if dataset_name == "all":
+            dataset_names = self.DATASETS.copy()
+            dataset_name = "combined"
 
-        # Get number of classes (for Stage 2)
-        self.num_classes = len(info["label"])
+        # Determine which datasets to use
+        if dataset_names is None:
+            datasets_to_use = [dataset_name]
+        else:
+            datasets_to_use = dataset_names
+
+        # Validate all dataset names
+        for ds_name in datasets_to_use:
+            if ds_name not in self.DATASETS:
+                raise ValueError(
+                    f"Unknown dataset: {ds_name}. "
+                    f"Available datasets: {self.DATASETS}"
+                )
+
+        self.dataset_name = dataset_name  # For logging/backward compatibility
+        self.dataset_names = datasets_to_use
+
+        # Store dataset classes and num_classes for each dataset
+        self.dataset_classes = {}
+        self.num_classes_list = []
+        for ds_name in datasets_to_use:
+            info = INFO[ds_name]
+            class_name = info["python_class"]
+            self.dataset_classes[ds_name] = getattr(medmnist, class_name)
+            self.num_classes_list.append(len(info["label"]))
+
+        # Total number of unique classes (for Stage 2, if needed)
+        self.num_classes = sum(self.num_classes_list)
 
         self.train_dataset = None
         self.val_dataset = None
 
     def _setup_datasets(self):
-        """Initialize train/val datasets."""
+        """Initialize train/val datasets with ConcatDataset support."""
         # Create root directory if it doesn't exist
         if self.root and not os.path.exists(self.root):
             os.makedirs(self.root, exist_ok=True)
-
-        # Load raw datasets
-        raw_train = self.dataset_class(
-            split="train", download=self.download, size=self.size, root=self.root
-        )
-
-        # Split into train/val
-        total_samples = len(raw_train)
-        train_size = int(total_samples * self.train_val_split)
-
-        # Create train/val splits using indices
-        train_indices = list(range(train_size))
-        val_indices = list(range(train_size, total_samples))
-
-        # Create subset datasets
-        train_subset = torch.utils.data.Subset(raw_train, train_indices)
-        val_subset = torch.utils.data.Subset(raw_train, val_indices)
 
         # Create transforms
         train_transform = self._create_transform(train=True)
         val_transform = self._create_transform(train=False)
 
-        # Wrap in custom dataset classes
-        self.train_dataset = _MedMNIST3DStage1Dataset(
-            train_subset, train_transform, modality_name=self.dataset_name
-        )
-        self.val_dataset = _MedMNIST3DStage1Dataset(
-            val_subset, val_transform, modality_name=self.dataset_name
-        )
+        train_datasets = []
+        val_datasets = []
+
+        for ds_name in self.dataset_names:
+            # Load raw dataset
+            dataset_class = self.dataset_classes[ds_name]
+            raw_train = dataset_class(
+                split="train", download=self.download, size=self.size, root=self.root
+            )
+
+            # Split into train/val
+            total_samples = len(raw_train)
+            train_size = int(total_samples * self.train_val_split)
+
+            # Create train/val splits using indices
+            train_indices = list(range(train_size))
+            val_indices = list(range(train_size, total_samples))
+
+            # Create subset datasets
+            train_subset = torch.utils.data.Subset(raw_train, train_indices)
+            val_subset = torch.utils.data.Subset(raw_train, val_indices)
+
+            # Wrap in custom dataset classes
+            train_datasets.append(
+                _MedMNIST3DStage1Dataset(
+                    train_subset, train_transform, modality_name=ds_name
+                )
+            )
+            val_datasets.append(
+                _MedMNIST3DStage1Dataset(
+                    val_subset, val_transform, modality_name=ds_name
+                )
+            )
+
+        # Combine datasets using ConcatDataset if multiple datasets
+        if len(train_datasets) > 1:
+            self.train_dataset = ConcatDataset(train_datasets)
+            self.val_dataset = ConcatDataset(val_datasets)
+        else:
+            self.train_dataset = train_datasets[0]
+            self.val_dataset = val_datasets[0]
 
     def setup(self, stage: str = "fit") -> None:
         """Setup train and validation datasets.
@@ -319,6 +356,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
 
         return cls(
             dataset_name=data_config.get("dataset_name", "organmnist3d"),
+            dataset_names=data_config.get("dataset_names", None),
             size=data_config.get("size", 64),
             root=data_config.get("root", "./.medmnist"),
             download=data_config.get("download", True),

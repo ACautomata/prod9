@@ -18,6 +18,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.metrics import FIDMetric3D, InceptionScore3D
+from prod9.training.schedulers import create_warmup_scheduler
 
 
 def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
@@ -72,6 +73,10 @@ class TransformerLightning(pl.LightningModule):
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
         sw_batch_size: Sliding window batch size (default: 1)
+        warmup_enabled: Enable learning rate warmup (default: True)
+        warmup_steps: Explicit warmup steps, or None to auto-calculate (default: None)
+        warmup_ratio: Ratio of total steps for warmup (default: 0.02)
+        warmup_eta_min: Minimum LR ratio after warmup (default: 0.0)
 
     Note:
         spatial_dims and levels are loaded from the autoencoder checkpoint,
@@ -101,6 +106,11 @@ class TransformerLightning(pl.LightningModule):
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
         sw_batch_size: int = 1,
+        # Training stability parameters
+        warmup_enabled: bool = True,
+        warmup_steps: Optional[int] = None,
+        warmup_ratio: float = 0.02,
+        warmup_eta_min: float = 0.0,
     ):
         super().__init__()
 
@@ -135,6 +145,11 @@ class TransformerLightning(pl.LightningModule):
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
 
+        # Training stability config
+        self.warmup_enabled = warmup_enabled
+        self.warmup_steps = warmup_steps
+        self.warmup_ratio = warmup_ratio
+        self.warmup_eta_min = warmup_eta_min
 
         # MaskGiTConditionGenerator for classifier-free guidance training
         # Note: uses latent_channels since we add embedding to the latent tensor
@@ -435,14 +450,40 @@ class TransformerLightning(pl.LightningModule):
         self.is_metric.reset()
 
     def configure_optimizers(self):
-        """Configure Adam optimizer."""
+        """Configure Adam optimizer with optional warmup scheduler."""
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             [*self.transformer.parameters(), *self.condition_generator.parameters()],
             lr=self.lr,
             betas=(0.9, 0.999),
         )
+
+        # Configure scheduler with warmup if enabled
+        if self.warmup_enabled:
+            # Estimate total training steps
+            total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
+            if total_steps is None:
+                # Fallback estimate: 100 epochs * estimated batches per epoch
+                num_epochs = getattr(self.trainer, "max_epochs", 100)
+                total_steps = num_epochs * 1000  # Conservative estimate
+
+            # Calculate warmup steps
+            warmup_steps = self.warmup_steps
+            if warmup_steps is None:
+                warmup_steps = max(100, int(self.warmup_ratio * total_steps))
+
+            scheduler = create_warmup_scheduler(
+                optimizer,
+                warmup_steps=warmup_steps,
+                total_steps=total_steps,
+                warmup_ratio=self.warmup_ratio,
+                eta_min=self.warmup_eta_min,
+            )
+            # Lightning expects sequences of optimizers and schedulers
+            return [optimizer], [scheduler]
+
+        return optimizer
 
     def sample(
         self,

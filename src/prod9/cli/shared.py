@@ -11,6 +11,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, Ca
 from pytorch_lightning.loggers import TensorBoardLogger
 from dotenv import load_dotenv
 
+from prod9.training.callbacks import GradientNormLogging
+
 
 def setup_environment() -> None:
     """Load environment variables from .env file."""
@@ -144,16 +146,17 @@ def create_trainer(
     os.makedirs(output_dir, exist_ok=True)
 
     # Checkpoint callback - replace '/' in metric name to avoid directory creation
-    monitor_metric = checkpoint_config.get('monitor', 'val/lpips').replace('/', '-')
+    monitor = checkpoint_config.get('monitor', 'val/lpips')
     checkpoint_callback = ModelCheckpoint(
         dirpath=output_dir,
-        filename=f"{stage_name}-{{epoch:02d}}-{{{monitor_metric}:.4f}}",
-        monitor=checkpoint_config.get("monitor", "val/lpips"),
+        filename=f"{stage_name}-{{epoch:02d}}-{monitor.replace('/', '-')}:{{{monitor}:.4f}}",
+        monitor=monitor,
         mode=checkpoint_config.get("mode", "min"),
         save_top_k=checkpoint_config.get("save_top_k", 3),
         save_last=checkpoint_config.get("save_last", True),
         every_n_epochs=checkpoint_config.get("every_n_epochs", 1),
         verbose=True,
+        auto_insert_metric_name=False
     )
 
     # Callbacks list
@@ -173,6 +176,17 @@ def create_trainer(
     if callback_config.get("lr_monitor", True):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
+
+    # Gradient norm logging callback (from training.stability config)
+    training_config = config.get("training", {})
+    stability_config = training_config.get("stability", {})
+    if stability_config.get("grad_norm_logging", True):
+        grad_norm_callback = GradientNormLogging(
+            log_interval=1,  # Log every step
+            log_grad_norm_gen=True,
+            log_grad_norm_disc=True,
+        )
+        callbacks.append(grad_norm_callback)
 
     # TensorBoard logger
     logger = TensorBoardLogger(

@@ -47,10 +47,10 @@ class TransformerDecoder(nn.Module):
         ])
         self.unpatch_proj = nn.Linear(
             hidden_dim,
-            patch_size ** 3 * latent_dim
+            patch_size ** 3 * hidden_dim
         )
         self.out_proj = nn.Conv3d(
-            latent_dim,
+            hidden_dim,
             codebook_size,
             kernel_size=1,
             padding=0,

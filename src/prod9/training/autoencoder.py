@@ -18,6 +18,7 @@ from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.losses import VAEGANLoss
 from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
+from prod9.training.schedulers import create_warmup_scheduler
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
@@ -73,6 +74,11 @@ class AutoencoderLightning(pl.LightningModule):
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
         sw_batch_size: Sliding window batch size (default: 1)
+        warmup_enabled: Enable learning rate warmup (default: True)
+        warmup_steps: Explicit warmup steps, or None to auto-calculate (default: None)
+        warmup_ratio: Ratio of total steps for warmup (default: 0.02)
+        warmup_eta_min: Minimum LR ratio after warmup (default: 0.0)
+        grad_clip_value: Gradient clipping value for manual optimization (default: 1.0)
     """
 
     def __init__(
@@ -93,6 +99,12 @@ class AutoencoderLightning(pl.LightningModule):
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
         sw_batch_size: int = 1,
+        # Training stability parameters
+        warmup_enabled: bool = True,
+        warmup_steps: Optional[int] = None,
+        warmup_ratio: float = 0.02,
+        warmup_eta_min: float = 0.0,
+        grad_clip_value: Optional[float] = 1.0,
     ):
         super().__init__()
 
@@ -132,6 +144,13 @@ class AutoencoderLightning(pl.LightningModule):
 
         # Logging config
         self.sample_every_n_steps = sample_every_n_steps
+
+        # Training stability config
+        self.warmup_enabled = warmup_enabled
+        self.warmup_steps = warmup_steps
+        self.warmup_ratio = warmup_ratio
+        self.warmup_eta_min = warmup_eta_min
+        self.grad_clip_value = grad_clip_value
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -208,10 +227,10 @@ class AutoencoderLightning(pl.LightningModule):
         self.log("train/gen_commitment", gen_losses["commitment"])
         self.log("train/adv_weight", gen_losses.get("adv_weight", 0.0))
 
-        # Log per-modality count
-        for modality in set(modalities):
-            count = modalities.count(modality)
-            self.log(f"train/{modality}_count", float(count))
+        # # Log per-modality count
+        # for modality in set(modalities):
+        #     count = modalities.count(modality)
+        #     self.log(f"train/{modality}_count", float(count))
 
         # Log samples periodically
         if batch_idx % self.sample_every_n_steps == 0:
@@ -246,8 +265,35 @@ class AutoencoderLightning(pl.LightningModule):
         if self.global_step < self.vaegan_loss.discriminator_iter_start:
             disc_loss = disc_loss * 0.0
 
-        # Backward and optimize
+        # Backward
         self.manual_backward(disc_loss)
+
+        # Gradient clipping for manual optimization
+        if self.grad_clip_value is not None and self.grad_clip_value > 0:
+            disc_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.discriminator.parameters(),
+                self.grad_clip_value,
+            )
+            # Log whether clipping occurred
+            self.log(
+                "train/disc_grad_norm",
+                disc_grad_norm,
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=False,
+                batch_size=1,
+            )
+            self.log(
+                "train/disc_grad_clipped",
+                float(disc_grad_norm > self.grad_clip_value),
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=False,
+                batch_size=1,
+            )
+
         self._optimizer_step(opt_d, optimizer_idx=1)
         self._optimizer_zero_grad(opt_d)
 
@@ -284,8 +330,35 @@ class AutoencoderLightning(pl.LightningModule):
             last_layer=self.last_layer,
         )
 
-        # Backward and optimize
+        # Backward
         self.manual_backward(losses["total"])
+
+        # Gradient clipping for manual optimization
+        if self.grad_clip_value is not None and self.grad_clip_value > 0:
+            gen_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.autoencoder.parameters(),
+                self.grad_clip_value,
+            )
+            # Log whether clipping occurred
+            self.log(
+                "train/gen_grad_norm",
+                gen_grad_norm,
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=False,
+                batch_size=1,
+            )
+            self.log(
+                "train/gen_grad_clipped",
+                float(gen_grad_norm > self.grad_clip_value),
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=False,
+                batch_size=1,
+            )
+
         self._optimizer_step(opt_g, optimizer_idx=0)
         self._optimizer_zero_grad(opt_g)
 
@@ -411,7 +484,7 @@ class AutoencoderLightning(pl.LightningModule):
             )
 
     def configure_optimizers(self):
-        """Configure separate optimizers for generator and discriminator."""
+        """Configure separate optimizers for generator and discriminator, with optional warmup."""
         lr_g = float(getattr(self.hparams, 'lr_g', 1e-4))
         lr_d = float(getattr(self.hparams, 'lr_d', 4e-4))
         b1 = float(getattr(self.hparams, 'b1', 0.5))
@@ -427,6 +500,40 @@ class AutoencoderLightning(pl.LightningModule):
             lr=lr_d,
             betas=(b1, b2),
         )
+
+        # Configure schedulers with warmup if enabled
+        if self.warmup_enabled:
+            # Estimate total training steps
+            # This will be updated by the trainer if known, otherwise use a reasonable estimate
+            total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
+            if total_steps is None:
+                # Fallback estimate: 100 epochs * estimated batches per epoch
+                num_epochs = getattr(self.trainer, "max_epochs", 100)
+                # We don't know the dataset size yet, use a reasonable default
+                total_steps = num_epochs * 1000  # Will be conservative
+
+            # Calculate warmup steps
+            warmup_steps = self.warmup_steps
+            if warmup_steps is None:
+                warmup_steps = max(100, int(self.warmup_ratio * total_steps))
+
+            # Create schedulers
+            scheduler_g = create_warmup_scheduler(
+                opt_g,
+                warmup_steps=warmup_steps,
+                total_steps=total_steps,
+                warmup_ratio=self.warmup_ratio,
+                eta_min=self.warmup_eta_min,
+            )
+            scheduler_d = create_warmup_scheduler(
+                opt_d,
+                warmup_steps=warmup_steps,
+                total_steps=total_steps,
+                warmup_ratio=self.warmup_ratio,
+                eta_min=self.warmup_eta_min,
+            )
+
+            return [opt_g, opt_d], [scheduler_g, scheduler_d]
 
         return [opt_g, opt_d]
 

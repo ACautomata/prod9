@@ -563,6 +563,103 @@ class TestMedMNIST3DDataModuleStage1:
         # OrganMNIST3D has 11 classes
         assert dm.num_classes == 11
 
+    def test_init_with_all_datasets_shortcut(self) -> None:
+        """Test dataset_name='all' expands to all datasets."""
+        dm = MedMNIST3DDataModuleStage1(dataset_name="all", download=False)
+        assert dm.dataset_name == "combined"
+        assert len(dm.dataset_names) == 6
+        assert dm.dataset_names == MedMNIST3DDataModuleStage1.DATASETS
+
+    def test_init_with_multiple_datasets(self) -> None:
+        """Test initialization with multiple datasets via dataset_names."""
+        dm = MedMNIST3DDataModuleStage1(
+            dataset_names=["organmnist3d", "nodulemnist3d", "vesselmnist3d"],
+            download=False,
+        )
+        assert dm.dataset_name == "organmnist3d"  # First dataset used for logging
+        assert len(dm.dataset_names) == 3
+        assert dm.dataset_names == ["organmnist3d", "nodulemnist3d", "vesselmnist3d"]
+
+    def test_init_with_invalid_dataset_in_list_raises_error(self) -> None:
+        """Test ValueError when one dataset in list is invalid."""
+        with pytest.raises(ValueError, match="Unknown dataset"):
+            MedMNIST3DDataModuleStage1(
+                dataset_names=["organmnist3d", "invalid_dataset"],
+                download=False,
+            )
+
+    @patch("medmnist.OrganMNIST3D")
+    @patch("medmnist.NoduleMNIST3D")
+    def test_concatdataset_with_multiple_datasets(
+        self, mock_nodule: MagicMock, mock_organ: MagicMock
+    ) -> None:
+        """Test ConcatDataset is created for multiple datasets."""
+        from torch.utils.data import ConcatDataset
+
+        # Create mock datasets with different sizes
+        organ_dataset = MagicMock()
+        organ_dataset.__len__.return_value = 100
+        mock_organ.return_value = organ_dataset
+
+        nodule_dataset = MagicMock()
+        nodule_dataset.__len__.return_value = 50
+        mock_nodule.return_value = nodule_dataset
+
+        dm = MedMNIST3DDataModuleStage1(
+            dataset_names=["organmnist3d", "nodulemnist3d"],
+            train_val_split=0.9,
+            download=False,
+        )
+        dm.setup()
+
+        # Should create ConcatDataset
+        assert isinstance(dm.train_dataset, ConcatDataset)
+        assert isinstance(dm.val_dataset, ConcatDataset)
+        # 90 + 45 = 135 training samples
+        assert len(dm.train_dataset) == 135
+        # 10 + 5 = 15 validation samples
+        assert len(dm.val_dataset) == 15
+
+    @patch("medmnist.OrganMNIST3D")
+    def test_single_dataset_does_not_use_concatdataset(
+        self, mock_dataset_class: MagicMock
+    ) -> None:
+        """Test single dataset doesn't use ConcatDataset."""
+        from torch.utils.data import ConcatDataset
+
+        mock_dataset = MagicMock()
+        mock_dataset.__len__.return_value = 100
+        mock_dataset_class.return_value = mock_dataset
+
+        dm = MedMNIST3DDataModuleStage1(download=False)
+        dm.setup()
+
+        # Should NOT create ConcatDataset for single dataset
+        assert not isinstance(dm.train_dataset, ConcatDataset)
+        assert not isinstance(dm.val_dataset, ConcatDataset)
+
+    def test_num_classes_summed_for_multiple_datasets(self) -> None:
+        """Test num_classes is sum of all dataset classes."""
+        dm = MedMNIST3DDataModuleStage1(
+            dataset_names=["organmnist3d", "nodulemnist3d", "adrenalmnist3d"],
+            download=False,
+        )
+        # OrganMNIST3D: 11, NoduleMNIST3D: 2, AdrenalMNIST3D: 2 = 15
+        assert dm.num_classes == 15
+
+    def test_from_config_with_dataset_names(self) -> None:
+        """Test from_config supports dataset_names parameter."""
+        config = {
+            "data": {
+                "dataset_name": "organmnist3d",
+                "dataset_names": ["organmnist3d", "nodulemnist3d"],
+                "size": 64,
+            }
+        }
+        dm = MedMNIST3DDataModuleStage1.from_config(config)
+        assert len(dm.dataset_names) == 2
+        assert dm.dataset_names == ["organmnist3d", "nodulemnist3d"]
+
 
 class TestMedMNIST3DDataModuleStage2:
     """Tests for MedMNIST3DDataModuleStage2 class."""

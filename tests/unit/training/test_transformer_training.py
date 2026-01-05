@@ -7,7 +7,7 @@ _log_samples, and error paths.
 
 import tempfile
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -527,11 +527,14 @@ class TestConfigureOptimizers(unittest.TestCase):
             autoencoder_path=self.checkpoint_path,
             transformer=mock_transformer,
             lr=2e-4,
+            warmup_enabled=False,  # Disable warmup to test optimizer-only return
         )
 
         # Patch condition_generator.parameters to return parameters
         with patch.object(model.condition_generator, 'parameters', return_value=[torch.randn(1, requires_grad=True)]):
-            optimizer = model.configure_optimizers()
+            result = model.configure_optimizers()
+            # When warmup_enabled=False, returns optimizer directly
+            optimizer = cast(torch.optim.AdamW, result)
 
         self.assertIsInstance(optimizer, torch.optim.AdamW)
         self.assertEqual(optimizer.param_groups[0]["lr"], 2e-4)
