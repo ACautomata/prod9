@@ -55,7 +55,7 @@ class AutoencoderLightningConfig:
         # Get loss configuration
         loss_config = config.get("loss", {})
         recon_config = loss_config.get("reconstruction", {})
-        perceptual_config = loss_config.get("perceptual", {})
+        ffl_config = loss_config.get("focal_frequency", {})
         adv_config = loss_config.get("adversarial", {})
         commitment_config = loss_config.get("commitment", {})
         discriminator_iter_start = loss_config.get("discriminator_iter_start", 0)
@@ -72,9 +72,13 @@ class AutoencoderLightningConfig:
             b1=optimizer_config.get("b1", 0.5),
             b2=optimizer_config.get("b2", 0.999),
             recon_weight=recon_config.get("weight", 1.0),
-            perceptual_weight=perceptual_config.get("weight", 0.5),
+            perceptual_weight=ffl_config.get("weight", 0.5),
             adv_weight=adv_config.get("weight", 0.1),
             commitment_weight=commitment_config.get("weight", 0.25),
+            ffl_alpha=ffl_config.get("alpha", 1.0),
+            ffl_patch_factor=ffl_config.get("patch_factor", 1),
+            ffl_axes=tuple(ffl_config.get("axes", (2, 3, 4))),
+            ffl_ratio=ffl_config.get("ratio", 0.5),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             discriminator_iter_start=discriminator_iter_start,
             # Sliding window config

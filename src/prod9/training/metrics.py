@@ -226,8 +226,8 @@ class FIDMetric3D(nn.Module):
             pred: Generated images [B, C, H, W, D]
             target: Real images [B, C, H, W, D]
         """
-        self.fake_features.append(self._extract_features(pred).cpu())
-        self.real_features.append(self._extract_features(target).cpu())
+        self.fake_features.append(self._extract_features(pred))
+        self.real_features.append(self._extract_features(target))
 
     def compute(self) -> torch.Tensor:
         """
@@ -239,8 +239,9 @@ class FIDMetric3D(nn.Module):
         if not self.real_features or not self.fake_features:
             return torch.tensor(float("nan"))
 
-        all_real = torch.cat(self.real_features, dim=0)
-        all_fake = torch.cat(self.fake_features, dim=0)
+        # Stack and move to CPU just before FID computation
+        all_real = torch.cat(self.real_features, dim=0).cpu()
+        all_fake = torch.cat(self.fake_features, dim=0).cpu()
 
         # MONAI's FIDMetric expects [N, features] shape
         return self.fid_computer(all_fake, all_real)
@@ -355,7 +356,7 @@ class InceptionScore3D(nn.Module):
         with torch.no_grad():
             logits = self.classifier(images)
             probs = torch.nn.functional.softmax(logits, dim=1)
-            self.predictions.append(probs.cpu())
+            self.predictions.append(probs)
 
     def compute(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -367,7 +368,8 @@ class InceptionScore3D(nn.Module):
         if not self.predictions:
             return torch.tensor(0.0), torch.tensor(0.0)
 
-        all_preds = torch.cat(self.predictions, dim=0)
+        # Move to CPU just before IS computation
+        all_preds = torch.cat(self.predictions, dim=0).cpu()
         split_size = max(1, len(all_preds) // self.splits)
         scores = []
 

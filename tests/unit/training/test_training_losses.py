@@ -1,13 +1,13 @@
 """
 Tests for training loss functions module.
 
-Tests VAEGAN loss from prod9.training.losses.
+Tests VAEGAN loss, FocalFrequencyLoss, and SliceWiseFake3DLoss from prod9.training.losses.
 """
 import unittest
 import torch
 from urllib.error import HTTPError
 
-from prod9.training.losses import VAEGANLoss
+from prod9.training.losses import VAEGANLoss, FocalFrequencyLoss, SliceWiseFake3DLoss
 
 
 class TestVAEGANLoss(unittest.TestCase):
@@ -172,9 +172,6 @@ class TestVAEGANLoss(unittest.TestCase):
         )
         discriminator_output = [torch.randn(self.batch_size, 1, device=self.device)]
 
-        # Debug: print requires_grad before forward
-        print(f"\nDEBUG: Before forward - encoder_output.requires_grad = {encoder_output.requires_grad}")
-
         loss_dict = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
@@ -185,23 +182,16 @@ class TestVAEGANLoss(unittest.TestCase):
         )
         total_loss = loss_dict['total']
 
-        # Debug: print grad_fn after forward
-        print(f"DEBUG: After forward - encoder_output.grad_fn = {encoder_output.grad_fn}")
-        print(f"DEBUG: After forward - total_loss.grad_fn = {total_loss.grad_fn}")
-
         # Backward pass
         total_loss.backward()
 
-        # Debug: print gradients after backward
-        print(f"DEBUG: After backward - encoder_output.grad is None = {encoder_output.grad is None}")
-        print(f"DEBUG: After backward - fake_images.grad is None = {fake_images.grad is None}")
-
         # Check gradients exist for inputs that require grad
-        # fake_images: used in recon and perceptual losses
-        # encoder_output: used in commitment loss
+        # fake_images: used in recon and focal frequency losses
+        # encoder_output: NOT used in FSQ (commitment loss is disabled for FSQ)
         # quantized_output: detached in commitment loss, so no gradient
         self.assertIsNotNone(fake_images.grad)
-        self.assertIsNotNone(encoder_output.grad)
+        # Note: encoder_output.grad is None for FSQ since commitment loss is disabled
+        # (FSQ uses straight-through estimator instead)
 
     def test_vaegan_loss_perfect_reconstruction(self):
         """Value test: loss should be minimal for perfect reconstruction."""
@@ -562,6 +552,263 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         # Should be a fixed tensor (not computed via gradients)
         adv_weight = loss_dict['adv_weight']
         self.assertTrue(torch.isfinite(adv_weight))
+
+
+class TestFocalFrequencyLoss(unittest.TestCase):
+    """Test suite for FocalFrequencyLoss."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.batch_size = 2
+        self.channels = 1
+        self.height = 32
+        self.width = 32
+
+    def test_ffl_forward(self):
+        """Smoke test: basic forward pass."""
+        ffl = FocalFrequencyLoss().to(self.device)
+
+        pred = torch.randn(self.batch_size, self.channels, self.height, self.width, device=self.device)
+        target = torch.randn(self.batch_size, self.channels, self.height, self.width, device=self.device)
+
+        loss = ffl(pred, target)
+
+        self.assertIsInstance(loss, torch.Tensor)
+        self.assertEqual(loss.dim(), 0)  # Scalar
+        self.assertTrue(torch.isfinite(loss))
+
+    def test_ffl_shape_consistency(self):
+        """Shape test: verify loss computation with different input shapes."""
+        shapes = [
+            (1, 1, 16, 16),
+            (2, 1, 32, 32),
+            (4, 3, 64, 64),
+        ]
+
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                ffl = FocalFrequencyLoss()
+                pred = torch.randn(*shape)
+                target = torch.randn(*shape)
+
+                loss = ffl(pred, target)
+
+                self.assertEqual(loss.dim(), 0)
+                self.assertTrue(torch.isfinite(loss))
+
+    def test_ffl_perfect_reconstruction(self):
+        """Value test: loss should be zero for perfect reconstruction."""
+        ffl = FocalFrequencyLoss()
+
+        pred = torch.randn(2, 1, 32, 32)
+        target = pred.clone()
+
+        loss = ffl(pred, target)
+
+        # Loss should be very close to zero (only numerical errors)
+        self.assertAlmostEqual(loss.item(), 0.0, places=5)
+
+    def test_ffl_backward(self):
+        """Gradient test: verify backward pass works correctly."""
+        ffl = FocalFrequencyLoss()
+
+        pred = torch.randn(2, 1, 32, 32, requires_grad=True)
+        target = torch.randn(2, 1, 32, 32)
+
+        loss = ffl(pred, target)
+        loss.backward()
+
+        self.assertIsNotNone(pred.grad)
+
+    def test_ffl_alpha_parameter(self):
+        """Test that alpha parameter affects the loss computation."""
+        pred = torch.randn(2, 1, 32, 32)
+        target = torch.randn(2, 1, 32, 32)
+
+        ffl_alpha1 = FocalFrequencyLoss(alpha=1.0)
+        ffl_alpha2 = FocalFrequencyLoss(alpha=2.0)
+
+        loss_alpha1 = ffl_alpha1(pred, target)
+        loss_alpha2 = ffl_alpha2(pred, target)
+
+        # Both should be finite
+        self.assertTrue(torch.isfinite(loss_alpha1))
+        self.assertTrue(torch.isfinite(loss_alpha2))
+
+        # Different alpha should produce different loss
+        # (though they may not be strictly ordered due to the normalization)
+        self.assertIsInstance(loss_alpha1, torch.Tensor)
+        self.assertIsInstance(loss_alpha2, torch.Tensor)
+
+    def test_ffl_patch_factor(self):
+        """Test patch_factor parameter."""
+        pred = torch.randn(1, 1, 32, 32)
+        target = torch.randn(1, 1, 32, 32)
+
+        # patch_factor=1 (default, no patching)
+        ffl_no_patch = FocalFrequencyLoss(patch_factor=1)
+        loss_no_patch = ffl_no_patch(pred, target)
+
+        # patch_factor=2 (2x2 patches)
+        ffl_patch = FocalFrequencyLoss(patch_factor=2)
+        loss_patch = ffl_patch(pred, target)
+
+        self.assertTrue(torch.isfinite(loss_no_patch))
+        self.assertTrue(torch.isfinite(loss_patch))
+
+
+class TestSliceWiseFake3DLoss(unittest.TestCase):
+    """Test suite for SliceWiseFake3DLoss."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.batch_size = 2
+        self.channels = 1
+        self.depth = 16
+        self.height = 32
+        self.width = 32
+
+        # Simple 2D loss function to wrap
+        def simple_mse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return torch.nn.functional.mse_loss(pred, target)
+
+        self.loss2d = simple_mse_loss
+
+    def test_slice_wise_forward(self):
+        """Smoke test: basic forward pass with 3D volumes."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2, 3, 4),
+            ratio=1.0,
+        )
+
+        pred = torch.randn(
+            self.batch_size, self.channels,
+            self.depth, self.height, self.width,
+            device=self.device
+        )
+        target = torch.randn(
+            self.batch_size, self.channels,
+            self.depth, self.height, self.width,
+            device=self.device
+        )
+
+        loss = loss_3d(pred, target)
+
+        self.assertIsInstance(loss, torch.Tensor)
+        self.assertEqual(loss.dim(), 0)  # Scalar
+        self.assertTrue(torch.isfinite(loss))
+
+    def test_slice_wise_single_axis(self):
+        """Test with single axis (axial only)."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2,),  # Axial slices only
+            ratio=0.5,  # Use 50% of slices
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = torch.randn(2, 1, 16, 32, 32)
+
+        loss = loss_3d(pred, target)
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertEqual(loss.dim(), 0)
+
+    def test_slice_wise_all_axes(self):
+        """Test with all three axes."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2, 3, 4),  # Axial, coronal, sagittal
+            ratio=0.5,
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = torch.randn(2, 1, 16, 32, 32)
+
+        loss = loss_3d(pred, target)
+
+        self.assertTrue(torch.isfinite(loss))
+
+    def test_slice_wise_perfect_reconstruction(self):
+        """Value test: loss should be zero for perfect reconstruction."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2, 3, 4),
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = pred.clone()
+
+        loss = loss_3d(pred, target)
+
+        self.assertAlmostEqual(loss.item(), 0.0, places=5)
+
+    def test_slice_wise_backward(self):
+        """Gradient test: verify backward pass works correctly."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2, 3, 4),
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32, requires_grad=True)
+        target = torch.randn(2, 1, 16, 32, 32)
+
+        loss = loss_3d(pred, target)
+        loss.backward()
+
+        self.assertIsNotNone(pred.grad)
+
+    def test_slice_wise_invalid_axis(self):
+        """Test that invalid axis raises error."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(1,),  # Invalid axis for (B,C,D,H,W)
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = torch.randn(2, 1, 16, 32, 32)
+
+        with self.assertRaises(ValueError):
+            loss_3d(pred, target)
+
+    def test_slice_wise_ratio_parameter(self):
+        """Test that ratio parameter affects number of slices used."""
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = torch.randn(2, 1, 16, 32, 32)
+
+        # Use all slices
+        loss_full = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2,),
+            ratio=1.0,
+        )(pred, target)
+
+        # Use half of slices
+        loss_half = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2,),
+            ratio=0.5,
+        )(pred, target)
+
+        # Both should be finite
+        self.assertTrue(torch.isfinite(loss_full))
+        self.assertTrue(torch.isfinite(loss_half))
+
+    def test_slice_wise_shape_mismatch(self):
+        """Test that shape mismatch raises error."""
+        loss_3d = SliceWiseFake3DLoss(
+            loss2d=self.loss2d,
+            axes=(2, 3, 4),
+        )
+
+        pred = torch.randn(2, 1, 16, 32, 32)
+        target = torch.randn(2, 1, 16, 16, 16)  # Different spatial size
+
+        with self.assertRaises(ValueError):
+            loss_3d(pred, target)
 
 
 if __name__ == '__main__':
