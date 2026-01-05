@@ -12,7 +12,7 @@ Key features:
 """
 
 import os
-from typing import Literal, cast
+from typing import Literal, cast, Optional
 
 import medmnist
 import numpy as np
@@ -26,6 +26,23 @@ from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.config import load_config
 
 
+def get_device() -> torch.device:
+    """
+    Get the best available device for computation.
+
+    Priority: CUDA > MPS > CPU
+
+    Returns:
+        torch.device: The best available device
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 class _MedMNIST3DStage1Dataset(TorchDataset):
     """
     Stage 1 dataset wrapper for MedMNIST 3D.
@@ -35,7 +52,7 @@ class _MedMNIST3DStage1Dataset(TorchDataset):
 
     Args:
         dataset: MedMNIST 3D dataset instance
-        transform: Optional transform to apply to images
+        transform: Optional MONAI dictionary transform to apply
         modality_name: Modality name for logging (default: "mnist3d")
 
     Returns:
@@ -56,21 +73,21 @@ class _MedMNIST3DStage1Dataset(TorchDataset):
         img, _ = self.dataset[idx]  # Ignore label for Stage 1
 
         # img is numpy array in [0, 1], shape=(1, D, H, W) or (3, D, H, W)
-        img_tensor = torch.from_numpy(img).float()
-
-        # Normalize to [-1, 1] for GAN training
-        img_tensor = img_tensor * 2.0 - 1.0
-
         # Ensure single channel (convert RGB to grayscale if needed)
-        if img_tensor.shape[0] == 3:
-            img_tensor = img_tensor[0:1, ...]
+        if img.shape[0] == 3:
+            img = img[0:1, ...]
 
-        # Apply transform if provided
+        # Create dictionary for MONAI transforms
+        data_dict = {"image": img}
+
+        # Apply MONAI dictionary transform if provided
         if self.transform is not None:
-            img_tensor = self.transform(img_tensor)
+            data_dict = self.transform(data_dict)
 
-        # Return BraTS-compatible format
-        return {"image": img_tensor, "modality": self.modality_name}
+        # Add modality name
+        data_dict["modality"] = self.modality_name
+
+        return data_dict
 
 
 class _MedMNIST3DStage2Dataset(TorchDataset):
@@ -125,6 +142,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
         persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
+        device: Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)
         augmentation: Optional augmentation configuration
     """
 
@@ -151,6 +169,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         prefetch_factor: int = 2,
         persistent_workers: bool = True,
         train_val_split: float = 0.9,
+        device: Optional[str] = None,
         augmentation=None,
     ):
         super().__init__()  # Required by LightningDataModule
@@ -164,6 +183,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
+        self.device = self._resolve_device(device)
         self.augmentation = augmentation
 
         # Handle "all" shortcut for combining all datasets
@@ -202,6 +222,12 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
 
         self.train_dataset = None
         self.val_dataset = None
+
+    def _resolve_device(self, device_config: Optional[str]) -> torch.device:
+        """Resolve device from config or auto-detect."""
+        if device_config is not None:
+            return torch.device(device_config)
+        return get_device()  # Auto-detect: CUDA > MPS > CPU
 
     def _setup_datasets(self):
         """Initialize train/val datasets with ConcatDataset support."""
@@ -266,62 +292,80 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             self._setup_datasets()
 
     def _create_transform(self, train: bool):
-        """Create MONAI transform pipeline."""
-
-        if self.augmentation is None or not self.augmentation.get("enabled", False):
-            return None
-
+        """Create MONAI transform pipeline with preprocessing and optional augmentation."""
         from monai.transforms.compose import Compose
+        from monai.transforms.io.array import LoadImage
         from monai.transforms.spatial.dictionary import RandFlipd, RandRotated, RandZoomd
-        from monai.transforms.intensity.dictionary import RandShiftIntensityd
+        from monai.transforms.intensity.dictionary import ScaleIntensityRanged, RandShiftIntensityd
+        from monai.transforms.utility.dictionary import EnsureTyped
 
         transforms = []
-        # Spatial transforms
-        if train and self.augmentation.get("flip_prob", 0) > 0:
-            transforms.append(
-                RandFlipd(
-                    keys=["image"],
-                    prob=self.augmentation["flip_prob"],
-                    spatial_axis=self.augmentation.get("flip_axes", [0, 1, 2]),
-                )
-            )
 
-        if train and self.augmentation.get("rotate_prob", 0) > 0:
-            transforms.append(
-                RandRotated(
-                    keys=["image"],
-                    prob=self.augmentation["rotate_prob"],
-                    range_x=self.augmentation.get("rotate_range", 0.26),
-                    range_y=self.augmentation.get("rotate_range", 0.26),
-                    range_z=self.augmentation.get("rotate_range", 0.26),
-                    keep_size=True,
-                )
-            )
+        # Preprocessing transforms (always applied)
+        # LoadImage - handles numpy arrays from MedMNIST
+        transforms.append(LoadImage(image_only=True, keys=["image"]))
 
-        if train and self.augmentation.get("zoom_prob", 0) > 0:
-            transforms.append(
-                RandZoomd(
-                    keys=["image"],
-                    prob=self.augmentation["zoom_prob"],
-                    min_zoom=self.augmentation.get("zoom_min", 0.9),
-                    max_zoom=self.augmentation.get("zoom_max", 1.1),
-                    keep_size=True,
-                )
+        # Normalize from [0, 1] to [-1, 1]
+        transforms.append(
+            ScaleIntensityRanged(
+                keys=["image"],
+                a_min=0.0,
+                a_max=1.0,
+                b_min=-1.0,
+                b_max=1.0,
+                clip=True,
             )
+        )
 
-        # Intensity transforms
-        if train and self.augmentation.get("shift_intensity_prob", 0) > 0:
-            transforms.append(
-                RandShiftIntensityd(
-                    keys=["image"],
-                    prob=self.augmentation["shift_intensity_prob"],
-                    offsets=self.augmentation.get("shift_intensity_offset", 0.1),
+        # Augmentation transforms (only when enabled and for training)
+        if train and self.augmentation is not None and self.augmentation.get("enabled", False):
+            # Spatial transforms
+            if self.augmentation.get("flip_prob", 0) > 0:
+                transforms.append(
+                    RandFlipd(
+                        keys=["image"],
+                        prob=self.augmentation["flip_prob"],
+                        spatial_axis=self.augmentation.get("flip_axes", [0, 1, 2]),
+                    )
                 )
-            )
 
-        if transforms:
-            return Compose(transforms)
-        return None
+            if self.augmentation.get("rotate_prob", 0) > 0:
+                transforms.append(
+                    RandRotated(
+                        keys=["image"],
+                        prob=self.augmentation["rotate_prob"],
+                        range_x=self.augmentation.get("rotate_range", 0.26),
+                        range_y=self.augmentation.get("rotate_range", 0.26),
+                        range_z=self.augmentation.get("rotate_range", 0.26),
+                        keep_size=True,
+                    )
+                )
+
+            if self.augmentation.get("zoom_prob", 0) > 0:
+                transforms.append(
+                    RandZoomd(
+                        keys=["image"],
+                        prob=self.augmentation["zoom_prob"],
+                        min_zoom=self.augmentation.get("zoom_min", 0.9),
+                        max_zoom=self.augmentation.get("zoom_max", 1.1),
+                        keep_size=True,
+                    )
+                )
+
+            # Intensity transforms
+            if self.augmentation.get("shift_intensity_prob", 0) > 0:
+                transforms.append(
+                    RandShiftIntensityd(
+                        keys=["image"],
+                        prob=self.augmentation["shift_intensity_prob"],
+                        offsets=self.augmentation.get("shift_intensity_offset", 0.1),
+                    )
+                )
+
+        # Final transform: EnsureTyped with device (always applied last)
+        transforms.append(EnsureTyped(keys=["image"], device=self.device))
+
+        return Compose(transforms)
 
     def train_dataloader(self):
         """Return training DataLoader."""
@@ -378,6 +422,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             prefetch_factor=data_config.get("prefetch_factor", 2),
             persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
+            device=data_config.get("device"),
             augmentation=augmentation,
         )
 
@@ -402,6 +447,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
         persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
+        device: Device for tensor placement (null=auto-detect: cuda/mps/cpu)
     """
 
     autoencoder_path: str
@@ -420,6 +466,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         prefetch_factor: int = 2,
         persistent_workers: bool = True,
         train_val_split: float = 0.9,
+        device: Optional[str] = None,
     ):
         super().__init__()  # Required by LightningDataModule
 
@@ -437,6 +484,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
+        self.device = self._resolve_device(device)
 
         # Dynamically get dataset class
         info = INFO[dataset_name]
@@ -446,6 +494,12 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
 
         self.train_dataset = None
         self.val_dataset = None
+
+    def _resolve_device(self, device_config: Optional[str]) -> torch.device:
+        """Resolve device from config or auto-detect."""
+        if device_config is not None:
+            return torch.device(device_config)
+        return get_device()  # Auto-detect: CUDA > MPS > CPU
 
     def set_autoencoder(self, autoencoder: AutoencoderFSQ) -> None:
         """Set the trained autoencoder for pre-encoding."""
@@ -607,4 +661,5 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             prefetch_factor=data_config.get("prefetch_factor", 2),
             persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
+            device=data_config.get("device"),
         )

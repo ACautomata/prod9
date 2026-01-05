@@ -860,6 +860,8 @@ class TestBraTSDataModuleStage1FromConfig(unittest.TestCase):
         self.assertEqual(dm.spacing, (1.0, 1.0, 1.0))
         self.assertEqual(dm.orientation, "RAS")
         self.assertTrue(dm.clip)
+        # Device should be auto-detected
+        self.assertIn(dm.device.type, ["cuda", "mps", "cpu"])
 
     def test_from_config_with_empty_augmentation(self):
         """Test from_config with empty augmentation config."""
@@ -876,6 +878,38 @@ class TestBraTSDataModuleStage1FromConfig(unittest.TestCase):
         self.assertEqual(dm.flip_prob, 0.5)
         self.assertEqual(dm.flip_axes, [0, 1, 2])  # Default when None
         self.assertEqual(dm.rotate_prob, 0.5)
+
+    def test_from_config_with_device(self):
+        """Test from_config with explicit device configuration."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+                "preprocessing": {
+                    "device": "cpu",
+                },
+            },
+        }
+
+        dm = BraTSDataModuleStage1.from_config(config)
+
+        # Device should be explicitly set to cpu
+        self.assertEqual(dm.device.type, "cpu")
+
+    def test_from_config_with_device_auto(self):
+        """Test from_config with auto device detection (default)."""
+        config = {
+            "data": {
+                "data_dir": "/fake/data",
+                "preprocessing": {
+                    "device": None,
+                },
+            },
+        }
+
+        dm = BraTSDataModuleStage1.from_config(config)
+
+        # Device should be auto-detected
+        self.assertIn(dm.device.type, ["cuda", "mps", "cpu"])
 
 
 class TestBraTSDataModuleStage1ErrorPaths(unittest.TestCase):

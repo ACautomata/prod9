@@ -27,6 +27,23 @@ from monai.data.dataset import CacheDataset
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
 
+def get_device() -> torch.device:
+    """
+    Get the best available device for computation.
+
+    Priority: CUDA > MPS > CPU
+
+    Returns:
+        torch.device: The best available device
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 # Modality names for BraTS dataset
 MODALITY_KEYS: List[str] = ["T1", "T1ce", "T2", "FLAIR"]
 
@@ -319,6 +336,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         intensity_b_min: float = -1.0,
         intensity_b_max: float = 1.0,
         clip: bool = True,
+        device: Optional[str] = None,
         # Augmentation parameters
         flip_prob: float = 0.5,
         flip_axes: Optional[List[int]] = None,
@@ -349,6 +367,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.intensity_b_min = intensity_b_min
         self.intensity_b_max = intensity_b_max
         self.clip = clip
+        self.device = self._resolve_device(device)
 
         # Augmentation parameters
         self.flip_prob = flip_prob
@@ -362,6 +381,12 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         # Single dataset with random modality sampling (set in setup())
         self.train_dataset: Optional[_RandomModalityDataset] = None
         self.val_dataset: Optional[_RandomModalityDataset] = None
+
+    def _resolve_device(self, device_config: Optional[str]) -> torch.device:
+        """Resolve device from config or auto-detect."""
+        if device_config is not None:
+            return torch.device(device_config)
+        return get_device()  # Auto-detect: CUDA > MPS > CPU
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "BraTSDataModuleStage1":
@@ -397,6 +422,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             intensity_b_min=prep_config.get("intensity_b_min", 0.0),
             intensity_b_max=prep_config.get("intensity_b_max", 1.0),
             clip=prep_config.get("clip", True),
+            device=prep_config.get("device"),
             # Augmentation
             flip_prob=aug_config.get("flip_prob", 0.5),
             flip_axes=aug_config.get("flip_axes"),
@@ -474,7 +500,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             RandFlipd(keys=["image"], spatial_axis=self.flip_axes, prob=self.flip_prob),
             RandRotate90d(keys=["image"], max_k=self.rotate_max_k, spatial_axes=self.rotate_axes, prob=self.rotate_prob),
             RandShiftIntensityd(keys=["image"], offsets=self.shift_intensity_offset, prob=self.shift_intensity_prob),
-            EnsureTyped(keys=["image"]),
+            EnsureTyped(keys=["image"], device=self.device),
         ])
 
     def _get_val_transforms(self) -> Compose:
@@ -493,7 +519,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
                 clip=self.clip,
             ),
             CropForegroundd(keys=["image"], source_key="image"),
-            EnsureTyped(keys=["image"]),
+            EnsureTyped(keys=["image"], device=self.device),
         ])
 
     def train_dataloader(self) -> DataLoader:
@@ -601,6 +627,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         intensity_b_min: float = -1.0,
         intensity_b_max: float = 1.0,
         clip: bool = True,
+        device: Optional[str] = None,
         # Conditional generation
         unconditional_prob: float = 0.1,
     ):
@@ -632,12 +659,19 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.intensity_b_min = intensity_b_min
         self.intensity_b_max = intensity_b_max
         self.clip = clip
+        self.device = self._resolve_device(device)
 
         # Conditional generation
         self.unconditional_prob = unconditional_prob
 
         self.train_dataset: Optional[_PreEncodedDataset] = None
         self.val_dataset: Optional[_PreEncodedDataset] = None
+
+    def _resolve_device(self, device_config: Optional[str]) -> torch.device:
+        """Resolve device from config or auto-detect."""
+        if device_config is not None:
+            return torch.device(device_config)
+        return get_device()  # Auto-detect: CUDA > MPS > CPU
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "BraTSDataModuleStage2":
@@ -673,6 +707,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             intensity_b_min=prep_config.get("intensity_b_min", 0.0),
             intensity_b_max=prep_config.get("intensity_b_max", 1.0),
             clip=prep_config.get("clip", True),
+            device=prep_config.get("device"),
             # Sliding window for pre-encoding
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
             sw_overlap=sw_config.get("overlap", 0.5),
@@ -815,7 +850,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                 neg=1,
                 num_samples=1,
             ),
-            EnsureTyped(keys=self.modalities),
+            EnsureTyped(keys=self.modalities, device=self.device),
         ])
 
     def train_dataloader(self) -> DataLoader:

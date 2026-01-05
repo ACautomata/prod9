@@ -241,6 +241,10 @@ class PreprocessingConfig(BaseModel):
     intensity_b_min: float = Field(default=0.0)
     intensity_b_max: float = Field(default=1.0)
     clip: bool = Field(default=True)
+    device: Optional[str] = Field(
+        default=None,
+        description="Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)",
+    )
 
 
 class AugmentationConfig(BaseModel):
@@ -579,6 +583,12 @@ class MedMNIST3DDataConfig(BaseModel):
     prefetch_factor: int = Field(default=2, ge=1, description="Batches to prefetch per worker")
     persistent_workers: bool = Field(default=True, description="Keep workers alive between epochs")
     train_val_split: float = Field(default=0.9, gt=0, lt=1)
+
+    # Device configuration
+    device: Optional[str] = Field(
+        default=None,
+        description="Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)",
+    )
 
     # Optional augmentation
     augmentation: Optional[MedMNIST3DDataAugmentation] = Field(default=None)
