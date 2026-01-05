@@ -198,6 +198,12 @@ class StabilityConfig(BaseModel):
         ge=0.0,
         description="Gradient clip value for manual optimization (GAN training)",
     )
+    warmup_eta_min: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Minimum learning rate ratio after cosine decay",
+    )
 
 
 class UnconditionalConfig(BaseModel):

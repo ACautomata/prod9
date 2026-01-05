@@ -112,7 +112,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 3000  # Discriminator warmup
+  discriminator_iter_start: 500  # Discriminator warmup (reduced from 3000)
 
   # Reconstruction loss (L1)
   reconstruction:

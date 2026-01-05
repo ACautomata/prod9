@@ -312,9 +312,9 @@ class AutoencoderLightning(pl.LightningModule):
         Returns:
             Dictionary of losses for logging
         """
-        # Encode and decode
-        z_mu, _ = self.autoencoder.encode(real_images)
-        fake_images = self.autoencoder.decode(z_mu)
+        # Encode and decode - encode() now returns (z_q, z_mu)
+        z_q, z_mu = self.autoencoder.encode(real_images)
+        fake_images = self.autoencoder.decode(z_q)
 
         # Discriminator outputs
         fake_outputs, _ = self.discriminator(fake_images)
@@ -323,8 +323,8 @@ class AutoencoderLightning(pl.LightningModule):
         losses = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=z_mu,
-            quantized_output=z_mu,
+            encoder_output=z_mu,       # Unquantized encoder output
+            quantized_output=z_q,      # Quantized output
             discriminator_output=fake_outputs,
             global_step=self.global_step,
             last_layer=self.last_layer,

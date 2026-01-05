@@ -135,11 +135,13 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
     @override
     def encode(self, x: torch.Tensor):
         """
-        Forwards an image through the spatial encoder, obtaining the latent mean and sigma representations.
+        Forwards an image through the spatial encoder and applies FSQ quantization.
 
         Args:
             x: BxCx[SPATIAL DIMS] tensor
 
+        Returns:
+            (z_q, z_mu): Quantized latent and encoder pre-quantization output
         """
         if self.use_checkpoint:
             h = torch.utils.checkpoint.checkpoint(self.encoder, x, use_reentrant=False)
@@ -147,16 +149,37 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
             h = self.encoder(x)
 
         z_mu = self.quant_conv_mu(h)
-        return z_mu, torch.tensor(0.0, device=z_mu.device)
-    
+        # Apply FSQ quantization via sampling() method
+        z_q = self.sampling(z_mu, torch.zeros_like(z_mu))
+        return z_q, z_mu
+
+    @override
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass: encode -> quantize -> decode.
+
+        Args:
+            x: BxCx[SPATIAL DIMS] tensor
+
+        Returns:
+            (reconstruction, z_q, z_mu): Reconstructed image, quantized latent, encoder output
+        """
+        z_q, z_mu = self.encode(x)
+        reconstruction = self.decode(z_q)
+        return reconstruction, z_q, z_mu
+
     @override
     def decode(self, z: torch.Tensor):
         return super().decode(z)
     
     def quantize_stage_2_inputs(self, x: torch.Tensor):
-        """Encode and quantize input for Stage 2 transformer training."""
-        z, _ = self.encode(x)  # Returns (z_mu, z_sigma)
-        return self.quantizer.quantize(z)
+        """Encode and quantize input for Stage 2 transformer training.
+
+        Returns discrete token indices for transformer training.
+        """
+        z_q, _ = self.encode(x)  # Returns (z_q, z_mu) - z_q is already quantized
+        # Convert quantized continuous values to discrete token indices
+        return self.quantizer.quantize(z_q)
     
     def embed(self, indices):
         return self.quantizer.embed(indices)

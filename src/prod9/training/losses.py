@@ -187,9 +187,9 @@ class VAEGANLoss(nn.Module):
         recon_loss = self._compute_reconstruction_loss(fake_images, real_images)
         perceptual_loss = self._compute_perceptual_loss(fake_images, real_images)
         generator_adv_loss = self._compute_generator_adv_loss(discriminator_output)
-        commitment_loss = self._compute_commitment_loss(
-            quantized_output, encoder_output
-        )
+
+        # FSQ doesn't need commitment loss - straight-through estimator handles commitment
+        commitment_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
 
         # Combined reconstruction loss (nll_loss in VQGAN terminology)
         nll_loss = recon_loss + self.perceptual_weight * perceptual_loss
@@ -206,10 +206,10 @@ class VAEGANLoss(nn.Module):
             adv_weight = torch.tensor(disc_factor, device=nll_loss.device, dtype=nll_loss.dtype)
 
         # Total generator loss with adaptive adversarial weight
+        # NOTE: FSQ doesn't need commitment loss - straight-through estimator handles it
         total_generator_loss = (
             nll_loss
             + adv_weight * generator_adv_loss
-            + self.commitment_weight * commitment_loss
         )
 
         return {
