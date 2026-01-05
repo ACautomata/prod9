@@ -62,6 +62,9 @@ def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None)
     # Remove keys that were already used or shouldn't be passed to __init__
     init_kwargs = {k: v for k, v in config.items() if k not in ("spatial_dims", "levels")}
 
+    # Force save_mem=True for inference (saves GPU memory during large volume processing)
+    init_kwargs["save_mem"] = True
+
     # Create model instance
     autoencoder = AutoencoderFSQ(spatial_dims=spatial_dims, levels=levels, **init_kwargs)
 

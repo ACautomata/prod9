@@ -78,7 +78,7 @@ training:
 data:
   # MedMNIST 3D dataset configuration
   # Option 1: Single dataset (backward compatible)
-  dataset_name: "all"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
+  dataset_name: "organmnist3d"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
   # Option 2: Multiple datasets (combines all specified datasets)
   dataset_names: null  # null = use dataset_name, or specify list: ["organmnist3d", "nodulemnist3d", ...]
 

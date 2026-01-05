@@ -1,4 +1,5 @@
 from typing import override, Sequence, cast
+from sympy import false
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
@@ -95,7 +96,7 @@ class FiniteScalarQuantizer(nn.Module):
         return (torch.round(z) - z).detach() + z
 
 class AutoencoderFSQ(AutoencoderKlMaisi):
-    def __init__(self, spatial_dims: int, levels: Sequence[int], **kwargs):
+    def __init__(self, spatial_dims: int, levels: Sequence[int], save_mem=False, **kwargs):
         """
         Initialize AutoencoderFSQ with Finite Scalar Quantization.
 
@@ -117,10 +118,11 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         self._init_config = {
             "spatial_dims": spatial_dims,
             "levels": levels,
+            "save_mem": save_mem,
             **kwargs,
         }
 
-        super().__init__(spatial_dims, latent_channels=len(levels), **kwargs)
+        super().__init__(spatial_dims, latent_channels=len(levels), save_mem=save_mem, **kwargs)
         self.quantizer = FiniteScalarQuantizer(
             spatial_dims=spatial_dims,
             levels=levels

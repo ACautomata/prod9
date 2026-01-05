@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import random
-from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict, cast
+from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict, cast, Sequence
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -218,6 +218,208 @@ class _RandomModalityDataset(Dataset):
         }
 
 
+class _CachedRandomModalityDataset(CacheDataset):
+    """
+    Cached dataset wrapper for BraTS with pre-computed deterministic transforms.
+
+    Uses MONAI's CacheDataset to pre-compute deterministic transforms (LoadImage,
+    EnsureTyped, EnsureChannelFirstd, Spacingd, Orientationd, ScaleIntensityRanged,
+    CropForegroundd) at setup time. Random augmentation transforms are applied
+    per-batch during training.
+
+    Each __getitem__ randomly samples one modality for self-supervised reconstruction.
+
+    Args:
+        data_files: List of dictionaries mapping modality names to file paths
+        preprocessing_transform: Deterministic transforms to cache
+        augmentation_transform: Random transforms applied per-batch (training only)
+        modalities: List of modality keys to sample from (default: MODALITY_KEYS)
+        cache_rate: Fraction of dataset to cache (1.0 = full cache)
+        num_workers: Number of workers for caching (default: 0 to avoid nested multiprocessing)
+    """
+
+    def __init__(
+        self,
+        data_files: List[Dict[str, str]],
+        preprocessing_transform: Compose,
+        augmentation_transform: Compose | None = None,
+        modalities: Optional[List[str]] = None,
+        cache_rate: float = 1.0,
+        num_workers: int = 4  # Default number of workers for caching
+    ) -> None:
+        # Prepare data for CacheDataset: list of dictionaries
+        # Each dictionary contains file path and metadata for one modality
+        data: List[Dict[str, Any]] = []
+        self.modalities = modalities or MODALITY_KEYS
+
+        for patient_idx, patient_files in enumerate(data_files):
+            for modality in self.modalities:
+                file_path = patient_files[modality]
+                data.append({
+                    "image": file_path,  # String path for LoadImaged
+                    "_modality": modality,
+                    "_patient_id": patient_idx,
+                    "_modality_idx": MODALITY_KEYS.index(modality)
+                })
+
+        # Initialize CacheDataset with data and preprocessing transforms
+        super().__init__(
+            data=data,
+            transform=preprocessing_transform,
+            cache_rate=cache_rate,
+            num_workers=num_workers,
+        )
+
+        # Store augmentation transform to apply after caching
+        self.augmentation_transform = augmentation_transform
+
+    def __getitem__(self, index: Union[int, slice, Sequence[int]]) -> Any:
+        # Get cached preprocessed data
+        # CacheDataset.__getitem__ returns various types after transform is applied
+        # We handle the case where index is a single int (most common)
+        data: Any = super().__getitem__(index)
+
+        # If data is a dictionary (single item), apply augmentation and rename modality
+        if isinstance(data, dict):
+            # Cast to dict[str, Any] for type safety
+            data_dict = cast(dict[str, Any], data)
+
+            # Apply augmentation on-the-fly (if provided)
+            if self.augmentation_transform is not None:
+                data_dict = cast(dict[str, Any], self.augmentation_transform(data_dict))
+
+            # Rename _modality to modality for consistency
+            if "_modality" in data_dict:
+                modality_value = data_dict.pop("_modality")
+                data_dict["modality"] = modality_value
+
+            # Remove internal metadata keys
+            data_dict.pop("_patient_id", None)
+            data_dict.pop("_modality_idx", None)
+
+            return data_dict
+
+        # If data is a sequence (e.g., from slicing), apply to each element
+        elif isinstance(data, Sequence):
+            # Recursively process each item in the sequence
+            return [self._process_single_item(cast(dict[str, Any], item)) if isinstance(item, dict) else item
+                   for item in data]
+
+        # Return data unchanged for other types (should not happen with our transforms)
+        return data
+
+    def _process_single_item(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Helper method to process a single dictionary item."""
+        # Apply augmentation on-the-fly (if provided)
+        if self.augmentation_transform is not None:
+            # Augmentation transform returns dict with same keys
+            data = cast(dict[str, Any], self.augmentation_transform(data))
+
+        # Rename _modality to modality for consistency
+        if "_modality" in data:
+            modality_value = data.pop("_modality")
+            data["modality"] = modality_value
+
+        # Remove internal metadata keys
+        data.pop("_patient_id", None)
+        data.pop("_modality_idx", None)
+
+        return data
+
+
+class _CachedAllModalitiesDataset(CacheDataset):
+    """
+    Cached dataset wrapper for BraTS Stage 2 pre-encoding with pre-computed deterministic transforms.
+
+    Uses MONAI's CacheDataset to pre-compute deterministic transforms for ALL modalities
+    at setup time. Random cropping transform is applied per-batch during pre-encoding
+    to ensure consistent cropping across all modalities.
+
+    Args:
+        data_files: List of dictionaries mapping modality names to file paths
+        preprocessing_transform: Deterministic transforms to cache
+        augmentation_transform: Random transforms applied per-batch (pre-encoding only)
+        modalities: List of modality keys to process
+        cache_rate: Fraction of dataset to cache (1.0 = full cache)
+        num_workers: Number of workers for caching (default: 0 to avoid nested multiprocessing)
+    """
+
+    def __init__(
+        self,
+        data_files: List[Dict[str, str]],
+        preprocessing_transform: Compose,
+        augmentation_transform: Compose | None = None,
+        modalities: Optional[List[str]] = None,
+        cache_rate: float = 1.0,
+        num_workers: int = 4  # Default number of workers for caching
+    ) -> None:
+        # Prepare data for CacheDataset: list of dictionaries
+        # Each dictionary contains file paths for all modalities
+        data: List[Dict[str, Any]] = []
+        self.modalities = modalities or MODALITY_KEYS
+
+        for patient_idx, patient_files in enumerate(data_files):
+            # Create dictionary with all modality file paths
+            file_dict: Dict[str, Any] = {}
+            for modality in self.modalities:
+                file_dict[modality] = patient_files[modality]
+            file_dict["_patient_id"] = patient_idx
+
+            data.append(file_dict)
+
+        # Initialize CacheDataset with data and preprocessing transforms
+        super().__init__(
+            data=data,
+            transform=preprocessing_transform,
+            cache_rate=cache_rate,
+            num_workers=num_workers,
+        )
+
+        # Store augmentation transform to apply after caching
+        self.augmentation_transform = augmentation_transform
+
+    def __getitem__(self, index: Union[int, slice, Sequence[int]]) -> Any:
+        # Get cached preprocessed data
+        # CacheDataset.__getitem__ returns various types after transform is applied
+        # We handle the case where index is a single int (most common)
+        data: Any = super().__getitem__(index)
+
+        # If data is a dictionary (single item), apply augmentation
+        if isinstance(data, dict):
+            # Cast to dict[str, Any] for type safety
+            data_dict = cast(dict[str, Any], data)
+
+            # Apply augmentation on-the-fly (if provided)
+            if self.augmentation_transform is not None:
+                data_dict = cast(dict[str, Any], self.augmentation_transform(data_dict))
+
+            # Remove internal metadata keys
+            data_dict.pop("_patient_id", None)
+
+            return data_dict
+
+        # If data is a sequence (e.g., from slicing), apply to each element
+        elif isinstance(data, Sequence):
+            # Recursively process each item in the sequence
+            return [self._process_single_item(cast(dict[str, Any], item)) if isinstance(item, dict) else item
+                   for item in data]
+
+        # Return data unchanged for other types (should not happen with our transforms)
+        return data
+
+    def _process_single_item(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Helper method to process a single dictionary item."""
+        # Apply augmentation on-the-fly (if provided)
+        if self.augmentation_transform is not None:
+            # Augmentation transform returns dict with same keys
+            data = cast(dict[str, Any], self.augmentation_transform(data))
+
+        # Remove internal metadata keys
+        data.pop("_patient_id", None)
+
+        return data
+
+
 class _PreEncodedDataset(Dataset):
     """
     Dataset for Stage 2 training with pre-encoded latents/indices.
@@ -379,8 +581,8 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.shift_intensity_offset = shift_intensity_offset
 
         # Single dataset with random modality sampling (set in setup())
-        self.train_dataset: Optional[_RandomModalityDataset] = None
-        self.val_dataset: Optional[_RandomModalityDataset] = None
+        self.train_dataset: Optional[_CachedRandomModalityDataset] = None
+        self.val_dataset: Optional[_CachedRandomModalityDataset] = None
 
     def _resolve_device(self, device_config: Optional[str]) -> torch.device:
         """Resolve device from config or auto-detect."""
@@ -438,6 +640,27 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         if stage == "predict" or stage is None:
             return
 
+        # Resource diagnostics for multiprocessing debugging
+        try:
+            import resource
+            import psutil
+
+            # Check file descriptor limits
+            soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+            print(f"[BraTSDataModuleStage1] File descriptor limits: soft={soft_limit}, hard={hard_limit}")
+
+            # Check available memory
+            mem = psutil.virtual_memory()
+            print(f"[BraTSDataModuleStage1] Available memory: {mem.available / 1024**3:.1f} GB")
+
+            # Check CPU count
+            cpu_count = psutil.cpu_count()
+            print(f"[BraTSDataModuleStage1] CPU cores: {cpu_count}")
+            print(f"[BraTSDataModuleStage1] Config num_workers: {self.num_workers}")
+
+        except (ImportError, AttributeError) as e:
+            print(f"[BraTSDataModuleStage1] Warning: Could not perform resource diagnostics: {e}")
+
         # Get patient directories
         patients = sorted([
             d for d in os.listdir(self.data_dir)
@@ -456,28 +679,135 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         train_files = [_get_brats_files(self.data_dir, p) for p in train_patients]
         val_files = [_get_brats_files(self.data_dir, p) for p in val_patients]
 
-        # Create transforms
-        train_transforms = self._get_train_transforms()
-        val_transforms = self._get_val_transforms()
+        # Create separate transform pipelines
+        preprocessing_transforms = self._get_preprocessing_transforms()
+        train_augmentation_transforms = self._get_augmentation_transforms(train=True)
+        # Validation has no augmentation
+        val_augmentation_transforms = None
 
-        # Create datasets with RANDOM modality sampling
+        # Create cached datasets with RANDOM modality sampling
         if stage in ["fit", None]:
-            self.train_dataset = _RandomModalityDataset(
+            self.train_dataset = _CachedRandomModalityDataset(
                 data_files=train_files,
-                transforms=train_transforms,
+                preprocessing_transform=preprocessing_transforms,
+                augmentation_transform=train_augmentation_transforms,
                 modalities=self.modalities,
+                cache_rate=self.cache_rate,
+                num_workers=self.num_workers,
             )
-            self.val_dataset = _RandomModalityDataset(
+            self.val_dataset = _CachedRandomModalityDataset(
                 data_files=val_files,
-                transforms=val_transforms,
+                preprocessing_transform=preprocessing_transforms,
+                augmentation_transform=val_augmentation_transforms,  # No augmentation
                 modalities=self.modalities,
+                cache_rate=self.cache_rate,
+                num_workers=self.num_workers,
             )
+
+    def _get_preprocessing_transforms(self) -> Compose:
+        """
+        Get deterministic preprocessing transforms (cached by CacheDataset).
+
+        These transforms are applied once at setup time and cached:
+        1. LoadImaged: Load NIfTI files
+        2. EnsureTyped: Convert to tensor (CPU-only for caching)
+        3. EnsureChannelFirstd: Ensure channel dimension
+        4. Spacingd: Resample to consistent spacing
+        5. Orientationd: Standardize orientation
+        6. ScaleIntensityRanged: Normalize intensity values
+        7. CropForegroundd: Crop to non-zero region
+
+        Returns:
+            Compose: Deterministic transform pipeline
+        """
+        return Compose([
+            LoadImaged(keys=["image"], reader="NibabelReader"),
+            EnsureTyped(keys=["image"]),  # CPU-only for caching
+            EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
+            Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
+            Orientationd(keys=["image"], axcodes=self.orientation),
+            ScaleIntensityRanged(
+                keys=["image"],
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.clip,
+            ),
+            CropForegroundd(keys=["image"], source_key="image"),
+        ])
+
+    def _get_augmentation_transforms(self, train: bool) -> Compose | None:
+        """
+        Get random augmentation transforms (applied per-batch, not cached).
+
+        These transforms are applied on-the-fly during training:
+        1. RandCropByPosNegLabeld: Random cropping to ROI size
+        2. RandFlipd: Random spatial flipping
+        3. RandRotate90d: Random 90-degree rotations
+        4. RandShiftIntensityd: Random intensity shifting
+
+        Args:
+            train: If True, include augmentation transforms; if False, return None
+
+        Returns:
+            Compose or None: Augmentation transform pipeline (None for validation)
+        """
+        # No augmentation for validation
+        if not train:
+            return None
+
+        transforms = []
+
+        # Random cropping (training only)
+        transforms.append(
+            RandCropByPosNegLabeld(
+                keys=["image"],
+                label_key="image",
+                spatial_size=self.roi_size,
+                pos=1,
+                neg=1,
+                num_samples=1,
+            )
+        )
+
+        # Spatial transforms
+        if self.flip_prob > 0:
+            transforms.append(
+                RandFlipd(
+                    keys=["image"],
+                    spatial_axis=self.flip_axes,
+                    prob=self.flip_prob,
+                )
+            )
+
+        if self.rotate_prob > 0:
+            transforms.append(
+                RandRotate90d(
+                    keys=["image"],
+                    max_k=self.rotate_max_k,
+                    spatial_axes=self.rotate_axes,
+                    prob=self.rotate_prob,
+                )
+            )
+
+        # Intensity transforms
+        if self.shift_intensity_prob > 0:
+            transforms.append(
+                RandShiftIntensityd(
+                    keys=["image"],
+                    offsets=self.shift_intensity_offset,
+                    prob=self.shift_intensity_prob,
+                )
+            )
+
+        return Compose(transforms) if transforms else None
 
     def _get_train_transforms(self) -> Compose:
         """Get training transforms with augmentation."""
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
-            EnsureTyped(keys=["image"], device=self.device),  # Convert to tensor early
+            EnsureTyped(keys=["image"]),  # Convert to tensor early
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
             Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
             Orientationd(keys=["image"], axcodes=self.orientation),
@@ -507,7 +837,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         """Get validation transforms (no augmentation)."""
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
-            EnsureTyped(keys=["image"], device=self.device),  # Convert to tensor early
+            EnsureTyped(keys=["image"]),  # Convert to tensor early
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
             Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
             Orientationd(keys=["image"], axcodes=self.orientation),
@@ -527,6 +857,18 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         if self.train_dataset is None:
             raise RuntimeError("Dataset not setup. Call setup('fit') first.")
 
+        # Diagnostics for DataLoader configuration
+        import os
+        import torch
+
+        print(f"[BraTSDataModuleStage1] Creating DataLoader with:")
+        print(f"  - num_workers: {self.num_workers}")
+        print(f"  - prefetch_factor: {self.prefetch_factor}")
+        print(f"  - persistent_workers: {self.persistent_workers}")
+        print(f"  - batch_size: {self.batch_size}")
+        print(f"  - Current process ID: {os.getpid()}")
+        print(f"  - PyTorch multiprocessing start method: {torch.multiprocessing.get_start_method()}")
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -535,6 +877,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
             # No custom collate_fn needed - PyTorch default works fine
             # Default collate will:
             #   - Stack tensors: List[Tensor[1,1,H,W,D]] → Tensor[B,1,H,W,D]
@@ -554,6 +897,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
             # No custom collate_fn needed
         )
 
@@ -737,6 +1081,27 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         if stage == "predict" or stage is None:
             return
 
+        # Resource diagnostics for multiprocessing debugging
+        try:
+            import resource
+            import psutil
+
+            # Check file descriptor limits
+            soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+            print(f"[BraTSDataModuleStage2] File descriptor limits: soft={soft_limit}, hard={hard_limit}")
+
+            # Check available memory
+            mem = psutil.virtual_memory()
+            print(f"[BraTSDataModuleStage2] Available memory: {mem.available / 1024**3:.1f} GB")
+
+            # Check CPU count
+            cpu_count = psutil.cpu_count()
+            print(f"[BraTSDataModuleStage2] CPU cores: {cpu_count}")
+            print(f"[BraTSDataModuleStage2] Config num_workers: {self.num_workers}")
+
+        except (ImportError, AttributeError) as e:
+            print(f"[BraTSDataModuleStage2] Warning: Could not perform resource diagnostics: {e}")
+
         if stage in ["fit", None]:
             if self._autoencoder is None:
                 raise RuntimeError(
@@ -778,23 +1143,36 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         n_train = int(self.train_val_split * len(patients))
         patients = patients[:n_train] if split == "train" else patients[n_train:]
 
-        # Create transforms
-        transforms = self._get_transforms()
-
         # Check cache
         cache_file = os.path.join(self.cache_dir, f"{split}_encoded.pt")
         if os.path.exists(cache_file):
             return torch.load(cache_file)
 
-        # Pre-encode each patient
+        # Create separate transform pipelines
+        preprocessing_transforms = self._get_preprocessing_transforms()
+        augmentation_transforms = self._get_augmentation_transforms()
+
+        # Get file lists for all patients
+        patient_files = [_get_brats_files(self.data_dir, p) for p in patients]
+
+        # Create cached dataset
+        cached_dataset = _CachedAllModalitiesDataset(
+            data_files=patient_files,
+            preprocessing_transform=preprocessing_transforms,
+            augmentation_transform=augmentation_transforms,
+            modalities=self.modalities,
+            cache_rate=self.cache_rate,
+            num_workers=self.num_workers,
+        )
+
+        # Pre-encode all patients using cached dataset
         encoded_data: List[Dict] = []
 
         with torch.no_grad():
-            for patient in patients:
+            for i in range(len(cached_dataset)):
                 try:
-                    files = _get_brats_files(self.data_dir, patient)
-                    # Load all modalities
-                    data: Dict[str, torch.Tensor] = cast(Dict[str, torch.Tensor], transforms(files))
+                    # Get preprocessed and augmented data from cached dataset
+                    data: Dict[str, torch.Tensor] = cast(Dict[str, torch.Tensor], cached_dataset[i])
 
                     # Encode each modality
                     patient_data: Dict[str, torch.Tensor] = {}
@@ -817,7 +1195,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                     encoded_data.append(patient_data)
 
                 except Exception as e:
-                    print(f"Warning: Failed to encode {patient}: {e}")
+                    print(f"Warning: Failed to encode patient {i}: {e}")
                     continue
 
         # Cache encoded data
@@ -826,11 +1204,66 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
 
         return encoded_data
 
-    def _get_transforms(self) -> Compose:
-        """Get transforms for pre-encoding."""
+    def _get_preprocessing_transforms(self) -> Compose:
+        """
+        Get deterministic preprocessing transforms for Stage 2 pre-encoding.
+
+        These transforms are applied once at setup time and cached for ALL modalities:
+        1. LoadImaged: Load NIfTI files for all modalities
+        2. EnsureTyped: Convert to tensor (CPU-only for caching)
+        3. EnsureChannelFirstd: Ensure channel dimension for all modalities
+        4. Spacingd: Resample to consistent spacing
+        5. Orientationd: Standardize orientation
+        6. ScaleIntensityRanged: Normalize intensity values
+        7. CropForegroundd: Crop to non-zero region
+
+        Returns:
+            Compose: Deterministic transform pipeline for all modalities
+        """
         return Compose([
             LoadImaged(keys=self.modalities, reader="NibabelReader"),
-            EnsureTyped(keys=self.modalities, device=self.device),  # Convert to tensor early
+            EnsureTyped(keys=self.modalities),  # CPU-only for caching
+            EnsureChannelFirstd(keys=self.modalities, channel_dim="no_channel"),
+            Spacingd(keys=self.modalities, pixdim=self.spacing, mode=("bilinear",) * len(self.modalities)),
+            Orientationd(keys=self.modalities, axcodes=self.orientation),
+            ScaleIntensityRanged(
+                keys=self.modalities,
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.clip,
+            ),
+            CropForegroundd(keys=self.modalities, source_key=self.modalities[0]),
+        ])
+
+    def _get_augmentation_transforms(self) -> Compose | None:
+        """
+        Get random augmentation transforms for Stage 2 pre-encoding.
+
+        Only RandCropByPosNegLabeld is used to ensure consistent cropping
+        across all modalities during pre-encoding.
+
+        Returns:
+            Compose or None: Augmentation transform pipeline
+        """
+        # Only random cropping for consistent cropping across modalities
+        return Compose([
+            RandCropByPosNegLabeld(
+                keys=self.modalities,
+                label_key=self.modalities[0],
+                spatial_size=self.roi_size,
+                pos=1,
+                neg=1,
+                num_samples=1,
+            ),
+        ])
+
+    def _get_transforms(self) -> Compose:
+        """Get transforms for pre-encoding (legacy method, kept for backward compatibility)."""
+        return Compose([
+            LoadImaged(keys=self.modalities, reader="NibabelReader"),
+            EnsureTyped(keys=self.modalities),  # Convert to tensor early
             EnsureChannelFirstd(keys=self.modalities, channel_dim="no_channel"),
             Spacingd(keys=self.modalities, pixdim=self.spacing, mode=("bilinear",) * len(self.modalities)),
             Orientationd(keys=self.modalities, axcodes=self.orientation),
@@ -858,6 +1291,18 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         if self.train_dataset is None:
             raise RuntimeError("Dataset not setup. Call setup('fit') first.")
 
+        # Diagnostics for DataLoader configuration
+        import os
+        import torch
+
+        print(f"[BraTSDataModuleStage2] Creating DataLoader with:")
+        print(f"  - num_workers: {self.num_workers}")
+        print(f"  - prefetch_factor: {self.prefetch_factor}")
+        print(f"  - persistent_workers: {self.persistent_workers}")
+        print(f"  - batch_size: {self.batch_size}")
+        print(f"  - Current process ID: {os.getpid()}")
+        print(f"  - PyTorch multiprocessing start method: {torch.multiprocessing.get_start_method()}")
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -866,6 +1311,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -881,4 +1327,5 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )

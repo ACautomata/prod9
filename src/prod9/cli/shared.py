@@ -1,5 +1,6 @@
 """Shared utilities for CLI modules."""
 
+import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -14,9 +15,22 @@ from dotenv import load_dotenv
 from prod9.training.callbacks import GradientNormLogging
 
 
+def configure_multiprocessing() -> None:
+    """
+    Configure multiprocessing for CUDA compatibility.
+
+    Sets start method to 'spawn' to avoid CUDA re-initialization errors
+    in forked subprocesses when using data loader workers.
+    """
+    # Disabled - spawn method shows no improvement in practice
+    # The spawn method creates too many file descriptors and startup overhead
+    pass
+
+
 def setup_environment() -> None:
-    """Load environment variables from .env file."""
+    """Load environment variables from .env file and configure multiprocessing."""
     load_dotenv()
+    configure_multiprocessing()
 
 
 def get_device() -> torch.device:

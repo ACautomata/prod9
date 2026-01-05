@@ -96,6 +96,7 @@ class AutoencoderLightningConfig:
         return AutoencoderFSQ(
             spatial_dims=config.get("spatial_dims", 3),
             levels=config.get("levels", [8, 8, 8]),
+            save_mem=config.get("save_mem", False),  # Default to False for training
             in_channels=config.get("in_channels", 1),
             out_channels=config.get("out_channels", 1),
             num_channels=config.get("num_channels", [32, 64, 128, 256, 512]),

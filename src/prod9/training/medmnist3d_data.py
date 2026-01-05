@@ -112,7 +112,7 @@ class _CachedMedMNIST3DStage1Dataset(CacheDataset):
         augmentation_transform: Random transforms applied per-batch (training only)
         modality_name: Modality name for logging
         cache_rate: Fraction of dataset to cache (1.0 = full cache)
-        num_workers: Number of workers for caching
+        num_workers: Number of workers for caching (set to 0 to avoid nested multiprocessing)
     """
 
     def __init__(
@@ -122,7 +122,7 @@ class _CachedMedMNIST3DStage1Dataset(CacheDataset):
         augmentation_transform: Compose | None = None,
         modality_name: str = "mnist3d",
         cache_rate: float = 1.0,
-        num_workers: int = 4,
+        num_workers: int = 4,  # Default number of workers for caching
     ):
         # Prepare data for CacheDataset: list of (data_dict, modality_name) tuples
         # CacheDataset expects items to be dictionaries or hashable objects
@@ -414,7 +414,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         Get deterministic preprocessing transforms (cached by CacheDataset).
 
         These transforms are applied once at setup time and cached:
-        1. EnsureTyped: Convert numpy array to tensor and move to device
+        1. EnsureTyped: Convert numpy array to tensor
         2. ScaleIntensityRanged: Normalize from [0, 1] to [-1, 1]
 
         Note: LoadImage is not needed because MedMNIST provides numpy arrays directly.
@@ -426,9 +426,8 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         from monai.transforms.utility.dictionary import EnsureTyped
 
         return Compose([
-            # EnsureTyped - convert numpy array to tensor and move to device early
-            # This ensures expensive transforms below run on GPU
-            EnsureTyped(keys=["image"], device=self.device),
+            # EnsureTyped - convert numpy array to tensor
+            EnsureTyped(keys=["image"]),
 
             # Normalize from [0, 1] to [-1, 1]
             ScaleIntensityRanged(
@@ -517,6 +516,9 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             self.setup()
         assert self.train_dataset is not None  # Type guard for pyright
 
+        # Simple diagnostics for multiprocessing debugging
+        print(f"[MedMNIST3DStage1] Creating DataLoader with num_workers={self.num_workers}")
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -525,6 +527,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )
 
     def val_dataloader(self):
@@ -541,6 +544,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )
 
     @classmethod
@@ -759,6 +763,9 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             self.setup()
         assert self.train_dataset is not None  # Type guard for pyright
 
+        # Simple diagnostics for multiprocessing debugging
+        print(f"[MedMNIST3DStage2] Creating DataLoader with num_workers={self.num_workers}")
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -767,6 +774,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )
 
     def val_dataloader(self):
@@ -783,6 +791,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+            timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
         )
 
     @classmethod
