@@ -207,21 +207,24 @@ class AutoencoderInferenceWrapper:
         inferer = self._create_inferer()
 
         # Wrap encode method for SW
+        # Note: AutoencoderFSQ.encode() now returns (z_q, z_mu) where z_q is quantized
         def _encode_fn(x: torch.Tensor) -> torch.Tensor:
-            z_mu, _ = self.autoencoder.encode(x)  # type: ignore[misc]
-            return z_mu
+            z_q, z_mu = self.autoencoder.encode(x)  # type: ignore[misc]
+            return z_q  # Return quantized latent for decode (correct for FSQ)
 
         # Apply SW - handle different return types
         result = inferer(x, _encode_fn)
         if isinstance(result, tuple):
-            z_mu = result[0]
+            z_q = result[0]
         elif isinstance(result, dict):
-            z_mu = result[list(result.keys())[0]]
+            z_q = result[list(result.keys())[0]]
         else:
-            z_mu = result
+            z_q = result
 
-        z_sigma = torch.tensor(0.0, device=z_mu.device)
-        return z_mu, z_sigma
+        # For API compatibility, return (z_q, z_sigma) where z_q is quantized
+        # The decode() method expects quantized values for FSQ
+        z_sigma = torch.tensor(0.0, device=z_q.device)
+        return z_q, z_sigma
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -248,7 +251,8 @@ class AutoencoderInferenceWrapper:
         """
         Encode image and return token indices for Stage 2 transformer training.
 
-        Uses sliding window for encoding, then quantizes to indices.
+        Uses the autoencoder's quantize_stage_2_inputs() method which handles
+        the new encode() signature correctly.
 
         Args:
             x: Input image [B, C, H, W, D]
@@ -256,10 +260,9 @@ class AutoencoderInferenceWrapper:
         Returns:
             Token indices [B, H, W, D] (flat scalar indices for FSQ)
         """
-        # First encode with sliding window to get continuous latent
-        z_mu, _ = self.encode(x)
-        # Then quantize to discrete indices
-        return self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
+        # Delegate to autoencoder's quantize_stage_2_inputs() which handles
+        # the new (z_q, z_mu) signature correctly
+        return self.autoencoder.quantize_stage_2_inputs(x)  # type: ignore[return-value]
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """
@@ -359,14 +362,15 @@ class AutoencoderInferenceWrapper:
         Returns:
             Token indices [B, H'*W'*D']
         """
-        z_mu, _ = self.encode(x)
-        return self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
+        # Delegate to autoencoder's quantize_stage_2_inputs() which handles
+        # the new (z_q, z_mu) signature correctly
+        return self.autoencoder.quantize_stage_2_inputs(x)  # type: ignore[return-value]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Full encode-decode pass with sliding window.
 
-        Matches AutoencoderLightning.forward() signature.
+        Matches AutoencoderFSQ.forward() signature.
 
         Args:
             x: Input image [B, C, H, W, D]
@@ -375,10 +379,10 @@ class AutoencoderInferenceWrapper:
         Returns:
             Reconstructed image [B, C, H, W, D]
         """
-        z_mu, _ = self.encode(x)
-        z_quantized = self.autoencoder.quantize(z_mu)  # type: ignore[return-value]
-        z_embedded = self.autoencoder.embed(z_quantized)  # type: ignore[return-value]
-        return self.decode(z_embedded)
+        # encode() now returns (z_q, z_sigma) where z_q is quantized
+        z_q, _ = self.encode(x)
+        # Decode quantized values directly (no need to quantize again)
+        return self.decode(z_q)
 
     def to(self, device: torch.device) -> "AutoencoderInferenceWrapper":
         """

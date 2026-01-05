@@ -739,17 +739,16 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                         image: torch.Tensor = data[modality]
                         # image: [1, 1, H, W, D]
 
-                        # Encode to latent
-                        latent_tuple = autoencoder.encode(image)
-                        # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar
-                        latent = latent_tuple[0] if isinstance(latent_tuple, tuple) else latent_tuple
-                        # latent: [1, C, H', W', D']
-
-                        # Get token indices
-                        indices = autoencoder.quantize(latent)
+                        # Encode and quantize to token indices for Stage 2
+                        # encode() now returns (z_q, z_mu) where z_q is quantized
+                        indices = autoencoder.quantize_stage_2_inputs(image)
                         # indices: [1, H'*W'*D']
 
-                        patient_data[f"{modality}_latent"] = latent.squeeze(0).cpu()
+                        # Also store latent (z_mu) for potential debugging/visualization
+                        _, z_mu = autoencoder.encode(image)  # Returns (z_q, z_mu)
+                        latent = z_mu.squeeze(0).cpu()  # [C, H', W', D']
+
+                        patient_data[f"{modality}_latent"] = latent
                         patient_data[f"{modality}_indices"] = indices.squeeze(0).cpu()
 
                     encoded_data.append(patient_data)

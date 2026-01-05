@@ -55,8 +55,8 @@ def _measure_scale_factor(autoencoder) -> int:
     device = next(autoencoder.parameters()).device
     with torch.no_grad():
         dummy = torch.zeros(1, 1, 64, 64, 64, device=device)
-        z_mu, _ = autoencoder.encode(dummy)
-        scale = 64 // z_mu.shape[2]
+        z_q, _ = autoencoder.encode(dummy)  # Returns (z_q, z_mu)
+        scale = 64 // z_q.shape[2]
     return scale
 
 

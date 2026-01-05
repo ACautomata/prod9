@@ -508,8 +508,9 @@ class TransformerLightning(pl.LightningModule):
         autoencoder = self._get_autoencoder()
 
         with torch.no_grad():
-            # Encode source
-            source_latent, _ = autoencoder.encode(source_image)
+            # Encode source - encode() now returns (z_q, z_mu)
+            # We use z_mu (unquantized) for condition generation
+            _, source_latent = autoencoder.encode(source_image)
 
             # Create source modality tensor
             source_modality_tensor = torch.tensor(

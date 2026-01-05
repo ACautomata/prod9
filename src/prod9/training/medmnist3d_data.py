@@ -507,20 +507,20 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
                 device = next(self.autoencoder.parameters()).device
                 img_tensor = img_tensor.to(device)
 
-                # Encode to latent
-                latent_tuple = self.autoencoder.encode(img_tensor)
-                # Returns (z_mu, z_sigma): [1, C, H', W', D'], scalar
-                latent = latent_tuple[0] if isinstance(latent_tuple, tuple) else latent_tuple
+                # Encode and quantize to token indices for Stage 2
+                # encode() now returns (z_q, z_mu) where z_q is quantized
+                indices_tensor = self.autoencoder.quantize_stage_2_inputs(img_tensor)
 
-                # Quantize to token indices
-                indices_tensor = self.autoencoder.quantize(latent)
+                # For backward compatibility, also store latent (z_mu for potential debugging)
+                _, z_mu = self.autoencoder.encode(img_tensor)  # Returns (z_q, z_mu)
+                latent = z_mu.squeeze(0).cpu()
 
                 # Store label index (not embedding) - embedding will be added by MaskGiTConditionGenerator
                 # Convert numpy array to Python int (handle both 0-d and multi-dimensional arrays)
                 label_int = int(label) if np.ndim(label) == 0 else int(label.item())
                 encoded_data.append(
                     {
-                        "latent": latent.squeeze(0).cpu(),  # Move to CPU before caching
+                        "latent": latent,  # Already squeezed and moved to CPU
                         "indices": indices_tensor.cpu(),  # Move to CPU before caching
                         "label": label_int,
                     }
