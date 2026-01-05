@@ -477,6 +477,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         """Get training transforms with augmentation."""
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
+            EnsureTyped(keys=["image"], device=self.device),  # Convert to tensor early
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
             Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
             Orientationd(keys=["image"], axcodes=self.orientation),
@@ -500,13 +501,13 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             RandFlipd(keys=["image"], spatial_axis=self.flip_axes, prob=self.flip_prob),
             RandRotate90d(keys=["image"], max_k=self.rotate_max_k, spatial_axes=self.rotate_axes, prob=self.rotate_prob),
             RandShiftIntensityd(keys=["image"], offsets=self.shift_intensity_offset, prob=self.shift_intensity_prob),
-            EnsureTyped(keys=["image"], device=self.device),
         ])
 
     def _get_val_transforms(self) -> Compose:
         """Get validation transforms (no augmentation)."""
         return Compose([
             LoadImaged(keys=["image"], reader="NibabelReader"),
+            EnsureTyped(keys=["image"], device=self.device),  # Convert to tensor early
             EnsureChannelFirstd(keys=["image"], channel_dim="no_channel"),
             Spacingd(keys=["image"], pixdim=self.spacing, mode="bilinear"),
             Orientationd(keys=["image"], axcodes=self.orientation),
@@ -519,7 +520,6 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
                 clip=self.clip,
             ),
             CropForegroundd(keys=["image"], source_key="image"),
-            EnsureTyped(keys=["image"], device=self.device),
         ])
 
     def train_dataloader(self) -> DataLoader:
@@ -830,6 +830,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         """Get transforms for pre-encoding."""
         return Compose([
             LoadImaged(keys=self.modalities, reader="NibabelReader"),
+            EnsureTyped(keys=self.modalities, device=self.device),  # Convert to tensor early
             EnsureChannelFirstd(keys=self.modalities, channel_dim="no_channel"),
             Spacingd(keys=self.modalities, pixdim=self.spacing, mode=("bilinear",) * len(self.modalities)),
             Orientationd(keys=self.modalities, axcodes=self.orientation),
@@ -850,7 +851,6 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
                 neg=1,
                 num_samples=1,
             ),
-            EnsureTyped(keys=self.modalities, device=self.device),
         ])
 
     def train_dataloader(self) -> DataLoader:

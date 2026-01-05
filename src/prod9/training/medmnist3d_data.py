@@ -12,7 +12,7 @@ Key features:
 """
 
 import os
-from typing import Literal, cast, Optional
+from typing import Literal, cast, Optional, Any, Union, Sequence
 
 import medmnist
 import numpy as np
@@ -20,6 +20,8 @@ import torch
 import pytorch_lightning as pl
 from medmnist import INFO
 from torch.utils.data import ConcatDataset, DataLoader, Dataset as TorchDataset
+from monai.transforms.compose import Compose
+from monai.data.dataset import CacheDataset
 
 import prod9.training.brats_data as brats_data
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
@@ -45,14 +47,15 @@ def get_device() -> torch.device:
 
 class _MedMNIST3DStage1Dataset(TorchDataset):
     """
-    Stage 1 dataset wrapper for MedMNIST 3D.
+    Stage 1 dataset wrapper for MedMNIST 3D with separated transforms.
 
     Wraps MedMNIST 3D dataset and ignores labels for self-supervised training.
     Returns BraTS-compatible format with 'modality' key.
 
     Args:
         dataset: MedMNIST 3D dataset instance
-        transform: Optional MONAI dictionary transform to apply
+        preprocessing_transform: Deterministic transforms (LoadImage, EnsureTyped, Normalize)
+        augmentation_transform: Random transforms (Flip, Rotate, Zoom) - training only
         modality_name: Modality name for logging (default: "mnist3d")
 
     Returns:
@@ -61,9 +64,10 @@ class _MedMNIST3DStage1Dataset(TorchDataset):
             - 'modality': Modality name (single string)
     """
 
-    def __init__(self, dataset, transform=None, modality_name="mnist3d"):
+    def __init__(self, dataset, preprocessing_transform=None, augmentation_transform=None, modality_name="mnist3d"):
         self.dataset = dataset
-        self.transform = transform
+        self.preprocessing_transform = preprocessing_transform
+        self.augmentation_transform = augmentation_transform
         self.modality_name = modality_name
 
     def __len__(self):
@@ -80,14 +84,116 @@ class _MedMNIST3DStage1Dataset(TorchDataset):
         # Create dictionary for MONAI transforms
         data_dict = {"image": img}
 
-        # Apply MONAI dictionary transform if provided
-        if self.transform is not None:
-            data_dict = self.transform(data_dict)
+        # Apply preprocessing transform (always)
+        if self.preprocessing_transform is not None:
+            data_dict = self.preprocessing_transform(data_dict)
+
+        # Apply augmentation transform (if provided, e.g., during training)
+        if self.augmentation_transform is not None:
+            data_dict = self.augmentation_transform(data_dict)
 
         # Add modality name
         data_dict["modality"] = self.modality_name
 
         return data_dict
+
+
+class _CachedMedMNIST3DStage1Dataset(CacheDataset):
+    """
+    Cached dataset wrapper for MedMNIST 3D with pre-computed deterministic transforms.
+
+    Uses MONAI's CacheDataset to pre-compute deterministic transforms (LoadImage,
+    EnsureTyped, Normalize) at setup time. Random augmentation transforms are
+    applied per-batch during training.
+
+    Args:
+        dataset: MedMNIST 3D dataset instance
+        preprocessing_transform: Deterministic transforms to cache
+        augmentation_transform: Random transforms applied per-batch (training only)
+        modality_name: Modality name for logging
+        cache_rate: Fraction of dataset to cache (1.0 = full cache)
+        num_workers: Number of workers for caching
+    """
+
+    def __init__(
+        self,
+        dataset: TorchDataset,
+        preprocessing_transform: Compose,
+        augmentation_transform: Compose | None = None,
+        modality_name: str = "mnist3d",
+        cache_rate: float = 1.0,
+        num_workers: int = 4,
+    ):
+        # Prepare data for CacheDataset: list of (data_dict, modality_name) tuples
+        # CacheDataset expects items to be dictionaries or hashable objects
+        data = []
+        # Type guard: ensure dataset is Sized
+        if not hasattr(dataset, "__len__"):
+            raise TypeError(f"Dataset must implement __len__, got {type(dataset)}")
+        dataset_len = len(dataset)  # type: ignore
+        for i in range(dataset_len):
+            img, _ = dataset[i]
+            # Ensure single channel
+            if img.shape[0] == 3:
+                img = img[0:1, ...]
+            # CacheDataset will apply preprocessing_transform to each dict
+            data.append({"image": img, "_modality": modality_name})
+
+        # Initialize CacheDataset with data and preprocessing transforms
+        super().__init__(
+            data=data,
+            transform=preprocessing_transform,
+            cache_rate=cache_rate,
+            num_workers=num_workers,
+        )
+
+        # Store augmentation transform to apply after caching
+        self.augmentation_transform = augmentation_transform
+
+    def __getitem__(self, index: Union[int, slice, Sequence[int]]) -> Any:
+        # Get cached preprocessed data
+        # CacheDataset.__getitem__ returns various types after transform is applied
+        # We handle the case where index is a single int (most common)
+        data: Any = super().__getitem__(index)
+
+        # If data is a dictionary (single item), apply augmentation and rename modality
+        if isinstance(data, dict):
+            # Cast to dict[str, Any] for type safety
+            data_dict = cast(dict[str, Any], data)
+
+            # Apply augmentation on-the-fly (if provided)
+            if self.augmentation_transform is not None:
+                data_dict = cast(dict[str, Any], self.augmentation_transform(data_dict))
+
+            # Rename _modality to modality for consistency
+            if "_modality" in data_dict:
+                modality_value = data_dict.pop("_modality")
+                data_dict["modality"] = modality_value
+
+            return data_dict
+
+        # If data is a sequence (e.g., from slicing), apply to each element
+        elif isinstance(data, Sequence):
+            # Recursively process each item in the sequence
+            return [self._process_single_item(cast(dict[str, Any], item)) if isinstance(item, dict) else item
+                   for item in data]
+
+        # Return data unchanged for other types (should not happen with our transforms)
+        return data
+
+    def _process_single_item(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Helper method to process a single dictionary item."""
+        # Apply augmentation on-the-fly (if provided)
+        if self.augmentation_transform is not None:
+            # Augmentation transform returns dict with same keys
+            data = cast(dict[str, Any], self.augmentation_transform(data))
+
+        # Rename _modality to modality for consistency
+        if "_modality" in data:
+            modality_value = data.pop("_modality")
+            data["modality"] = modality_value
+
+        return data
 
 
 class _MedMNIST3DStage2Dataset(TorchDataset):
@@ -230,14 +336,16 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         return get_device()  # Auto-detect: CUDA > MPS > CPU
 
     def _setup_datasets(self):
-        """Initialize train/val datasets with ConcatDataset support."""
+        """Initialize train/val datasets with separated deterministic and random transforms."""
         # Create root directory if it doesn't exist
         if self.root and not os.path.exists(self.root):
             os.makedirs(self.root, exist_ok=True)
 
-        # Create transforms
-        train_transform = self._create_transform(train=True)
-        val_transform = self._create_transform(train=False)
+        # Create separate transform pipelines
+        preprocessing_transforms = self._get_preprocessing_transforms()
+        train_augmentation_transforms = self._get_augmentation_transforms(train=True)
+        # Validation has no augmentation
+        val_augmentation_transforms = None
 
         train_datasets = []
         val_datasets = []
@@ -261,15 +369,25 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             train_subset = torch.utils.data.Subset(raw_train, train_indices)
             val_subset = torch.utils.data.Subset(raw_train, val_indices)
 
-            # Wrap in custom dataset classes
+            # Wrap in cached dataset classes with separated transforms
             train_datasets.append(
-                _MedMNIST3DStage1Dataset(
-                    train_subset, train_transform, modality_name=ds_name
+                _CachedMedMNIST3DStage1Dataset(
+                    dataset=train_subset,
+                    preprocessing_transform=preprocessing_transforms,
+                    augmentation_transform=train_augmentation_transforms,
+                    modality_name=ds_name,
+                    cache_rate=1.0,  # Cache all preprocessing results
+                    num_workers=self.num_workers,
                 )
             )
             val_datasets.append(
-                _MedMNIST3DStage1Dataset(
-                    val_subset, val_transform, modality_name=ds_name
+                _CachedMedMNIST3DStage1Dataset(
+                    dataset=val_subset,
+                    preprocessing_transform=preprocessing_transforms,
+                    augmentation_transform=val_augmentation_transforms,  # No augmentation
+                    modality_name=ds_name,
+                    cache_rate=1.0,
+                    num_workers=self.num_workers,
                 )
             )
 
@@ -291,22 +409,28 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         if stage == "fit":
             self._setup_datasets()
 
-    def _create_transform(self, train: bool):
-        """Create MONAI transform pipeline with preprocessing and optional augmentation."""
-        from monai.transforms.compose import Compose
-        from monai.transforms.io.array import LoadImage
-        from monai.transforms.spatial.dictionary import RandFlipd, RandRotated, RandZoomd
-        from monai.transforms.intensity.dictionary import ScaleIntensityRanged, RandShiftIntensityd
+    def _get_preprocessing_transforms(self) -> Compose:
+        """
+        Get deterministic preprocessing transforms (cached by CacheDataset).
+
+        These transforms are applied once at setup time and cached:
+        1. EnsureTyped: Convert numpy array to tensor and move to device
+        2. ScaleIntensityRanged: Normalize from [0, 1] to [-1, 1]
+
+        Note: LoadImage is not needed because MedMNIST provides numpy arrays directly.
+
+        Returns:
+            Compose: Deterministic transform pipeline
+        """
+        from monai.transforms.intensity.dictionary import ScaleIntensityRanged
         from monai.transforms.utility.dictionary import EnsureTyped
 
-        transforms = []
+        return Compose([
+            # EnsureTyped - convert numpy array to tensor and move to device early
+            # This ensures expensive transforms below run on GPU
+            EnsureTyped(keys=["image"], device=self.device),
 
-        # Preprocessing transforms (always applied)
-        # LoadImage - handles numpy arrays from MedMNIST
-        transforms.append(LoadImage(image_only=True, keys=["image"]))
-
-        # Normalize from [0, 1] to [-1, 1]
-        transforms.append(
+            # Normalize from [0, 1] to [-1, 1]
             ScaleIntensityRanged(
                 keys=["image"],
                 a_min=0.0,
@@ -314,58 +438,78 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
                 b_min=-1.0,
                 b_max=1.0,
                 clip=True,
+            ),
+        ])
+
+    def _get_augmentation_transforms(self, train: bool) -> Compose | None:
+        """
+        Get random augmentation transforms (applied per-batch, not cached).
+
+        These transforms are applied on-the-fly during training:
+        1. RandFlipd: Random spatial flipping
+        2. RandRotated: Random rotation
+        3. RandZoomd: Random zoom/scaling
+        4. RandShiftIntensityd: Random intensity shift
+
+        Args:
+            train: If True, include augmentation transforms; if False, return None
+
+        Returns:
+            Compose or None: Augmentation transform pipeline (None for validation)
+        """
+        from monai.transforms.spatial.dictionary import RandFlipd, RandRotated, RandZoomd
+        from monai.transforms.intensity.dictionary import RandShiftIntensityd
+
+        # No augmentation for validation
+        if not train or self.augmentation is None or not self.augmentation.get("enabled", False):
+            return None
+
+        transforms = []
+
+        # Spatial transforms
+        if self.augmentation.get("flip_prob", 0) > 0:
+            transforms.append(
+                RandFlipd(
+                    keys=["image"],
+                    prob=self.augmentation["flip_prob"],
+                    spatial_axis=self.augmentation.get("flip_axes", [0, 1, 2]),
+                )
             )
-        )
 
-        # Augmentation transforms (only when enabled and for training)
-        if train and self.augmentation is not None and self.augmentation.get("enabled", False):
-            # Spatial transforms
-            if self.augmentation.get("flip_prob", 0) > 0:
-                transforms.append(
-                    RandFlipd(
-                        keys=["image"],
-                        prob=self.augmentation["flip_prob"],
-                        spatial_axis=self.augmentation.get("flip_axes", [0, 1, 2]),
-                    )
+        if self.augmentation.get("rotate_prob", 0) > 0:
+            transforms.append(
+                RandRotated(
+                    keys=["image"],
+                    prob=self.augmentation["rotate_prob"],
+                    range_x=self.augmentation.get("rotate_range", 0.26),
+                    range_y=self.augmentation.get("rotate_range", 0.26),
+                    range_z=self.augmentation.get("rotate_range", 0.26),
+                    keep_size=True,
                 )
+            )
 
-            if self.augmentation.get("rotate_prob", 0) > 0:
-                transforms.append(
-                    RandRotated(
-                        keys=["image"],
-                        prob=self.augmentation["rotate_prob"],
-                        range_x=self.augmentation.get("rotate_range", 0.26),
-                        range_y=self.augmentation.get("rotate_range", 0.26),
-                        range_z=self.augmentation.get("rotate_range", 0.26),
-                        keep_size=True,
-                    )
+        if self.augmentation.get("zoom_prob", 0) > 0:
+            transforms.append(
+                RandZoomd(
+                    keys=["image"],
+                    prob=self.augmentation["zoom_prob"],
+                    min_zoom=self.augmentation.get("zoom_min", 0.9),
+                    max_zoom=self.augmentation.get("zoom_max", 1.1),
+                    keep_size=True,
                 )
+            )
 
-            if self.augmentation.get("zoom_prob", 0) > 0:
-                transforms.append(
-                    RandZoomd(
-                        keys=["image"],
-                        prob=self.augmentation["zoom_prob"],
-                        min_zoom=self.augmentation.get("zoom_min", 0.9),
-                        max_zoom=self.augmentation.get("zoom_max", 1.1),
-                        keep_size=True,
-                    )
+        # Intensity transforms
+        if self.augmentation.get("shift_intensity_prob", 0) > 0:
+            transforms.append(
+                RandShiftIntensityd(
+                    keys=["image"],
+                    prob=self.augmentation["shift_intensity_prob"],
+                    offsets=self.augmentation.get("shift_intensity_offset", 0.1),
                 )
+            )
 
-            # Intensity transforms
-            if self.augmentation.get("shift_intensity_prob", 0) > 0:
-                transforms.append(
-                    RandShiftIntensityd(
-                        keys=["image"],
-                        prob=self.augmentation["shift_intensity_prob"],
-                        offsets=self.augmentation.get("shift_intensity_offset", 0.1),
-                    )
-                )
-
-        # Final transform: EnsureTyped with device (always applied last)
-        transforms.append(EnsureTyped(keys=["image"], device=self.device))
-
-        return Compose(transforms)
+        return Compose(transforms) if transforms else None
 
     def train_dataloader(self):
         """Return training DataLoader."""
