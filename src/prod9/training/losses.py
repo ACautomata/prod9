@@ -181,7 +181,7 @@ class VAEGANLoss(nn.Module):
         commitment_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
 
         # Combined reconstruction loss (nll_loss in VQGAN terminology)
-        nll_loss = recon_loss + self.perceptual_weight * perceptual_loss
+        nll_loss = self.recon_weight * recon_loss + self.perceptual_weight * perceptual_loss
 
         # Compute adaptive adversarial weight (if last_layer provided)
         if last_layer is not None:
@@ -231,6 +231,9 @@ class VAEGANLoss(nn.Module):
                 network_type=self.perceptual_network_type,
                 is_fake_3d=False,
             ).to(fake_images.device)
+            # Freeze pretrained network weights to prevent training instability
+            for param in self.perceptual_network.parameters():
+                param.requires_grad = False
         # Type narrowing: perceptual_network is now guaranteed to be non-None
         network = self.perceptual_network
         assert network is not None

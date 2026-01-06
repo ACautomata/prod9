@@ -61,6 +61,7 @@ class AutoencoderLightningConfig:
         adv_config = loss_config.get("adversarial", {})
         commitment_config = loss_config.get("commitment", {})
         discriminator_iter_start = loss_config.get("discriminator_iter_start", 0)
+        adv_criterion = adv_config.get("criterion", "least_squares")
 
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
@@ -77,6 +78,7 @@ class AutoencoderLightningConfig:
             perceptual_weight=perceptual_config.get("weight", 0.5),
             perceptual_network_type=perceptual_config.get("network_type", "medicalnet_resnet10_23datasets"),
             adv_weight=adv_config.get("weight", 0.1),
+            adv_criterion=adv_criterion,
             commitment_weight=commitment_config.get("weight", 0.25),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             discriminator_iter_start=discriminator_iter_start,

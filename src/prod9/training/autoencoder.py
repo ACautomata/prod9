@@ -94,6 +94,7 @@ class AutoencoderLightning(pl.LightningModule):
         perceptual_weight: float = 0.5,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
         adv_weight: float = 0.1,
+        adv_criterion: str = "least_squares",
         commitment_weight: float = 0.25,
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
@@ -127,9 +128,9 @@ class AutoencoderLightning(pl.LightningModule):
             perceptual_weight=perceptual_weight,
             perceptual_network_type=perceptual_network_type,
             adv_weight=adv_weight,
+            adv_criterion=adv_criterion,
             commitment_weight=commitment_weight,
             spatial_dims=3,
-            adv_criterion="least_squares",
             discriminator_iter_start=discriminator_iter_start,
         )
 
