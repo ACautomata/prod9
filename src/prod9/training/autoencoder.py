@@ -65,13 +65,10 @@ class AutoencoderLightning(pl.LightningModule):
         b1: Adam beta1 (default: 0.5)
         b2: Adam beta2 (default: 0.999)
         recon_weight: Weight for reconstruction loss (default: 1.0)
-        perceptual_weight: Weight for focal frequency loss (default: 0.5)
+        perceptual_weight: Weight for perceptual loss (default: 0.5)
+        perceptual_network_type: Pretrained network for perceptual loss (default: "medicalnet_resnet10_23datasets")
         adv_weight: Base weight for adversarial loss (default: 0.1)
         commitment_weight: Weight for commitment loss (default: 0.25)
-        ffl_alpha: Focusing exponent for focal frequency loss (default: 1.0)
-        ffl_patch_factor: Split image into N×N patches before FFT (default: 1)
-        ffl_axes: Slice axes for 3D volumes - 2=axial, 3=coronal, 4=sagittal (default: (2,3,4))
-        ffl_ratio: Fraction of slices used per axis (default: 0.5)
         sample_every_n_steps: Log samples every N steps (default: 100)
         discriminator_iter_start: Step to start discriminator training (default: 0)
         use_sliding_window: Use sliding window for validation (default: False)
@@ -95,12 +92,9 @@ class AutoencoderLightning(pl.LightningModule):
         b2: float = 0.999,
         recon_weight: float = 1.0,
         perceptual_weight: float = 0.5,
+        perceptual_network_type: str = "medicalnet_resnet10_23datasets",
         adv_weight: float = 0.1,
         commitment_weight: float = 0.25,
-        ffl_alpha: float = 1.0,
-        ffl_patch_factor: int = 1,
-        ffl_axes: tuple[int, ...] = (2, 3, 4),
-        ffl_ratio: float = 0.5,
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
         use_sliding_window: bool = False,
@@ -131,13 +125,10 @@ class AutoencoderLightning(pl.LightningModule):
         self.vaegan_loss = VAEGANLoss(
             recon_weight=recon_weight,
             perceptual_weight=perceptual_weight,
+            perceptual_network_type=perceptual_network_type,
             adv_weight=adv_weight,
             commitment_weight=commitment_weight,
             spatial_dims=3,
-            ffl_alpha=ffl_alpha,
-            ffl_patch_factor=ffl_patch_factor,
-            ffl_axes=ffl_axes,
-            ffl_ratio=ffl_ratio,
             adv_criterion="least_squares",
             discriminator_iter_start=discriminator_iter_start,
         )

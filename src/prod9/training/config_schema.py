@@ -298,28 +298,14 @@ class ReconstructionLossConfig(BaseModel):
     weight: float = Field(default=1.0, ge=0)
 
 
-class FocalFrequencyLossConfig(BaseModel):
-    """Focal Frequency Loss configuration (slice-based 2.5D for 3D volumes)."""
+class PerceptualLossConfig(BaseModel):
+    """Perceptual loss configuration using MONAI's PerceptualLoss."""
 
     weight: float = Field(default=0.5, ge=0, description="Loss weight multiplier")
-    alpha: float = Field(default=1.0, ge=0, description="Focusing exponent for spectrum weight matrix")
-    patch_factor: int = Field(default=1, ge=1, description="Split image into N×N patches before FFT")
-    ave_spectrum: bool = Field(default=False, description="Use minibatch-average spectrum")
-    log_matrix: bool = Field(default=False, description="Apply log(1+w) before normalization")
-    batch_matrix: bool = Field(default=False, description="Normalize w using batch-level max")
-    axes: Tuple[int, ...] = Field(default=(2, 3, 4), description="Slice axes: 2=axial, 3=coronal, 4=sagittal")
-    ratio: float = Field(default=0.5, ge=0, le=1, description="Fraction of slices used per axis")
-    eps: float = Field(default=1e-8, ge=0, description="Numerical stability epsilon")
-
-    @field_validator("axes")
-    @classmethod
-    def validate_axes(cls, v: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Validate axes are valid for (B,C,D,H,W) tensor."""
-        valid_axes = {2, 3, 4}
-        if not set(v).issubset(valid_axes):
-            invalid = set(v) - valid_axes
-            raise ValueError(f"Invalid axes: {invalid}. Must be subset of {{2, 3, 4}}")
-        return v
+    network_type: str = Field(
+        default="medicalnet_resnet10_23datasets",
+        description="Pretrained network for feature extraction (e.g., medicalnet_resnet10_23datasets)"
+    )
 
 
 class AdversarialLossConfig(BaseModel):
@@ -349,7 +335,7 @@ class LossConfig(BaseModel):
     reconstruction: ReconstructionLossConfig = Field(
         default_factory=ReconstructionLossConfig
     )
-    focal_frequency: FocalFrequencyLossConfig = Field(default_factory=FocalFrequencyLossConfig)
+    perceptual: PerceptualLossConfig = Field(default_factory=PerceptualLossConfig)
     adversarial: AdversarialLossConfig = Field(default_factory=AdversarialLossConfig)
     commitment: CommitmentLossConfig = Field(default_factory=CommitmentLossConfig)
     adaptive: AdaptiveWeightConfig = Field(default_factory=AdaptiveWeightConfig)
