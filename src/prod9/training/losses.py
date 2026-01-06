@@ -183,7 +183,12 @@ class VAEGANLoss(nn.Module):
 
         # Compute adaptive adversarial weight (if last_layer provided)
         if last_layer is not None:
-            adv_weight = self.calculate_adaptive_weight(nll_loss, generator_adv_loss, last_layer)
+            # Apply warmup threshold: set weight to 0 before discriminator_iter_start
+            # This prevents the adversarial loss from destabilizing early training
+            if global_step < self.discriminator_iter_start:
+                adv_weight = torch.tensor(0.0, device=nll_loss.device, dtype=nll_loss.dtype)
+            else:
+                adv_weight = self.calculate_adaptive_weight(nll_loss, generator_adv_loss, last_layer)
         else:
             # Fallback to fixed weight with warmup
             disc_factor = self.adopt_weight(

@@ -333,6 +333,18 @@ class AutoencoderLightning(pl.LightningModule):
         # Step the optimizer
         optimizer.step()
 
+        # Step the corresponding scheduler if warmup is enabled
+        # In manual optimization, Lightning doesn't auto-step schedulers
+        if self.warmup_enabled:
+            schedulers = self.lr_schedulers()
+            # lr_schedulers() can return a single scheduler, a list, or a dict
+            # We expect a list when warmup is enabled (one per optimizer)
+            if isinstance(schedulers, list) and schedulers and optimizer_idx < len(schedulers):
+                scheduler = schedulers[optimizer_idx]
+                # Warmup scheduler is LambdaLR (from create_warmup_scheduler)
+                # which doesn't require metrics parameter
+                cast(torch.optim.lr_scheduler.LambdaLR, scheduler).step()
+
         # Manually increment global_step since we're using manual optimization
         # Only increment once per training step (after generator optimizer)
         if optimizer_idx == 0:

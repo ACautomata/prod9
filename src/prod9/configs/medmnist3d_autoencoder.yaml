@@ -161,7 +161,7 @@ callbacks:
 
   # PyTorch Profiler (disabled by default)
   profiler:
-    enabled: True
+    enabled: False
     profile_cpu: true
     profile_cuda: true
     record_shapes: true

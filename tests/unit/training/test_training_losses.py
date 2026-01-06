@@ -553,6 +553,94 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         adv_weight = loss_dict['adv_weight']
         self.assertTrue(torch.isfinite(adv_weight))
 
+    def test_adaptive_weight_with_warmup(self):
+        """Test that adaptive weight is 0 before discriminator_iter_start threshold."""
+        if not self.has_real_implementation:
+            self.skipTest("Real VAEGANLoss not available")
+        assert self.vaegan_loss is not None  # Type guard for pyright
+
+        # Create a real autoencoder and discriminator to establish proper computational graph
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+
+        ae = AutoencoderFSQ(
+            spatial_dims=3,
+            levels=(4, 4, 4),
+            in_channels=1,
+            out_channels=1,
+            num_res_blocks=[1, 1, 1],
+            num_channels=[32, 64, 128],
+            attention_levels=[False, False, False],
+            num_splits=1,
+        ).to(self.device)
+
+        # Create a simple discriminator for testing
+        disc = MultiScalePatchDiscriminator(
+            in_channels=1,
+            num_d=1,
+            channels=32,
+            num_layers_d=2,
+            spatial_dims=3,
+            out_channels=1,
+            minimum_size_im=16,
+        ).to(self.device)
+
+        # Get last layer for adaptive weight computation
+        last_layer = ae.get_last_layer()
+
+        # Set warmup threshold
+        self.vaegan_loss.discriminator_iter_start = 100
+
+        # Create real input and run through autoencoder to establish computational graph
+        batch_size = 2
+        real_images = torch.randn(batch_size, 1, 16, 16, 16).to(self.device)
+
+        # Run forward pass to get fake_images (connected to last_layer via decoder)
+        # AutoencoderFSQ.forward returns (reconstruction, z_q, z_mu)
+        fake_images, _, _ = ae(real_images)
+
+        # Run discriminator on fake_images to establish computational graph
+        discriminator_output, _ = disc(fake_images)
+
+        # Before warmup threshold - weight should be 0
+        loss_dict_before = self.vaegan_loss.forward(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=discriminator_output,
+            global_step=50,
+            last_layer=last_layer,
+        )
+        self.assertEqual(
+            loss_dict_before['adv_weight'].item(), 0.0,
+            "Adaptive weight should be 0 before discriminator_iter_start threshold"
+        )
+
+        # At threshold - weight should be adaptive (>0)
+        loss_dict_at = self.vaegan_loss.forward(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=discriminator_output,
+            global_step=100,
+            last_layer=last_layer,
+        )
+        self.assertGreater(
+            loss_dict_at['adv_weight'].item(), 0.0,
+            "Adaptive weight should be positive at/after discriminator_iter_start threshold"
+        )
+
+        # After threshold - weight should be adaptive (>0)
+        loss_dict_after = self.vaegan_loss.forward(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=discriminator_output,
+            global_step=150,
+            last_layer=last_layer,
+        )
+        self.assertGreater(
+            loss_dict_after['adv_weight'].item(), 0.0,
+            "Adaptive weight should be positive after discriminator_iter_start threshold"
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
