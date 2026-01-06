@@ -52,6 +52,7 @@ class AutoencoderLightningConfig:
         training_config = config.get("training", {})
         optimizer_config = training_config.get("optimizer", {})
         loop_config = training_config.get("loop", {})
+        stability_config = training_config.get("stability", {})
 
         # Get loss configuration
         loss_config = config.get("loss", {})
@@ -81,6 +82,7 @@ class AutoencoderLightningConfig:
             commitment_weight=commitment_config.get("weight", 0.25),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             discriminator_iter_start=discriminator_iter_start,
+            grad_clip_value=stability_config.get("manual_optimization_clip_val", 1.0),
             # Sliding window config
             use_sliding_window=sw_config.get("enabled", False),
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
