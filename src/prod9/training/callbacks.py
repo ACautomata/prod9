@@ -14,15 +14,16 @@ from pytorch_lightning.callbacks import Callback
 
 class GradientNormLogging(Callback):
     """
-    Callback to log gradient norms after each backward pass.
+    Callback to log gradient norms for training stability monitoring.
 
-    This helps monitor training stability - healthy training shows
-    gradual grad norm changes without spikes. Sudden spikes often
-    precede loss explosions in the next step.
+    Key improvements over naive implementations:
+    - Uses on_before_optimizer_step for automatic optimization (gets unscaled gradients under AMP)
+    - Uses _which marker for manual optimization (GAN) to avoid mixing G/D gradients
+    - Supports dotted paths for submodule lookup (e.g., "autoencoder.encoder")
+    - Explicitly filters requires_grad=True parameters
 
-    Supports both automatic and manual optimization modes.
     For GAN training (manual optimization), tracks generator and
-    discriminator gradients separately.
+    discriminator gradients separately using the _which marker set in training_step.
     """
 
     def __init__(
@@ -35,7 +36,7 @@ class GradientNormLogging(Callback):
         Initialize gradient norm logging callback.
 
         Args:
-            log_interval: Log every N training steps (default: 1)
+            log_interval: Log every N optimizer steps (default: 1)
             log_grad_norm_gen: Whether to log generator gradients (default: True)
             log_grad_norm_disc: Whether to log discriminator gradients (default: True)
         """
@@ -44,39 +45,71 @@ class GradientNormLogging(Callback):
         self.log_grad_norm_gen = log_grad_norm_gen
         self.log_grad_norm_disc = log_grad_norm_disc
 
+    def _get_submodule_by_path(self, module: nn.Module, path: str) -> Optional[nn.Module]:
+        """Get submodule by dotted path (supports 'autoencoder.encoder.block1')."""
+        cur = module
+        for part in path.split("."):
+            cur = getattr(cur, part, None)
+            if cur is None:
+                return None
+        return cur
+
     def _compute_grad_norm(
-        self, module: nn.Module, param_name_filter: Optional[str] = None
+        self, module: nn.Module, submodule_path: Optional[str] = None
     ) -> float:
         """
         Compute total L2 norm of all gradients in the module.
 
         Args:
             module: The module (any nn.Module or LightningModule)
-            param_name_filter: Optional prefix to filter parameters (e.g., "autoencoder")
+            submodule_path: Optional dotted path to filter parameters (e.g., "autoencoder.encoder")
 
         Returns:
             Total gradient norm (L2)
         """
-        total_norm = 0.0
-
-        if param_name_filter is not None:
-            # Use hasattr to check if submodule exists, then get its parameters directly
-            # This avoids using named_parameters() which hangs on MPS
-            target_module = getattr(module, param_name_filter, None)
-            if target_module is not None:
-                parameters = target_module.parameters()
-            else:
-                # Fallback: no matching submodule
+        if submodule_path is not None:
+            target = self._get_submodule_by_path(module, submodule_path)
+            if target is None:
                 return 0.0
+            params = target.parameters()
         else:
-            parameters = module.parameters()
+            params = module.parameters()
 
-        for p in parameters:
-            if p.grad is not None:
-                param_norm = p.grad.detach().data.norm(2)
-                total_norm += param_norm.item() ** 2
+        total_sq = 0.0
+        for p in params:
+            # Skip parameters without gradients or that don't require grad
+            if (p.grad is None) or (not p.requires_grad):
+                continue
+            # Use .detach() instead of .detach().data (deprecated)
+            g = p.grad.detach()
+            total_sq += g.norm(2).item() ** 2
+        return total_sq ** 0.5
 
-        return total_norm ** 0.5
+    def on_before_optimizer_step(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: pl.LightningModule,
+        optimizer: torch.optim.Optimizer,
+    ) -> None:
+        """
+        Called before optimizer step - best hook for gradient norm logging.
+
+        For automatic optimization:
+        - Logs after AMP unscale (gets true gradient scale)
+        - Uses global_step which equals optimizer step count
+
+        For manual optimization (GAN):
+        - Skips here (handled by on_after_backward with _which marker)
+        """
+        # Manual optimization is handled separately in on_after_backward
+        if hasattr(pl_module, "automatic_optimization") and not pl_module.automatic_optimization:
+            return
+
+        if trainer.global_step % self.log_interval != 0:
+            return
+
+        grad_norm = self._compute_grad_norm(pl_module)
+        pl_module.log("train/grad_norm", grad_norm, on_step=True, on_epoch=False, logger=True)
 
     def on_after_backward(
         self,
@@ -84,56 +117,42 @@ class GradientNormLogging(Callback):
         pl_module: pl.LightningModule,
     ) -> None:
         """
-        Called after each backward pass to compute and log gradient norms.
+        Called after backward pass - used for manual optimization (GAN) only.
 
-        For automatic optimization: Logs `train/grad_norm`
-        For manual optimization (GAN): Logs `train/grad_norm_gen` and `train/grad_norm_disc`
+        For GAN training, requires the LightningModule to set _which marker:
+        - Set _which = "gen" before generator backward
+        - Set _which = "disc" before discriminator backward
+
+        This avoids mixing G/D gradients when both optimizers are used.
         """
-        # Skip logging if not at the right interval
+        # Automatic optimization is handled in on_before_optimizer_step
+        if hasattr(pl_module, "automatic_optimization") and pl_module.automatic_optimization:
+            return
+
         if trainer.global_step % self.log_interval != 0:
             return
 
-        # Check if using manual optimization (GAN training)
-        if hasattr(pl_module, "automatic_optimization") and not pl_module.automatic_optimization:
-            # Manual optimization - log generator and discriminator separately
-            if self.log_grad_norm_gen:
-                gen_grad_norm = self._compute_grad_norm(
-                    pl_module, param_name_filter="autoencoder"
-                )
-                pl_module.log(
-                    "train/grad_norm_gen",
-                    gen_grad_norm,
-                    prog_bar=False,
-                    logger=True,
-                    on_step=True,
-                    on_epoch=False,
-                    batch_size=1,  # Not batch-dependent
-                )
+        # Use _which marker to determine which branch we're in
+        which = getattr(pl_module, "_current_backward_branch", None)
 
-            if self.log_grad_norm_disc:
-                disc_grad_norm = self._compute_grad_norm(
-                    pl_module, param_name_filter="discriminator"
-                )
-                pl_module.log(
-                    "train/grad_norm_disc",
-                    disc_grad_norm,
-                    prog_bar=False,
-                    logger=True,
-                    on_step=True,
-                    on_epoch=False,
-                    batch_size=1,
-                )
-        else:
-            # Automatic optimization - single grad norm
-            grad_norm = self._compute_grad_norm(pl_module)
+        if which == "gen" and self.log_grad_norm_gen:
+            gen_grad_norm = self._compute_grad_norm(pl_module, submodule_path="autoencoder")
             pl_module.log(
-                "train/grad_norm",
-                grad_norm,
-                prog_bar=False,
-                logger=True,
+                "train/grad_norm_gen",
+                gen_grad_norm,
                 on_step=True,
                 on_epoch=False,
-                batch_size=1,
+                logger=True,
+            )
+
+        if which == "disc" and self.log_grad_norm_disc:
+            disc_grad_norm = self._compute_grad_norm(pl_module, submodule_path="discriminator")
+            pl_module.log(
+                "train/grad_norm_disc",
+                disc_grad_norm,
+                on_step=True,
+                on_epoch=False,
+                logger=True,
             )
 
 
@@ -143,6 +162,9 @@ class PerLayerGradientMonitor(Callback):
 
     This helps identify which specific layers are causing gradient explosion
     by logging the gradient norm for each parameter separately.
+
+    Uses on_before_optimizer_step to get unscaled gradients under AMP.
+    Only works with automatic optimization (manual optimization is handled by GradientNormLogging).
     """
 
     def __init__(
@@ -155,7 +177,7 @@ class PerLayerGradientMonitor(Callback):
         Initialize per-layer gradient monitor callback.
 
         Args:
-            log_interval: Log every N training steps (default: 10)
+            log_interval: Log every N optimizer steps (default: 10)
             log_top_k: Only log top K layers with largest gradient norms (default: 10)
             min_grad_norm: Minimum gradient norm to log (filters out tiny gradients)
         """
@@ -171,19 +193,22 @@ class PerLayerGradientMonitor(Callback):
         optimizer: torch.optim.Optimizer,
     ) -> None:
         """
-        Called before optimizer step to log per-layer gradient norms.
+        Called before optimizer step - logs per-layer gradient norms.
 
-        Logs gradient norms for each parameter to help identify sources of gradient explosion.
+        Only active for automatic optimization to avoid mixing G/D gradients.
         """
-        # Skip logging if not at the right interval
+        # Skip for manual optimization (GAN) to avoid gradient mixing
+        if hasattr(pl_module, "automatic_optimization") and not pl_module.automatic_optimization:
+            return
+
         if trainer.global_step % self.log_interval != 0:
             return
 
         # Collect gradient norms for all parameters
         grad_norms: dict[str, float] = {}
         for name, param in pl_module.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
+            if param.grad is not None and param.requires_grad:
+                grad_norm = param.grad.detach().norm(2).item()
                 if grad_norm >= self.min_grad_norm:
                     # Use a shorter name for cleaner logging
                     short_name = name.replace(".weight", "").replace(".bias", "")
@@ -200,7 +225,6 @@ class PerLayerGradientMonitor(Callback):
                     logger=True,
                     on_step=True,
                     on_epoch=False,
-                    batch_size=1,
                 )
 
             # Also log the maximum gradient norm
@@ -212,5 +236,4 @@ class PerLayerGradientMonitor(Callback):
                 logger=True,
                 on_step=True,
                 on_epoch=False,
-                batch_size=1,
             )

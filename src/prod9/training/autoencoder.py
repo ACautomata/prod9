@@ -272,6 +272,9 @@ class AutoencoderLightning(pl.LightningModule):
         if self.global_step < self.vaegan_loss.discriminator_iter_start:
             disc_loss = disc_loss * 0.0
 
+        # Set marker for gradient norm logging callback
+        self._current_backward_branch = "disc"
+
         # Backward
         self.manual_backward(disc_loss)
 
@@ -332,6 +335,9 @@ class AutoencoderLightning(pl.LightningModule):
             global_step=self.global_step,
             last_layer=self.last_layer,
         )
+
+        # Set marker for gradient norm logging callback
+        self._current_backward_branch = "gen"
 
         # Backward
         self.manual_backward(losses["total"])
