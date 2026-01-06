@@ -457,3 +457,132 @@ class TestCreateTrainer:
                 assert call_kwargs["version"] == "test_version"
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
+
+    @patch("prod9.cli.shared.get_device")
+    def test_profiler_callback_not_added_when_disabled(self, mock_device):
+        """Test profiler callback is NOT added when enabled=false (default)."""
+        from pytorch_lightning.profilers import PyTorchProfiler
+
+        mock_device.return_value = torch.device("cpu")
+
+        config = {
+            "trainer": {},
+            "callbacks": {
+                "profiler": {"enabled": False},
+            },
+        }
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            # Track PyTorchProfiler initialization
+            with patch("prod9.cli.shared.PyTorchProfiler", wraps=PyTorchProfiler) as mock_prof:
+                trainer = create_trainer(config, output_dir, "test")
+
+                # Verify PyTorchProfiler was NOT called
+                assert mock_prof.call_count == 0
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    @patch("prod9.cli.shared.get_device")
+    def test_profiler_callback_added_when_enabled(self, mock_device):
+        """Test profiler callback IS added when enabled=true."""
+        from pytorch_lightning.profilers import PyTorchProfiler
+
+        mock_device.return_value = torch.device("cpu")
+
+        config = {
+            "trainer": {},
+            "callbacks": {
+                "profiler": {
+                    "enabled": True,
+                    "profile_cpu": True,
+                    "profile_cuda": False,  # CPU only
+                    "record_shapes": True,
+                    "with_stack": True,
+                    "profile_memory": True,
+                    "trace_dir": "profiler",
+                },
+            },
+        }
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            # Track PyTorchProfiler initialization
+            with patch("prod9.cli.shared.PyTorchProfiler", wraps=PyTorchProfiler) as mock_prof:
+                trainer = create_trainer(config, output_dir, "test")
+
+                # Verify PyTorchProfiler was called
+                assert mock_prof.call_count == 1
+                call_kwargs = mock_prof.call_args.kwargs
+                # Verify activities include CPU only
+                assert torch.profiler.ProfilerActivity.CPU in call_kwargs["activities"]
+                assert call_kwargs["record_shapes"] is True
+                assert call_kwargs["with_stack"] is True
+                assert call_kwargs["profile_memory"] is True
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    @patch("prod9.cli.shared.get_device")
+    @patch("torch.profiler.tensorboard_trace_handler")
+    def test_profiler_trace_dir_relative_to_output_dir(self, mock_tb_handler, mock_device):
+        """Test profiler trace directory is relative to output_dir."""
+        from pytorch_lightning.profilers import PyTorchProfiler
+
+        mock_device.return_value = torch.device("cpu")
+        mock_tb_handler.return_value = MagicMock()
+
+        config = {
+            "trainer": {},
+            "callbacks": {
+                "profiler": {
+                    "enabled": True,
+                    "trace_dir": "custom_profiler",
+                },
+            },
+        }
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            # Track PyTorchProfiler initialization
+            with patch("prod9.cli.shared.PyTorchProfiler", wraps=PyTorchProfiler) as mock_prof:
+                trainer = create_trainer(config, output_dir, "test")
+
+                # Verify tensorboard_trace_handler was called with correct path
+                expected_trace_dir = os.path.join(output_dir, "custom_profiler")
+                mock_tb_handler.assert_called_once_with(expected_trace_dir)
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    @patch("prod9.cli.shared.get_device")
+    @patch("torch.profiler.tensorboard_trace_handler")
+    def test_profiler_with_cuda_activities(self, mock_tb_handler, mock_device):
+        """Test profiler includes CUDA activity when CUDA is available."""
+        from pytorch_lightning.profilers import PyTorchProfiler
+
+        # Simulate CUDA device
+        mock_device.return_value = torch.device("cuda")
+        mock_tb_handler.return_value = MagicMock()
+
+        config = {
+            "trainer": {},
+            "callbacks": {
+                "profiler": {
+                    "enabled": True,
+                    "profile_cpu": True,
+                    "profile_cuda": True,
+                },
+            },
+        }
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            with patch("prod9.cli.shared.PyTorchProfiler", wraps=PyTorchProfiler) as mock_prof:
+                trainer = create_trainer(config, output_dir, "test")
+
+                # Verify both CPU and CUDA activities are included
+                call_kwargs = mock_prof.call_args.kwargs
+                activities = call_kwargs["activities"]
+                assert torch.profiler.ProfilerActivity.CPU in activities
+                assert torch.profiler.ProfilerActivity.CUDA in activities
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)

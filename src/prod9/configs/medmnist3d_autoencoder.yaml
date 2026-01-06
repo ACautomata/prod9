@@ -167,6 +167,16 @@ callbacks:
   # Learning rate monitoring
   lr_monitor: true
 
+  # PyTorch Profiler (disabled by default)
+  profiler:
+    enabled: True
+    profile_cpu: true
+    profile_cuda: true
+    record_shapes: true
+    with_stack: true
+    profile_memory: true
+    trace_dir: "profiler"
+
 # =============================================================================
 # Trainer Configuration
 # =============================================================================

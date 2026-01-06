@@ -9,6 +9,7 @@ from typing import Dict, Any
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, Callback, EarlyStopping
+from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.loggers import TensorBoardLogger
 from dotenv import load_dotenv
 
@@ -217,6 +218,30 @@ def create_trainer(
     if accelerator == "auto":
         accelerator = "gpu" if device.type in ["cuda", "mps"] else "cpu"
 
+    # PyTorch Profiler setup (from callbacks.profiler config)
+    # Use profiler from callbacks if enabled, otherwise fall back to trainer.profiler
+    profiler_to_use = trainer_config.get("profiler")
+    profiler_config = callback_config.get("profiler", {})
+    if profiler_config.get("enabled", False):
+        # Build activities list
+        activities: list[torch.profiler.ProfilerActivity] = []
+        if profiler_config.get("profile_cpu", True):
+            activities.append(torch.profiler.ProfilerActivity.CPU)
+        if profiler_config.get("profile_cuda", True) and device.type == "cuda":
+            activities.append(torch.profiler.ProfilerActivity.CUDA)
+
+        # Trace output directory
+        trace_dir = os.path.join(output_dir, profiler_config.get("trace_dir", "profiler"))
+
+        profiler_to_use = PyTorchProfiler(
+            profiler=profiler_config.get("schedule", "default"),
+            activities=activities,
+            record_shapes=profiler_config.get("record_shapes", True),
+            with_stack=profiler_config.get("with_stack", True),
+            profile_memory=profiler_config.get("profile_memory", True),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir),
+        )
+
     # Create trainer
     trainer = pl.Trainer(
         max_epochs=trainer_config.get("max_epochs", 100),
@@ -232,7 +257,7 @@ def create_trainer(
         limit_train_batches=logging_config.get("limit_train_batches"),
         limit_val_batches=logging_config.get("limit_val_batches"),
         accumulate_grad_batches=trainer_config.get("accumulate_grad_batches", 1),
-        profiler=trainer_config.get("profiler"),
+        profiler=profiler_to_use,
         detect_anomaly=trainer_config.get("detect_anomaly", False),
         benchmark=trainer_config.get("benchmark", False),
     )

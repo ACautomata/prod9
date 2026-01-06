@@ -381,12 +381,32 @@ class EarlyStopConfig(BaseModel):
     min_delta: float = Field(default=0.0)
 
 
+class ProfilerConfig(BaseModel):
+    """PyTorch Profiler configuration for performance analysis."""
+
+    enabled: bool = Field(default=False, description="Enable PyTorch profiler")
+    profile_cpu: bool = Field(default=True, description="Profile CPU activities")
+    profile_cuda: bool = Field(default=True, description="Profile CUDA activities")
+    record_shapes: bool = Field(default=True, description="Record tensor shapes")
+    with_stack: bool = Field(default=True, description="Record stack traces")
+    profile_memory: bool = Field(default=True, description="Profile memory usage")
+    schedule: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Profiler schedule (wait, warmup, active, repeat)",
+    )
+    trace_dir: str = Field(
+        default="profiler",
+        description="Subdirectory within output_dir for trace files",
+    )
+
+
 class CallbacksConfig(BaseModel):
     """Combined callbacks configuration."""
 
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
     early_stop: EarlyStopConfig = Field(default_factory=EarlyStopConfig)
     lr_monitor: bool = Field(default=True)
+    profiler: ProfilerConfig = Field(default_factory=ProfilerConfig)
 
 
 # =============================================================================
