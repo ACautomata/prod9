@@ -249,6 +249,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
         device: Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)
+        pin_memory: Pin memory for faster GPU transfer (default: True)
         augmentation: Optional augmentation configuration
     """
 
@@ -276,6 +277,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         persistent_workers: bool = True,
         train_val_split: float = 0.9,
         device: Optional[str] = None,
+        pin_memory: bool = True,
         augmentation=None,
     ):
         super().__init__()  # Required by LightningDataModule
@@ -290,6 +292,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
         self.device = self._resolve_device(device)
+        self.pin_memory = pin_memory
         self.augmentation = augmentation
 
         # Handle "all" shortcut for combining all datasets
@@ -524,7 +527,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -541,7 +544,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -571,6 +574,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
             device=data_config.get("device"),
+            pin_memory=data_config.get("pin_memory", True),
             augmentation=augmentation,
         )
 
@@ -596,6 +600,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
         train_val_split: Training/validation split ratio
         device: Device for tensor placement (null=auto-detect: cuda/mps/cpu)
+        pin_memory: Pin memory for faster GPU transfer (default: True)
     """
 
     autoencoder_path: str
@@ -615,6 +620,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         persistent_workers: bool = True,
         train_val_split: float = 0.9,
         device: Optional[str] = None,
+        pin_memory: bool = True,
     ):
         super().__init__()  # Required by LightningDataModule
 
@@ -633,6 +639,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         self.persistent_workers = persistent_workers
         self.train_val_split = train_val_split
         self.device = self._resolve_device(device)
+        self.pin_memory = pin_memory
 
         # Dynamically get dataset class
         info = INFO[dataset_name]
@@ -771,7 +778,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -788,7 +795,7 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -815,4 +822,5 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
             persistent_workers=data_config.get("persistent_workers", True),
             train_val_split=data_config.get("train_val_split", 0.9),
             device=data_config.get("device"),
+            pin_memory=data_config.get("pin_memory", True),
         )

@@ -75,6 +75,7 @@ class AutoencoderLightning(pl.LightningModule):
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
         sw_batch_size: Sliding window batch size (default: 1)
+        sw_mode: Sliding window blending mode - 'gaussian', 'constant', or 'mean' (default: "gaussian")
         warmup_enabled: Enable learning rate warmup (default: True)
         warmup_steps: Explicit warmup steps, or None to auto-calculate (default: None)
         warmup_ratio: Ratio of total steps for warmup (default: 0.02)
@@ -102,6 +103,7 @@ class AutoencoderLightning(pl.LightningModule):
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
         sw_batch_size: int = 1,
+        sw_mode: str = "gaussian",
         # Training stability parameters
         warmup_enabled: bool = True,
         warmup_steps: Optional[int] = None,
@@ -143,6 +145,7 @@ class AutoencoderLightning(pl.LightningModule):
         self.sw_roi_size = sw_roi_size
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
+        self.sw_mode = sw_mode
         self._inference_wrapper: Optional[AutoencoderInferenceWrapper] = None
 
         # Logging config
@@ -183,6 +186,7 @@ class AutoencoderLightning(pl.LightningModule):
                 roi_size=self.sw_roi_size,
                 overlap=self.sw_overlap,
                 sw_batch_size=self.sw_batch_size,
+                mode=self.sw_mode,
             )
             self._inference_wrapper = AutoencoderInferenceWrapper(
                 self.autoencoder, sw_config
@@ -315,9 +319,7 @@ class AutoencoderLightning(pl.LightningModule):
         Returns:
             Dictionary of losses for logging
         """
-        # Encode and decode - encode() now returns (z_q, z_mu)
-        z_q, z_mu = self.autoencoder.encode(real_images)
-        fake_images = self.autoencoder.decode(z_q)
+        fake_images, z_q, z_mu = self.autoencoder(real_images)
 
         # Discriminator outputs
         fake_outputs, _ = self.discriminator(fake_images)

@@ -376,10 +376,6 @@ class ProfilerConfig(BaseModel):
     record_shapes: bool = Field(default=True, description="Record tensor shapes")
     with_stack: bool = Field(default=True, description="Record stack traces")
     profile_memory: bool = Field(default=True, description="Profile memory usage")
-    schedule: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Profiler schedule (wait, warmup, active, repeat)",
-    )
     trace_dir: str = Field(
         default="profiler",
         description="Subdirectory within output_dir for trace files",
@@ -449,51 +445,6 @@ class SlidingWindowConfig(BaseModel):
 
 
 # =============================================================================
-# Metrics Configuration
-# =============================================================================
-
-class MetricCombinationConfig(BaseModel):
-    """Metric combination configuration for model checkpointing."""
-
-    weights: Dict[str, float] = Field(
-        default_factory=lambda: {"psnr": 1.0, "ssim": 1.0, "lpips": 1.0}
-    )
-    psnr_range: Tuple[float, float] = Field(default=(20.0, 40.0))
-
-    @field_validator("weights")
-    @classmethod
-    def validate_weights(cls, v: Dict[str, float]) -> Dict[str, float]:
-        """Validate metric weights."""
-        required_keys = {"psnr", "ssim", "lpips"}
-        if not required_keys.issubset(v.keys()):
-            missing = required_keys - set(v.keys())
-            raise ValueError(f"Missing weights for metrics: {missing}")
-
-        # Ensure all weights are non-negative
-        for key, value in v.items():
-            if value < 0:
-                raise ValueError(f"Weight for {key} must be non-negative, got {value}")
-
-        return v
-
-    @field_validator("psnr_range")
-    @classmethod
-    def validate_psnr_range(cls, v: Tuple[float, float]) -> Tuple[float, float]:
-        """Validate PSNR range."""
-        if v[0] >= v[1]:
-            raise ValueError(
-                f"psnr_range min must be less than max, got ({v[0]}, {v[1]})"
-            )
-        return v
-
-
-class MetricsConfig(BaseModel):
-    """Metrics configuration."""
-
-    combination: MetricCombinationConfig = Field(default_factory=MetricCombinationConfig)
-
-
-# =============================================================================
 # Sampler Configuration (for MaskGiT)
 # =============================================================================
 
@@ -522,7 +473,6 @@ class AutoencoderFullConfig(BaseModel):
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
 
 
 class TransformerFullConfig(BaseModel):
@@ -624,7 +574,6 @@ class MedMNIST3DAutoencoderFullConfig(BaseModel):
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
 
 
 class MedMNIST3DTransformerFullConfig(BaseModel):
@@ -728,7 +677,6 @@ class MAISIVAEFullConfig(BaseModel):
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
 
 
 class MAISIDiffusionFullConfig(BaseModel):

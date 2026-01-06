@@ -69,6 +69,8 @@ class TransformerLightning(pl.LightningModule):
         mask_value: Mask token value (default: -100)
         unconditional_prob: Probability of unconditional generation (default: 0.1)
         lr: Learning rate (default: 1e-4)
+        beta1: Adam beta1 (default: 0.9)
+        beta2: Adam beta2 (default: 0.999)
         sample_every_n_steps: Log samples every N steps (default: 100)
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
@@ -101,6 +103,8 @@ class TransformerLightning(pl.LightningModule):
         mask_value: float = -100,
         unconditional_prob: float = 0.1,
         lr: float = 1e-4,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
         sample_every_n_steps: int = 100,
         # Sliding window config (REQUIRED for transformer)
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
@@ -138,6 +142,8 @@ class TransformerLightning(pl.LightningModule):
         self.num_steps = num_steps
         self.mask_value = mask_value
         self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
         self.sample_every_n_steps = sample_every_n_steps
 
         # Sliding window config (REQUIRED for transformer)
@@ -456,7 +462,7 @@ class TransformerLightning(pl.LightningModule):
         optimizer = torch.optim.AdamW(
             [*self.transformer.parameters(), *self.condition_generator.parameters()],
             lr=self.lr,
-            betas=(0.9, 0.999),
+            betas=(self.beta1, self.beta2),
         )
 
         # Configure scheduler with warmup if enabled

@@ -31,7 +31,6 @@ class AutoencoderLightningConfig:
                 - training: Training hyperparameters (optimizer, loop, warmup)
                 - loss: Loss configuration
                 - sliding_window: Sliding window configuration
-                - metrics: Metrics configuration
 
         Returns:
             Configured AutoencoderLightning instance
@@ -87,6 +86,7 @@ class AutoencoderLightningConfig:
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
             sw_overlap=sw_config.get("overlap", 0.5),
             sw_batch_size=sw_config.get("sw_batch_size", 1),
+            sw_mode=sw_config.get("mode", "gaussian"),
         )
 
         return module

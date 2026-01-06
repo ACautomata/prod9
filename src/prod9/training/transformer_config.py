@@ -68,6 +68,8 @@ class TransformerLightningConfig:
             mask_value=sampler_config.get("mask_value", -100),
             unconditional_prob=unconditional_config.get("unconditional_prob", 0.1),
             lr=optimizer_config.get("learning_rate", 1e-4),
+            beta1=optimizer_config.get("beta1", 0.9),
+            beta2=optimizer_config.get("beta2", 0.999),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             # Sliding window config (REQUIRED)
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),

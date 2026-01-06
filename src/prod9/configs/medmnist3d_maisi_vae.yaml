@@ -118,13 +118,3 @@ sliding_window:
   overlap: 0.5
   sw_batch_size: 1
   mode: "gaussian"
-
-# =============================================================================
-# Metrics Configuration
-# =============================================================================
-metrics:
-  combination:
-    weights:
-      psnr: 1.0
-      ssim: 1.0
-      lpips: 1.0

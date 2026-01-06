@@ -547,6 +547,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         rotate_axes: Tuple[int, int] = (0, 1),
         shift_intensity_prob: float = 0.5,
         shift_intensity_offset: float = 0.1,
+        pin_memory: bool = True,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -579,6 +580,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.rotate_axes = rotate_axes
         self.shift_intensity_prob = shift_intensity_prob
         self.shift_intensity_offset = shift_intensity_offset
+        self.pin_memory = pin_memory
 
         # Single dataset with random modality sampling (set in setup())
         self.train_dataset: Optional[_CachedRandomModalityDataset] = None
@@ -633,6 +635,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             rotate_axes=tuple(aug_config.get("rotate_axes", (0, 1))),
             shift_intensity_prob=aug_config.get("shift_intensity_prob", 0.5),
             shift_intensity_offset=aug_config.get("shift_intensity_offset", 0.1),
+            pin_memory=data_config.get("pin_memory", True),
         )
 
     def setup(self, stage: Optional[str] = None) -> None:
@@ -874,7 +877,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -894,7 +897,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -974,6 +977,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         device: Optional[str] = None,
         # Conditional generation
         unconditional_prob: float = 0.1,
+        pin_memory: bool = True,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -1007,6 +1011,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
 
         # Conditional generation
         self.unconditional_prob = unconditional_prob
+        self.pin_memory = pin_memory
 
         self.train_dataset: Optional[_PreEncodedDataset] = None
         self.val_dataset: Optional[_PreEncodedDataset] = None
@@ -1056,6 +1061,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),
             sw_overlap=sw_config.get("overlap", 0.5),
             sw_batch_size=sw_config.get("sw_batch_size", 1),
+            pin_memory=data_config.get("pin_memory", True),
         )
 
     def set_autoencoder(self, autoencoder: Any) -> None:
@@ -1308,7 +1314,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
@@ -1324,7 +1330,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             timeout=60 if self.num_workers > 0 else 0,  # Prevent deadlocks
