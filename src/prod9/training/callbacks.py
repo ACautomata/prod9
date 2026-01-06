@@ -135,3 +135,82 @@ class GradientNormLogging(Callback):
                 on_epoch=False,
                 batch_size=1,
             )
+
+
+class PerLayerGradientMonitor(Callback):
+    """
+    Callback to log per-layer gradient norms for detailed gradient analysis.
+
+    This helps identify which specific layers are causing gradient explosion
+    by logging the gradient norm for each parameter separately.
+    """
+
+    def __init__(
+        self,
+        log_interval: int = 10,
+        log_top_k: int = 10,
+        min_grad_norm: float = 0.01,
+    ) -> None:
+        """
+        Initialize per-layer gradient monitor callback.
+
+        Args:
+            log_interval: Log every N training steps (default: 10)
+            log_top_k: Only log top K layers with largest gradient norms (default: 10)
+            min_grad_norm: Minimum gradient norm to log (filters out tiny gradients)
+        """
+        super().__init__()
+        self.log_interval = log_interval
+        self.log_top_k = log_top_k
+        self.min_grad_norm = min_grad_norm
+
+    def on_before_optimizer_step(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: pl.LightningModule,
+        optimizer: torch.optim.Optimizer,
+    ) -> None:
+        """
+        Called before optimizer step to log per-layer gradient norms.
+
+        Logs gradient norms for each parameter to help identify sources of gradient explosion.
+        """
+        # Skip logging if not at the right interval
+        if trainer.global_step % self.log_interval != 0:
+            return
+
+        # Collect gradient norms for all parameters
+        grad_norms: dict[str, float] = {}
+        for name, param in pl_module.named_parameters():
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                if grad_norm >= self.min_grad_norm:
+                    # Use a shorter name for cleaner logging
+                    short_name = name.replace(".weight", "").replace(".bias", "")
+                    grad_norms[short_name] = grad_norm
+
+        # Sort by gradient norm (descending) and log top K
+        if grad_norms:
+            sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)
+            for name, grad_norm in sorted_grads[: self.log_top_k]:
+                pl_module.log(
+                    f"grad_layer/{name}",
+                    grad_norm,
+                    prog_bar=False,
+                    logger=True,
+                    on_step=True,
+                    on_epoch=False,
+                    batch_size=1,
+                )
+
+            # Also log the maximum gradient norm
+            max_grad_norm = sorted_grads[0][1]
+            pl_module.log(
+                "train/max_grad_norm",
+                max_grad_norm,
+                prog_bar=True,
+                logger=True,
+                on_step=True,
+                on_epoch=False,
+                batch_size=1,
+            )

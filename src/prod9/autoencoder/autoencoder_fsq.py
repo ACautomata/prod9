@@ -129,6 +129,25 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         )
         self.quant_conv_log_sigma = None
 
+        # Add normalization before quantization to prevent gradient explosion
+        # This ensures encoder outputs stay in a reasonable range for FSQ
+        self.pre_quant_norm = nn.GroupNorm(num_groups=1, num_channels=len(levels))
+
+        # Initialize quant_conv_mu with small gain to prevent initial saturation
+        # The tanh in _bound() can saturate if inputs are too large
+        # Note: quant_conv_mu is a MONAI Convolution wrapper, access inner conv via .conv
+        if hasattr(self.quant_conv_mu, 'conv'):
+            conv = cast(nn.Conv3d, self.quant_conv_mu.conv)
+            nn.init.xavier_uniform_(conv.weight, gain=0.01)
+            if conv.bias is not None:
+                nn.init.zeros_(conv.bias)
+        else:
+            # Fallback for different MONAI versions
+            conv_fallback = cast(nn.Conv3d, self.quant_conv_mu)
+            nn.init.xavier_uniform_(conv_fallback.weight, gain=0.01)
+            if conv_fallback.bias is not None:
+                nn.init.zeros_(conv_fallback.bias)
+
     
     @override
     def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:
@@ -151,6 +170,8 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
             h = self.encoder(x)
 
         z_mu = self.quant_conv_mu(h)
+        # Apply normalization before quantization to prevent gradient explosion
+        z_mu = self.pre_quant_norm(z_mu)
         # Apply FSQ quantization via sampling() method
         z_q = self.sampling(z_mu, torch.zeros_like(z_mu))
         return z_q, z_mu

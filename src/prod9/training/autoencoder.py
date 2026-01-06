@@ -328,8 +328,6 @@ class AutoencoderLightning(pl.LightningModule):
         losses = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=z_mu,       # Unquantized encoder output
-            quantized_output=z_q,      # Quantized output
             discriminator_output=fake_outputs,
             global_step=self.global_step,
             last_layer=self.last_layer,

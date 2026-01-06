@@ -13,7 +13,7 @@ from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.loggers import TensorBoardLogger
 from dotenv import load_dotenv
 
-from prod9.training.callbacks import GradientNormLogging
+from prod9.training.callbacks import GradientNormLogging, PerLayerGradientMonitor
 
 
 def configure_multiprocessing() -> None:
@@ -202,6 +202,14 @@ def create_trainer(
             log_grad_norm_disc=True,
         )
         callbacks.append(grad_norm_callback)
+
+        # Also add per-layer gradient monitoring for detailed analysis
+        per_layer_monitor = PerLayerGradientMonitor(
+            log_interval=10,  # Log every 10 steps to avoid too much logging
+            log_top_k=10,
+            min_grad_norm=0.01,
+        )
+        callbacks.append(per_layer_monitor)
 
     # TensorBoard logger
     logger = TensorBoardLogger(

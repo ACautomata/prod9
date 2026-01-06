@@ -145,8 +145,6 @@ class VAEGANLoss(nn.Module):
         self,
         real_images: torch.Tensor,
         fake_images: torch.Tensor,
-        encoder_output: torch.Tensor,
-        quantized_output: torch.Tensor,
         discriminator_output: Union[torch.Tensor, List[torch.Tensor]],
         global_step: int = 0,
         last_layer: Optional[torch.Tensor] = None,
