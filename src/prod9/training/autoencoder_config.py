@@ -6,6 +6,8 @@ Helper class to create LightningModule from config dictionary.
 
 from typing import Dict, Any
 
+import torch
+
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
@@ -107,21 +109,30 @@ class AutoencoderLightningConfig:
     def _create_discriminator(
         config: Dict[str, Any]
     ) -> MultiScalePatchDiscriminator:
-        """Create MultiScalePatchDiscriminator from config."""
+        """Create MultiScalePatchDiscriminator from config.
+
+        Note: The discriminator is created on CPU first to avoid MPS hang
+        during weight initialization (tensor.normal_() hangs on MPS).
+        Lightning will move it to the correct device later.
+        """
         # Extract activation tuple if provided
         activation = config.get("activation", ("LEAKYRELU", {"negative_slope": 0.2}))
         if isinstance(activation, list):
             activation = tuple(activation)
 
-        return MultiScalePatchDiscriminator(
-            in_channels=config.get("in_channels", 1),
-            num_d=config.get("num_d", 3),
-            channels=config.get("channels", 64),
-            num_layers_d=config.get("num_layers_d", 3),
-            spatial_dims=config.get("spatial_dims", 3),
-            out_channels=config.get("out_channels", 1),
-            kernel_size=config.get("kernel_size", 4),
-            activation=activation,
-            norm=config.get("norm", "BATCH"),
-            minimum_size_im=config.get("minimum_size_im", 64),
-        )
+        # Create on CPU first to avoid MPS hang during initialization
+        # MONAI's PatchDiscriminator uses tensor.normal_() which hangs on MPS
+        with torch.device("cpu"):
+            discriminator = MultiScalePatchDiscriminator(
+                in_channels=config.get("in_channels", 1),
+                num_d=config.get("num_d", 3),
+                channels=config.get("channels", 64),
+                num_layers_d=config.get("num_layers_d", 3),
+                spatial_dims=config.get("spatial_dims", 3),
+                out_channels=config.get("out_channels", 1),
+                kernel_size=config.get("kernel_size", 4),
+                activation=activation,
+                norm=config.get("norm", "BATCH"),
+                minimum_size_im=config.get("minimum_size_im", 64),
+            )
+        return discriminator

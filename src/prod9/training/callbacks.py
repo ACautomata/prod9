@@ -58,19 +58,21 @@ class GradientNormLogging(Callback):
             Total gradient norm (L2)
         """
         total_norm = 0.0
-        for p in module.parameters():
-            if p.grad is not None:
-                # Optionally filter by parameter name
-                if param_name_filter is not None:
-                    # Check if this parameter belongs to the target submodule
-                    has_target = any(
-                        param_name_filter in n
-                        for n in dict(module.named_parameters()).keys()
-                        if p is dict(module.named_parameters())[n]
-                    )
-                    if not has_target:
-                        continue
 
+        if param_name_filter is not None:
+            # Use hasattr to check if submodule exists, then get its parameters directly
+            # This avoids using named_parameters() which hangs on MPS
+            target_module = getattr(module, param_name_filter, None)
+            if target_module is not None:
+                parameters = target_module.parameters()
+            else:
+                # Fallback: no matching submodule
+                return 0.0
+        else:
+            parameters = module.parameters()
+
+        for p in parameters:
+            if p.grad is not None:
                 param_norm = p.grad.detach().data.norm(2)
                 total_norm += param_norm.item() ** 2
 
