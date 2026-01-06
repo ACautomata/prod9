@@ -53,30 +53,40 @@ class TestTransformerTraining:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
 
-    def test_transformer_initialization(self, minimal_config: Dict[str, Any]):
-        """Test that transformer can be initialized without explicit transformer parameter."""
-        # Skip if no GPU available
-        if not torch.cuda.is_available() and not torch.backends.mps.is_available():
-            pytest.skip("GPU required for transformer test")
+    @pytest.fixture
+    def device(self) -> torch.device:
+        """Prefer GPU/MPS when available, otherwise use CPU for smoke coverage."""
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
 
+    def test_transformer_initialization(self, minimal_config: Dict[str, Any], device: torch.device):
+        """Test that transformer can be initialized without explicit transformer parameter."""
         config = minimal_config.copy()
 
         # Create model without explicit transformer (should be auto-created)
         model = TransformerLightningConfig.from_config(config)
+        model = model.to(device)
 
         # Verify transformer was created
         assert model.transformer is not None, "Transformer should be auto-created"
         assert isinstance(model.transformer, TransformerDecoder), "Should be TransformerDecoder"
+        # Run a minimal forward to ensure weights are usable
+        latent = torch.randn(1, model.latent_channels, 8, 8, 8, device=device)
+        cond = torch.randn_like(latent)
+        with torch.no_grad():
+            output = model.transformer(latent, cond)
+        expected_shape = (1, model.transformer.out_proj.out_channels, 8, 8, 8)
+        assert output.shape == expected_shape
+        assert torch.isfinite(output).all()
 
-    def test_conditional_generation(self, minimal_config: Dict[str, Any], temp_output_dir: str):
+    def test_conditional_generation(self, minimal_config: Dict[str, Any], temp_output_dir: str, device: torch.device):
         """Test that conditional generation works."""
-        if not torch.cuda.is_available() and not torch.backends.mps.is_available():
-            pytest.skip("GPU required for generation test")
-
         config = minimal_config.copy()
         model = TransformerLightningConfig.from_config(config)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "mps")
         model = model.to(device)
 
         # Create fake autoencoder for testing (since we don't have a trained one)
@@ -96,22 +106,37 @@ class TestTransformerTraining:
         model.autoencoder.eval()
 
         # Create dummy input
-        source_image = torch.randn(1, 1, 32, 32, 32).to(device)
+        source_latent = torch.randn(1, model.latent_channels, 16, 16, 16, device=device)
+        cond_latent = torch.randn_like(source_latent)
 
-        # This would normally call the sample method, but for testing we just verify
-        # the model structure is correct
+        # Forward pass through transformer should yield logits
+        with torch.no_grad():
+            logits = model.transformer(source_latent, cond_latent)
+
+        expected_shape = (1, model.transformer.out_proj.out_channels, 16, 16, 16)
+        assert logits.shape == expected_shape
+        assert torch.isfinite(logits).all()
         assert model.transformer is not None
         assert hasattr(model, "condition_generator")
 
-    def test_unconditional_generation(self, minimal_config: Dict[str, Any]):
+    def test_unconditional_generation(self, minimal_config: Dict[str, Any], device: torch.device):
         """Test that unconditional generation setup works."""
-        if not torch.cuda.is_available() and not torch.backends.mps.is_available():
-            pytest.skip("GPU required for generation test")
-
         config = minimal_config.copy()
         model = TransformerLightningConfig.from_config(config)
+        model = model.to(device)
 
         # Verify condition_generator exists (replaces label_embeddings)
         assert model.condition_generator is not None
         assert model.condition_generator.num_classes == 4
         assert model.condition_generator.contrast_embedding.embedding_dim == 192  # Match cond_dim in config
+
+        # Verify conditional and unconditional outputs have correct shape and are finite
+        cond = torch.randn(2, model.latent_channels, 4, 4, 4, device=device)
+        cond_idx = torch.tensor([0, 1], device=device)
+        with torch.no_grad():
+            conditioned, unconditioned = model.condition_generator(cond, cond_idx)
+
+        assert conditioned.shape == cond.shape
+        assert unconditioned.shape == cond.shape
+        assert torch.isfinite(conditioned).all()
+        assert torch.isfinite(unconditioned).all()

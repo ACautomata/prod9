@@ -193,11 +193,6 @@ class StabilityConfig(BaseModel):
         le=0.5,
         description="Ratio of total_steps for warmup (default: 2%)",
     )
-    manual_optimization_clip_val: Optional[float] = Field(
-        default=1.0,
-        ge=0.0,
-        description="Gradient clip value for manual optimization (GAN training)",
-    )
     warmup_eta_min: float = Field(
         default=0.1,
         ge=0.0,

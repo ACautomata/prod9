@@ -84,6 +84,19 @@ class TestAutoencoderTraining:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
 
+    def test_forward_pass_cpu_smoke(self, minimal_config: SystemTestConfig):
+        """Smoke test to ensure autoencoder forward works on CPU with small input."""
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        model = AutoencoderLightningConfig.from_config(minimal_config).to(device)
+        model.eval()
+
+        x = torch.randn(1, 1, 16, 16, 16, device=device)
+        with torch.no_grad():
+            output = model(x)
+
+        assert output.shape == x.shape
+        assert torch.isfinite(output).all()
+
     def test_training_loop_runs(
         self,
         minimal_config: SystemTestConfig,

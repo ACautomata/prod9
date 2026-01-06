@@ -1107,3 +1107,29 @@ class TestMedMNIST3DDataModuleStage2:
         # Should handle 1-d numpy arrays correctly using .item()
         assert len(result) == 9
         assert all(isinstance(item["label"], int) for item in result)
+
+    def test_stage2_dataset_converts_numpy_labels_to_int(self) -> None:
+        """Stage2 dataset should expose cond_idx as Python ints regardless of label shape."""
+        encoded_samples = [
+            {
+                "latent": torch.randn(4, 2, 2, 2),
+                "indices": torch.randint(0, 8, (2, 2, 2)),
+                "label": np.array(3),  # 0-d array
+            },
+            {
+                "latent": torch.randn(4, 2, 2, 2),
+                "indices": torch.randint(0, 8, (2, 2, 2)),
+                "label": np.array([4]),  # 1-d array
+            },
+            {
+                "latent": torch.randn(4, 2, 2, 2),
+                "indices": torch.randint(0, 8, (2, 2, 2)),
+                "label": np.int64(5),  # numpy scalar
+            },
+        ]
+
+        dataset = _MedMNIST3DStage2Dataset(encoded_samples)
+        cond_indices = [dataset[i]["cond_idx"] for i in range(len(dataset))]
+
+        assert [idx.item() for idx in cond_indices] == [3, 4, 5]
+        assert all(idx.dtype == torch.long for idx in cond_indices)

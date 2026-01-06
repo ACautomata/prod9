@@ -221,7 +221,9 @@ class _MedMNIST3DStage2Dataset(TorchDataset):
         target_latent: torch.Tensor = cast(torch.Tensor, sample["latent"])
         cond_latent = torch.zeros_like(target_latent)  # Zeros for MaskGiTConditionGenerator
         target_indices: torch.Tensor = cast(torch.Tensor, sample["indices"])
-        label_int: int = cast(int, sample["label"])
+        # Convert numpy/scalar labels to Python int for stable downstream usage
+        label_array = np.array(sample["label"])
+        label_int: int = int(label_array) if label_array.ndim == 0 else int(label_array.item())
 
         return {
             "cond_latent": cond_latent,  # [C, D, H, W] zeros tensor (aligned with BraTS)
