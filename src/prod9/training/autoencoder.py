@@ -3,12 +3,12 @@ Autoencoder Lightning module for Stage 1 training.
 
 This module implements VQGAN-style training with:
 - Reconstruction loss (L1)
-- Perceptual loss
+- Perceptual loss (LPIPS or Focal Frequency Loss)
 - Adversarial loss (multi-scale discriminator)
 - Commitment loss (FSQ codebook)
 """
 
-from typing import Dict, Optional, cast
+from typing import Dict, Optional, Union, cast
 
 import torch
 import pytorch_lightning as pl
@@ -66,7 +66,9 @@ class AutoencoderLightning(pl.LightningModule):
         b2: Adam beta2 (default: 0.999)
         recon_weight: Weight for reconstruction loss (default: 1.0)
         perceptual_weight: Weight for perceptual loss (default: 0.5)
-        perceptual_network_type: Pretrained network for perceptual loss (default: "medicalnet_resnet10_23datasets")
+        loss_type: Type of perceptual loss - "lpips" or "ffl" (default: "lpips")
+        ffl_config: Configuration for Focal Frequency Loss (required if loss_type="ffl")
+        perceptual_network_type: Pretrained network for perceptual loss (used if loss_type="lpips")
         adv_weight: Base weight for adversarial loss (default: 0.1)
         commitment_weight: Weight for commitment loss (default: 0.25)
         sample_every_n_steps: Log samples every N steps (default: 100)
@@ -92,6 +94,8 @@ class AutoencoderLightning(pl.LightningModule):
         b2: float = 0.999,
         recon_weight: float = 1.0,
         perceptual_weight: float = 0.5,
+        loss_type: str = "lpips",
+        ffl_config: Optional[Dict[str, Union[float, int, bool]]] = None,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
         adv_weight: float = 0.1,
         adv_criterion: str = "least_squares",
@@ -126,6 +130,8 @@ class AutoencoderLightning(pl.LightningModule):
         self.vaegan_loss = VAEGANLoss(
             recon_weight=recon_weight,
             perceptual_weight=perceptual_weight,
+            loss_type=loss_type,
+            ffl_config=ffl_config,
             perceptual_network_type=perceptual_network_type,
             adv_weight=adv_weight,
             adv_criterion=adv_criterion,

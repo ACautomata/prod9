@@ -62,6 +62,24 @@ class AutoencoderLightningConfig:
         discriminator_iter_start = loss_config.get("discriminator_iter_start", 0)
         adv_criterion = adv_config.get("criterion", "least_squares")
 
+        # Get loss type and FFL config
+        loss_type = loss_config.get("loss_type", "lpips")
+        focal_frequency_config = loss_config.get("focal_frequency", {})
+
+        # Build FFL config dict for VAEGANLoss
+        ffl_config = None
+        if loss_type == "ffl" and focal_frequency_config:
+            ffl_config = {
+                "alpha": focal_frequency_config.get("alpha", 1.0),
+                "patch_factor": focal_frequency_config.get("patch_factor", 1),
+                "ave_spectrum": focal_frequency_config.get("ave_spectrum", False),
+                "log_matrix": focal_frequency_config.get("log_matrix", False),
+                "batch_matrix": focal_frequency_config.get("batch_matrix", False),
+                "eps": focal_frequency_config.get("eps", 1e-8),
+                "axes": focal_frequency_config.get("axes", (2, 3, 4)),
+                "ratio": focal_frequency_config.get("ratio", 1.0),
+            }
+
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
 
@@ -75,6 +93,8 @@ class AutoencoderLightningConfig:
             b2=optimizer_config.get("b2", 0.999),
             recon_weight=recon_config.get("weight", 1.0),
             perceptual_weight=perceptual_config.get("weight", 0.5),
+            loss_type=loss_type,
+            ffl_config=ffl_config,
             perceptual_network_type=perceptual_config.get("network_type", "medicalnet_resnet10_23datasets"),
             adv_weight=adv_config.get("weight", 0.1),
             adv_criterion=adv_criterion,

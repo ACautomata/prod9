@@ -294,12 +294,53 @@ class ReconstructionLossConfig(BaseModel):
 
 
 class PerceptualLossConfig(BaseModel):
-    """Perceptual loss configuration using MONAI's PerceptualLoss."""
+    """Perceptual loss configuration using MONAI's PerceptualLoss (LPIPS)."""
 
     weight: float = Field(default=0.5, ge=0, description="Loss weight multiplier")
     network_type: str = Field(
         default="medicalnet_resnet10_23datasets",
         description="Pretrained network for feature extraction (e.g., medicalnet_resnet10_23datasets)"
+    )
+
+
+class FocalFrequencyLossConfig(BaseModel):
+    """Focal Frequency Loss (FFL) configuration.
+
+    FFL computes frequency-domain distance with adaptive weighting.
+    From "Focal Frequency Loss for Image Reconstruction and Synthesis" (ICCV 2021).
+    """
+
+    weight: float = Field(default=0.5, ge=0, description="Loss weight multiplier")
+    alpha: float = Field(
+        default=1.0,
+        gt=0,
+        description="Focusing exponent for spectrum weight matrix (higher = more focus on large errors)",
+    )
+    patch_factor: int = Field(
+        default=1,
+        ge=1,
+        description="Split image into (patch_factor x patch_factor) patches before FFT",
+    )
+    ave_spectrum: bool = Field(
+        default=False, description="Use minibatch-average spectrum"
+    )
+    log_matrix: bool = Field(
+        default=False, description="Apply log(1 + w) before normalization"
+    )
+    batch_matrix: bool = Field(
+        default=False, description="Normalize w using batch-level max instead of per-sample max"
+    )
+    eps: float = Field(default=1e-8, gt=0, description="Numerical stability constant")
+    # SliceWiseFake3DLoss parameters for 3D volumes
+    axes: Tuple[int, ...] = Field(
+        default=(2, 3, 4),
+        description="Axes to slice along: 2=D (axial), 3=H (coronal), 4=W (sagittal)",
+    )
+    ratio: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of slices used per axis (1.0 = use all slices)",
     )
 
 
@@ -326,11 +367,20 @@ class AdaptiveWeightConfig(BaseModel):
 class LossConfig(BaseModel):
     """Combined loss configuration."""
 
+    # Loss type selector
+    loss_type: Literal["lpips", "ffl"] = Field(
+        default="lpips",
+        description="Type of perceptual loss: 'lpips' (MONAI PerceptualLoss) or 'ffl' (Focal Frequency Loss)",
+    )
     discriminator_iter_start: int = Field(default=0, ge=0)
     reconstruction: ReconstructionLossConfig = Field(
         default_factory=ReconstructionLossConfig
     )
     perceptual: PerceptualLossConfig = Field(default_factory=PerceptualLossConfig)
+    focal_frequency: Optional[FocalFrequencyLossConfig] = Field(
+        default=None,
+        description="FFL configuration (required if loss_type='ffl')",
+    )
     adversarial: AdversarialLossConfig = Field(default_factory=AdversarialLossConfig)
     commitment: CommitmentLossConfig = Field(default_factory=CommitmentLossConfig)
     adaptive: AdaptiveWeightConfig = Field(default_factory=AdaptiveWeightConfig)
