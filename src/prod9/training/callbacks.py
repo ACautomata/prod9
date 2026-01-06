@@ -4,7 +4,7 @@ PyTorch Lightning callbacks for prod-9 MaskGiT training pipeline.
 This module provides custom callbacks for training stability monitoring.
 """
 
-from typing import Optional
+from typing import Any, Optional, cast
 
 import torch
 import torch.nn as nn
@@ -124,6 +124,9 @@ class GradientNormLogging(Callback):
         - Set _which = "disc" before discriminator backward
 
         This avoids mixing G/D gradients when both optimizers are used.
+
+        For AMP training, unscales gradients before computing grad norm to get
+        the true (unscaled) gradient values.
         """
         # Automatic optimization is handled in on_before_optimizer_step
         if hasattr(pl_module, "automatic_optimization") and pl_module.automatic_optimization:
@@ -134,6 +137,33 @@ class GradientNormLogging(Callback):
 
         # Use _which marker to determine which branch we're in
         which = getattr(pl_module, "_current_backward_branch", None)
+
+        # Get scaler for AMP
+        scaler = getattr(trainer, "scaler", None)
+
+        # Unscale gradients before computing norm (for AMP)
+        # Note: We check if gradients were already unscaled to avoid calling unscale_ twice
+        if scaler is not None and which is not None:
+            if which == "gen":
+                already_unscaled = getattr(pl_module, "_gen_gradients_unscaled", False)
+                if not already_unscaled:
+                    # Get generator optimizer (index 0)
+                    if hasattr(pl_module, "optimizers"):
+                        opts = pl_module.optimizers()
+                        opts_list = cast(list[Any], opts) if not isinstance(opts, list) else opts
+                        if opts_list:
+                            scaler.unscale_(opts_list[0])
+                            object.__setattr__(pl_module, "_gen_gradients_unscaled", True)
+            elif which == "disc":
+                already_unscaled = getattr(pl_module, "_disc_gradients_unscaled", False)
+                if not already_unscaled:
+                    # Get discriminator optimizer (index 1)
+                    if hasattr(pl_module, "optimizers"):
+                        opts = pl_module.optimizers()
+                        opts_list = cast(list[Any], opts) if not isinstance(opts, list) else opts
+                        if len(opts_list) > 1:
+                            scaler.unscale_(opts_list[1])
+                            object.__setattr__(pl_module, "_disc_gradients_unscaled", True)
 
         if which == "gen" and self.log_grad_norm_gen:
             gen_grad_norm = self._compute_grad_norm(pl_module, submodule_path="autoencoder")

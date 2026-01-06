@@ -8,7 +8,7 @@ This module implements VQGAN-style training with:
 - Commitment loss (FSQ codebook)
 """
 
-from typing import Dict, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 import torch
 import pytorch_lightning as pl
@@ -158,6 +158,10 @@ class AutoencoderLightning(pl.LightningModule):
         self.warmup_eta_min = warmup_eta_min
         self.grad_clip_value = grad_clip_value
 
+        # Flags to track whether gradients have been unscaled (for AMP gradient logging)
+        self._gen_gradients_unscaled = False
+        self._disc_gradients_unscaled = False
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through autoencoder.
@@ -193,6 +197,25 @@ class AutoencoderLightning(pl.LightningModule):
             )
 
         return self._inference_wrapper
+
+    def _get_scaler(self) -> Any:
+        """
+        Get the GradScaler from Lightning for AMP training.
+
+        Returns the GradScaler if AMP is enabled (e.g., precision="16-mixed"),
+        otherwise returns None. The scaler type is Any because it differs between
+        CUDA (torch.cuda.amp.GradScaler) and other backends.
+
+        Returns:
+            GradScaler instance or None
+        """
+        try:
+            if not self.trainer:
+                return None
+        except RuntimeError:
+            # Module is not attached to a Trainer
+            return None
+        return getattr(self.trainer, "scaler", None)
 
     def training_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int
@@ -278,22 +301,38 @@ class AutoencoderLightning(pl.LightningModule):
         # Backward
         self.manual_backward(disc_loss)
 
+        # Get scaler for AMP
+        scaler = self._get_scaler()
+
+        # Unscale gradients before clipping (required for AMP)
+        # Note: The on_after_backward callback may have already unscaled
+        if scaler is not None and not self._disc_gradients_unscaled:
+            scaler.unscale_(opt_d)
+            self._disc_gradients_unscaled = True
+
         # Gradient clipping for manual optimization
         if self.grad_clip_value is not None and self.grad_clip_value > 0:
             disc_grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.discriminator.parameters(),
                 self.grad_clip_value,
             )
-            # Log whether clipping occurred
-            self.log(
-                "train/disc_grad_norm",
-                disc_grad_norm,
-                prog_bar=False,
-                logger=True,
-                on_step=True,
-                on_epoch=False,
-                batch_size=1,
+        else:
+            disc_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.discriminator.parameters(),
+                float("inf"),
             )
+
+        # Log gradient norm and whether clipping occurred
+        self.log(
+            "train/disc_grad_norm",
+            disc_grad_norm,
+            prog_bar=False,
+            logger=True,
+            on_step=True,
+            on_epoch=False,
+            batch_size=1,
+        )
+        if self.grad_clip_value is not None and self.grad_clip_value > 0:
             self.log(
                 "train/disc_grad_clipped",
                 float(disc_grad_norm > self.grad_clip_value),
@@ -304,7 +343,7 @@ class AutoencoderLightning(pl.LightningModule):
                 batch_size=1,
             )
 
-        self._optimizer_step(opt_d, optimizer_idx=1)
+        self._optimizer_step(opt_d, optimizer_idx=1, scaler=scaler)
         self._optimizer_zero_grad(opt_d)
 
         return disc_loss
@@ -342,22 +381,38 @@ class AutoencoderLightning(pl.LightningModule):
         # Backward
         self.manual_backward(losses["total"])
 
+        # Get scaler for AMP
+        scaler = self._get_scaler()
+
+        # Unscale gradients before clipping (required for AMP)
+        # Note: The on_after_backward callback may have already unscaled
+        if scaler is not None and not self._gen_gradients_unscaled:
+            scaler.unscale_(opt_g)
+            self._gen_gradients_unscaled = True
+
         # Gradient clipping for manual optimization
         if self.grad_clip_value is not None and self.grad_clip_value > 0:
             gen_grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.autoencoder.parameters(),
                 self.grad_clip_value,
             )
-            # Log whether clipping occurred
-            self.log(
-                "train/gen_grad_norm",
-                gen_grad_norm,
-                prog_bar=False,
-                logger=True,
-                on_step=True,
-                on_epoch=False,
-                batch_size=1,
+        else:
+            gen_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.autoencoder.parameters(),
+                float("inf"),
             )
+
+        # Log gradient norm and whether clipping occurred
+        self.log(
+            "train/gen_grad_norm",
+            gen_grad_norm,
+            prog_bar=False,
+            logger=True,
+            on_step=True,
+            on_epoch=False,
+            batch_size=1,
+        )
+        if self.grad_clip_value is not None and self.grad_clip_value > 0:
             self.log(
                 "train/gen_grad_clipped",
                 float(gen_grad_norm > self.grad_clip_value),
@@ -368,20 +423,33 @@ class AutoencoderLightning(pl.LightningModule):
                 batch_size=1,
             )
 
-        self._optimizer_step(opt_g, optimizer_idx=0)
+        self._optimizer_step(opt_g, optimizer_idx=0, scaler=scaler)
         self._optimizer_zero_grad(opt_g)
 
         return losses
 
-    def _optimizer_step(self, optimizer: torch.optim.Optimizer, optimizer_idx: int) -> None:
+    def _optimizer_step(
+        self, optimizer: torch.optim.Optimizer, optimizer_idx: int, scaler: Any = None
+    ) -> None:
         """Helper to step optimizer with Lightning step tracking.
 
         Args:
             optimizer: The optimizer to step.
             optimizer_idx: Index of the optimizer (0 for generator, 1 for discriminator).
+            scaler: Optional GradScaler for AMP training. When using AMP with manual optimization,
+                Lightning handles gradient scaling internally via self.manual_backward().
+                The scaler is only used for unscaling gradients before clipping.
         """
         # Step the optimizer
+        # Note: With manual optimization + AMP, self.manual_backward() handles gradient scaling,
+        # so we should call optimizer.step() directly, not scaler.step().
         optimizer.step()
+
+        # Reset unscaled flags after optimizer step
+        if optimizer_idx == 0:  # Generator
+            self._gen_gradients_unscaled = False
+        elif optimizer_idx == 1:  # Discriminator
+            self._disc_gradients_unscaled = False
 
         # Manually increment global_step since we're using manual optimization
         # Only increment once per training step (after generator optimizer)
