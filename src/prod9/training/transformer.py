@@ -201,9 +201,23 @@ class TransformerLightning(pl.LightningModule):
         config = checkpoint["config"]
         state_dict = checkpoint.get("state_dict", checkpoint)
 
-        # Calculate codebook_size from levels
+        # Validate autoencoder config matches transformer expectations
         import numpy as np
-        codebook_size = int(np.prod(config["levels"]))
+        loaded_levels = config["levels"]
+        loaded_latent_channels = len(loaded_levels)
+        expected_latent_channels = self._transformer_config["latent_channels"]
+
+        if loaded_latent_channels != expected_latent_channels:
+            raise ValueError(
+                f"Autoencoder architecture mismatch! "
+                f"Loaded autoencoder has levels={loaded_levels} (latent_channels={loaded_latent_channels}), "
+                f"but transformer config expects latent_channels={expected_latent_channels}. "
+                f"Please check that the autoencoder_path in your transformer config matches "
+                f"the autoencoder_export_path from your Stage 1 training config."
+            )
+
+        # Calculate codebook_size from levels
+        codebook_size = int(np.prod(loaded_levels))
 
         # Create transformer if not provided
         if self.transformer is None:

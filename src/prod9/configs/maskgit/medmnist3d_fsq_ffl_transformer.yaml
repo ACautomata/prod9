@@ -1,0 +1,168 @@
+# =============================================================================
+# prod9 MedMNIST 3D Stage 2 Configuration for FFL Autoencoder
+# Complete configuration for MaskGiT transformer training
+# Matches the autoencoder trained with medmnist3d_fsq_ffl.yaml
+# =============================================================================
+
+# Paths
+autoencoder_path: ".output/medmnist3d_autoencoder_ffl.pt"
+output_dir: ".output/medmnist3d_stage2_ffl"
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  # Transformer decoder configuration
+  transformer:
+    latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
+    patch_size: 2  # 3D patch size
+    hidden_dim: 256  # Reduced from 512 for smaller dataset
+    cond_dim: 256  # Reduced from 512 for smaller dataset
+    num_heads: 4  # Reduced from 8 for smaller dataset
+    num_blocks: 6  # Reduced from 12 for smaller dataset
+    codebook_size: 512  # FSQ codebook size (8*8*8 for levels=[8,8,8])
+    mlp_ratio: 4.0
+    dropout: 0.1
+
+  # Class/condition embeddings
+  # Number of classes for the specific MedMNIST 3D dataset
+  # organmnist3d: 11, nodulemnist3d: 2, adrenalmnist3d: 2, fracturemnist3d: 3, vesselmnist3d: 2, synapsemnist3d: 2
+  num_classes: 11  # OrganMNIST3D has 11 classes
+  contrast_embed_dim: 128  # Label embedding dimension
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  # Optimizer settings
+  optimizer:
+    learning_rate: 1e-4
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.01
+
+  # Learning rate scheduler
+  scheduler:
+    type: "constant"  # constant, cosine, step
+    # T_max: 50  # For cosine
+    # step_size: 15  # For step
+    # gamma: 0.1  # For step
+    # eta_min: 0  # For cosine
+
+  # Training loop
+  loop:
+    sample_every_n_steps: 100  # How often to generate samples during training
+
+  # Unconditional generation probability
+  unconditional:
+    unconditional_prob: 0.1
+
+  # Training stability settings
+  stability:
+    grad_norm_logging: true  # Log gradient norms for monitoring training health
+    warmup_enabled: true  # Enable learning rate warmup
+    warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
+    warmup_ratio: 0.02  # 2% of total training steps for warmup
+
+# =============================================================================
+# MaskGiT Sampler Configuration
+# =============================================================================
+sampler:
+  steps: 12
+  mask_value: -100
+  scheduler_type: "log"  # log, linear, sqrt
+  temperature: 1.0  # Sampling temperature (lower = more deterministic)
+
+# =============================================================================
+# Data Configuration
+# =============================================================================
+data:
+  # MedMNIST 3D dataset configuration (must match Stage 1)
+  dataset_name: "organmnist3d"  # Same dataset as Stage 1
+  size: 64  # Same size as Stage 1
+  root: "./.medmnist"
+  download: false  # Already downloaded in Stage 1
+
+  # Data loader
+  batch_size: 8
+  num_workers: 4
+  train_val_split: 0.9
+
+  # Stage 2 specific
+  cond_emb_dim: 128  # Condition embedding dimension
+  unconditional_prob: 0.1  # 10% unconditional generation
+  cache_dir: ".output/medmnist3d_encoded_ffl"  # Pre-encoded data cache directory
+
+# =============================================================================
+# Loss Configuration
+# =============================================================================
+loss:
+  # Cross-entropy loss
+  cross_entropy:
+    weight: 1.0
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
+callbacks:
+  checkpoint:
+    monitor: "val/fid"
+    mode: "min"
+    save_top_k: 3
+    save_last: true
+    every_n_epochs: null
+
+  early_stop:
+    enabled: true
+    monitor: "val/fid"
+    patience: 10
+    mode: "min"
+    min_delta: 0.001
+
+  lr_monitor: true
+
+  # PyTorch Profiler (disabled by default)
+  profiler:
+    enabled: false
+    profile_cpu: true
+    profile_cuda: true
+    record_shapes: true
+    profile_memory: true
+    trace_dir: "profiler"
+
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
+trainer:
+  max_epochs: 50
+
+  hardware:
+    accelerator: "auto"  # auto, gpu, cpu, mps
+    devices: "auto"  # auto, 1, 2, 4, etc.
+    precision: "16-mixed"
+
+  logging:
+    log_every_n_steps: 10
+    val_check_interval: 1.0
+    limit_train_batches: null
+    limit_val_batches: 5
+    logger_version: null
+
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
+
+  profiler: null
+  detect_anomaly: false
+  benchmark: false
+
+# =============================================================================
+# Sliding Window Inference (REQUIRED for transformer)
+# =============================================================================
+sliding_window:
+  enabled: true  # Always true for transformer
+
+  roi_size: [64, 64, 64]
+  overlap: 0.5
+  sw_batch_size: 1
+  mode: "gaussian"
