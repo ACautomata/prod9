@@ -1,0 +1,79 @@
+# prod9 Configuration Files
+
+This directory contains configuration files for training different models in the prod9 project.
+
+## Directory Structure
+
+```
+configs/
+├── maskgit/           # MaskGiT-based models (FSQ autoencoder + transformer)
+├── maisi/             # MAISI models (Rectified Flow diffusion)
+│   ├── autoencoder/   # MAISI Stage 1: VAE training
+│   └── diffusion/     # MAISI Stage 2+: Diffusion and ControlNet
+└── README.md          # This file
+```
+
+## MaskGiT Models
+
+The `maskgit/` directory contains configs for the two-stage MaskGiT pipeline:
+- **Stage 1 (FSQ)**: Autoencoder with Finite Scalar Quantization
+- **Stage 2 (Transformer)**: Transformer-based token generation
+
+### Available Configs
+
+| Config | Dataset | Stage | Description |
+|--------|---------|-------|-------------|
+| `brats_fsq.yaml` | BraTS | 1 | Autoencoder with FSQ for BraTS |
+| `brats.yaml` | BraTS | 2 | Transformer for BraTS |
+| `medmnist3d_fsq.yaml` | MedMNIST 3D | 1 | Autoencoder with FSQ for MedMNIST 3D |
+| `medmnist3d.yaml` | MedMNIST 3D | 2 | Transformer for MedMNIST 3D |
+| `brats_fsq_ffl.yaml` | BraTS | 1 | Autoencoder with FFL loss (experimental) |
+
+### Usage
+
+```bash
+# Stage 1: Train autoencoder
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats_fsq.yaml
+
+# Stage 2: Train transformer
+prod9-train-transformer train --config src/prod9/configs/maskgit/brats.yaml
+```
+
+## MAISI Models
+
+The `maisi/` directory contains configs for the MAISI (Rectified Flow) pipeline.
+
+### Available Configs
+
+| Config | Dataset | Stage | Description |
+|--------|---------|-------|-------------|
+| `autoencoder/brats_vae.yaml` | BraTS | 1 | MAISI VAE for BraTS |
+| `autoencoder/medmnist3d_vae.yaml` | MedMNIST 3D | 1 | MAISI VAE for MedMNIST 3D |
+| `diffusion/brats_diffusion.yaml` | BraTS | 2 | Rectified Flow diffusion for BraTS |
+| `diffusion/brats_controlnet.yaml` | BraTS | 3 | ControlNet for conditional generation |
+
+## Perceptual Loss Options
+
+The autoencoder configs support two perceptual loss types:
+
+### LPIPS (default)
+- Uses MONAI's PerceptualLoss with MedicalNet ResNet10
+- Pre-trained on 23 medical datasets
+- Set `loss.loss_type: "lpips"` (or omit, as it's the default)
+
+### Focal Frequency Loss (FFL)
+- Frequency-domain loss from ICCV 2021
+- Configurable via `loss.focal_frequency` section
+- Set `loss.loss_type: "ffl"` to enable
+
+Example FFL configuration:
+```yaml
+loss:
+  loss_type: "ffl"
+  focal_frequency:
+    weight: 0.5
+    alpha: 1.0          # Focusing exponent
+    patch_factor: 1     # Patch size for FFT
+    axes: [2, 3, 4]     # Slicing axes for 3D
+    ratio: 1.0          # Fraction of slices to use
+```

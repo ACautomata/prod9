@@ -2,6 +2,8 @@
 Loss functions for VQGAN-style training.
 
 This module provides loss functions for autoencoder training:
+- SliceWiseFake3DLoss: Wraps any 2D loss to work on 3D volumes by slicing
+- FocalFrequencyLoss: Focal Frequency Loss for image reconstruction (FFL)
 - PerceptualLoss: Perceptual loss using pretrained features (MONAI)
 - PatchAdversarialLoss: Adversarial loss for GAN training (supports multi-scale)
 - Combined VAE-GAN loss with reconstruction, perceptual, adversarial, and commitment terms
@@ -9,13 +11,300 @@ This module provides loss functions for autoencoder training:
 Reference for adaptive weight implementation:
 - VQGAN Paper: Esser et al., "Taming Transformers for High-Resolution Image Synthesis", 2021
 - Code: https://github.com/CompVis/taming-transformers
+
+Reference for Focal Frequency Loss:
+- "Focal Frequency Loss for Image Reconstruction and Synthesis" (arXiv:2012.12821 / ICCV 2021)
 """
 
+import math
 import torch
 import torch.nn as nn
 from monai.losses.adversarial_loss import PatchAdversarialLoss
 from monai.losses.perceptual import PerceptualLoss
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
+
+
+class SliceWiseFake3DLoss(nn.Module):
+    """
+    Wrap any 2D loss to work on 3D volumes by slicing (2.5D / fake 3D).
+
+    Expects inputs shaped as (B, C, D, H, W).
+    It computes 2D loss on slices along selected axes and averages.
+
+    Args:
+        loss2d: A callable that takes 2D tensors (N, C, H, W) and returns a loss
+        axes: Sequence of axes to slice along.
+            - 2 means slice along D (axial): take (H, W) planes
+            - 3 means slice along H (coronal): take (D, W) planes
+            - 4 means slice along W (sagittal): take (D, H) planes
+        ratio: Fraction of slices used per axis (1.0 = use all slices)
+        reduction: Either "mean" or "sum" for aggregating losses across axes
+
+    Example:
+        >>> loss2d = torch.nn.MSELoss()
+        >>> loss3d = SliceWiseFake3DLoss(loss2d, axes=(2, 3, 4), ratio=0.5)
+        >>> pred = torch.randn(2, 1, 32, 64, 64)  # B, C, D, H, W
+        >>> target = torch.randn(2, 1, 32, 64, 64)
+        >>> loss = loss3d(pred, target)
+    """
+
+    def __init__(
+        self,
+        loss2d: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        axes: Sequence[int] = (2, 3, 4),
+        ratio: float = 1.0,
+        reduction: str = "mean",
+    ):
+        super().__init__()
+        self.loss2d = loss2d
+        self.axes = tuple(axes)
+        self.ratio = float(ratio)
+        if reduction not in ("mean", "sum"):
+            raise ValueError("reduction must be 'mean' or 'sum'")
+        self.reduction = reduction
+
+    @staticmethod
+    def _pick_indices(n: int, ratio: float, device: torch.device) -> torch.Tensor:
+        """Pick indices for slicing based on ratio."""
+        if ratio >= 1.0:
+            return torch.arange(n, device=device)
+        k = max(1, int(round(n * ratio)))
+        # Uniform sampling (deterministic)
+        return torch.linspace(0, n - 1, steps=k, device=device).round().long()
+
+    @staticmethod
+    def _slice_to_2d(x: torch.Tensor, axis: int, idx: torch.Tensor) -> torch.Tensor:
+        """
+        Slice 3D tensor along axis and reshape to 2D batches.
+
+        Args:
+            x: Input tensor (B, C, D, H, W)
+            axis: Axis to slice along (2, 3, or 4)
+            idx: Indices to select
+
+        Returns:
+            2D tensor reshaped for 2D loss computation
+        """
+        if axis == 2:
+            # Slice along D (axial): take (H, W) planes
+            xs = x.index_select(2, idx)  # (B, C, Nd, H, W)
+            xs = xs.permute(0, 2, 1, 3, 4).contiguous()  # (B, Nd, C, H, W)
+            return xs.view(-1, x.shape[1], x.shape[3], x.shape[4])
+        if axis == 3:
+            # Slice along H (coronal): take (D, W) planes
+            xs = x.index_select(3, idx)  # (B, C, D, Nh, W)
+            xs = xs.permute(0, 3, 1, 2, 4).contiguous()  # (B, Nh, C, D, W)
+            return xs.view(-1, x.shape[1], x.shape[2], x.shape[4])
+        if axis == 4:
+            # Slice along W (sagittal): take (D, H) planes
+            xs = x.index_select(4, idx)  # (B, C, D, H, Nw)
+            xs = xs.permute(0, 4, 1, 2, 3).contiguous()  # (B, Nw, C, D, H)
+            return xs.view(-1, x.shape[1], x.shape[2], x.shape[3])
+        raise ValueError("axis must be one of 2, 3, 4 for (B, C, D, H, W)")
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute fake 3D loss by averaging 2D losses on slices.
+
+        Args:
+            pred: Predicted images (B, C, D, H, W)
+            target: Target images (B, C, D, H, W)
+
+        Returns:
+            Scalar loss value
+        """
+        if pred.shape != target.shape:
+            raise ValueError(f"Shape mismatch: {pred.shape} vs {target.shape}")
+        if pred.dim() != 5:
+            raise ValueError(f"Expected (B, C, D, H, W), got {pred.dim()}D tensor")
+
+        losses = []
+        for axis in self.axes:
+            n = pred.shape[axis]
+            idx = self._pick_indices(n, self.ratio, pred.device)
+
+            p2d = self._slice_to_2d(pred, axis, idx)
+            t2d = self._slice_to_2d(target, axis, idx)
+
+            # loss2d can return scalar or per-sample; we reduce to scalar here
+            l = self.loss2d(p2d, t2d)
+            if l.dim() > 0:
+                l = l.mean()
+            losses.append(l)
+
+        out = torch.stack(losses)
+        return out.mean() if self.reduction == "mean" else out.sum()
+
+
+class FocalFrequencyLoss(nn.Module):
+    """
+    Focal Frequency Loss (FFL) for image reconstruction and synthesis.
+
+    From "Focal Frequency Loss for Image Reconstruction and Synthesis"
+    (arXiv:2012.12821 / ICCV 2021).
+
+    The loss computes frequency-domain distance with adaptive weighting:
+    - Frequency distance: |Fr(u,v) - Ff(u,v)|^2
+    - Weight matrix: w(u,v) = |Fr(u,v) - Ff(u,v)|^alpha, normalized to [0,1]
+    - Final loss: mean of w * |diff|^2 over all frequencies
+
+    Args:
+        loss_weight: Scalar multiplier for the loss
+        alpha: Focusing exponent for the spectrum weight matrix (higher = more focus on large errors)
+        patch_factor: Split image into (patch_factor x patch_factor) patches before FFT
+        ave_spectrum: Use minibatch-average spectrum
+        log_matrix: Apply log(1 + w) before normalization
+        batch_matrix: Normalize w using batch-level max instead of per-sample max
+        eps: Numerical stability constant
+
+    Example:
+        >>> ffl = FocalFrequencyLoss(loss_weight=1.0, alpha=1.0)
+        >>> pred = torch.randn(4, 3, 256, 256)  # N, C, H, W
+        >>> target = torch.randn(4, 3, 256, 256)
+        >>> loss = ffl(pred, target)
+    """
+
+    def __init__(
+        self,
+        loss_weight: float = 1.0,
+        alpha: float = 1.0,
+        patch_factor: int = 1,
+        ave_spectrum: bool = False,
+        log_matrix: bool = False,
+        batch_matrix: bool = False,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        if patch_factor < 1:
+            raise ValueError("patch_factor must be >= 1")
+
+        self.loss_weight = float(loss_weight)
+        self.alpha = float(alpha)
+        self.patch_factor = int(patch_factor)
+        self.ave_spectrum = bool(ave_spectrum)
+        self.log_matrix = bool(log_matrix)
+        self.batch_matrix = bool(batch_matrix)
+        self.eps = float(eps)
+
+    @staticmethod
+    def _crop_to_divisible(x: torch.Tensor, p: int) -> torch.Tensor:
+        """
+        Center-crop so H, W are divisible by p for clean patch grid.
+
+        Args:
+            x: Input tensor (N, C, H, W)
+            p: Patch factor
+
+        Returns:
+            Cropped tensor
+        """
+        n, c, h, w = x.shape
+        h2 = (h // p) * p
+        w2 = (w // p) * p
+        if h2 == h and w2 == w:
+            return x
+        top = (h - h2) // 2
+        left = (w - w2) // 2
+        return x[:, :, top : top + h2, left : left + w2]
+
+    def _to_patches(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Convert (N, C, H, W) to (N*p*p, C, h_patch, w_patch) if patch_factor > 1.
+
+        Args:
+            x: Input tensor (N, C, H, W)
+
+        Returns:
+            Patched tensor
+        """
+        if self.patch_factor == 1:
+            return x
+
+        p = self.patch_factor
+        x = self._crop_to_divisible(x, p)
+        n, c, h, w = x.shape
+        ph, pw = h // p, w // p
+
+        # Reshape into grid then flatten patches into batch dimension
+        # (N, C, p, ph, p, pw) -> (N, p, p, C, ph, pw) -> (N*p*p, C, ph, pw)
+        x = x.view(n, c, p, ph, p, pw).permute(0, 2, 4, 1, 3, 5).contiguous()
+        x = x.view(n * p * p, c, ph, pw)
+        return x
+
+    def _fft2(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Compute 2D unitary FFT.
+
+        Args:
+            x: Input tensor (N, C, H, W)
+
+        Returns:
+            Complex FFT output
+        """
+        return torch.fft.fft2(x, dim=(-2, -1), norm="ortho")
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute Focal Frequency Loss.
+
+        Args:
+            pred: Predicted images (N, C, H, W)
+            target: Target images (N, C, H, W)
+
+        Returns:
+            Scalar loss value
+        """
+        if pred.shape != target.shape:
+            raise ValueError(f"Shape mismatch: pred {pred.shape} vs target {target.shape}")
+        if pred.dim() != 4:
+            raise ValueError(f"Expected 4D (N, C, H, W), got {pred.dim()}D tensor")
+
+        # Optional patch-based FFL
+        pred_p = self._to_patches(pred)
+        targ_p = self._to_patches(target)
+
+        # FFT
+        F_pred = self._fft2(pred_p)
+        F_targ = self._fft2(targ_p)
+
+        # Option: minibatch average spectrum
+        if self.ave_spectrum:
+            F_pred = F_pred.mean(dim=0, keepdim=True)
+            F_targ = F_targ.mean(dim=0, keepdim=True)
+
+        # Complex diff
+        diff = F_targ - F_pred
+        diff_mag = torch.abs(diff)
+
+        # Frequency distance term: |diff|^2
+        freq_dist = diff_mag.pow(2)
+
+        # Spectrum weight matrix: w = |diff|^alpha
+        weight = (diff_mag + self.eps).pow(self.alpha)
+
+        # Optional log adjustment
+        if self.log_matrix:
+            weight = torch.log1p(weight)
+
+        # Normalize to [0, 1] by max
+        if self.batch_matrix:
+            denom = weight.max().clamp_min(self.eps)
+        else:
+            # Per-sample max over (C, H, W)
+            denom = (
+                weight.view(weight.shape[0], -1)
+                .max(dim=1)[0]
+                .view(-1, 1, 1, 1)
+                .clamp_min(self.eps)
+            )
+
+        weight = (weight / denom).clamp(0.0, 1.0)
+
+        # Stop gradient through weight matrix
+        weight = weight.detach()
+
+        loss = (weight * freq_dist).mean()
+        return loss * self.loss_weight
 
 
 class VAEGANLoss(nn.Module):
@@ -24,7 +313,7 @@ class VAEGANLoss(nn.Module):
 
     Combines four loss terms:
     1. Reconstruction loss (L1): Pixel-wise reconstruction accuracy
-    2. Perceptual loss: Feature-based similarity using pretrained network
+    2. Perceptual loss: Feature-based similarity (LPIPS or Focal Frequency Loss)
     3. Adversarial loss: Realism via discriminator (using MONAI's PatchAdversarialLoss)
     4. Commitment loss: FSQ codebook commitment
 
@@ -34,10 +323,12 @@ class VAEGANLoss(nn.Module):
     Args:
         recon_weight: Weight for L1 reconstruction loss
         perceptual_weight: Weight for perceptual loss
+        loss_type: Type of perceptual loss ("lpips" or "ffl")
+        ffl_config: Configuration for Focal Frequency Loss (required if loss_type="ffl")
+        spatial_dims: Spatial dimensions (3 for 3D medical images)
+        perceptual_network_type: Pretrained network for perceptual loss (used if loss_type="lpips")
         adv_weight: Weight for adversarial loss (base weight, scaled adaptively)
         commitment_weight: Weight for commitment loss (beta in VQ terminology)
-        spatial_dims: Spatial dimensions (3 for 3D medical images)
-        perceptual_network_type: Pretrained network for perceptual loss
         adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
         discriminator_iter_start: Step number to start discriminator training (warmup)
     """
@@ -50,25 +341,34 @@ class VAEGANLoss(nn.Module):
         self,
         recon_weight: float = 1.0,
         perceptual_weight: float = 0.5,
-        adv_weight: float = 0.1,
-        commitment_weight: float = 0.25,
+        loss_type: str = "lpips",
+        ffl_config: Optional[Dict[str, Union[float, int, bool]]] = None,
         spatial_dims: int = 3,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
+        adv_weight: float = 0.1,
+        commitment_weight: float = 0.25,
         adv_criterion: str = "least_squares",
         discriminator_iter_start: int = 0,
     ):
         super().__init__()
 
+        if loss_type not in ("lpips", "ffl"):
+            raise ValueError(f"loss_type must be 'lpips' or 'ffl', got '{loss_type}'")
+
         self.recon_weight = recon_weight
         self.perceptual_weight = perceptual_weight
+        self.loss_type = loss_type
+        self.ffl_config = ffl_config or {}
         self.disc_factor = adv_weight  # Base discriminator weight
         self.commitment_weight = commitment_weight
         self.discriminator_iter_start = discriminator_iter_start
         self.spatial_dims = spatial_dims
         self.perceptual_network_type = perceptual_network_type
 
-        # Perceptual network (lazy initialization on first use)
+        # Perceptual network (lazy initialization on first use, for LPIPS)
         self.perceptual_network: Optional[PerceptualLoss] = None
+        # FFL network (lazy initialization on first use, for FFL)
+        self.ffl_network: Optional[SliceWiseFake3DLoss] = None
 
         # L1 loss for reconstruction
         self.l1_loss = nn.L1Loss()
@@ -223,7 +523,26 @@ class VAEGANLoss(nn.Module):
         self, fake_images: torch.Tensor, real_images: torch.Tensor
     ) -> torch.Tensor:
         """
-        Compute perceptual loss using pretrained network features.
+        Compute perceptual loss based on loss_type.
+
+        Supports:
+        - "lpips": MONAI's PerceptualLoss with MedicalNet ResNet10 for 3D medical images
+        - "ffl": Focal Frequency Loss wrapped in SliceWiseFake3DLoss for 3D
+
+        Networks are lazily initialized on first forward pass.
+        """
+        if self.loss_type == "lpips":
+            return self._compute_lpips_loss(fake_images, real_images)
+        elif self.loss_type == "ffl":
+            return self._compute_ffl_loss(fake_images, real_images)
+        else:
+            raise ValueError(f"Unknown loss_type: {self.loss_type}")
+
+    def _compute_lpips_loss(
+        self, fake_images: torch.Tensor, real_images: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute LPIPS perceptual loss using pretrained network features.
 
         Uses MONAI's PerceptualLoss with MedicalNet ResNet10 for 3D medical images.
         The network is lazily initialized on first forward pass.
@@ -239,6 +558,51 @@ class VAEGANLoss(nn.Module):
                 param.requires_grad = False
         # Type narrowing: perceptual_network is now guaranteed to be non-None
         network = self.perceptual_network
+        assert network is not None
+        return network(fake_images, real_images)
+
+    def _compute_ffl_loss(
+        self, fake_images: torch.Tensor, real_images: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute Focal Frequency Loss for 3D volumes.
+
+        Uses SliceWiseFake3DLoss to apply 2D FFL on 3D volumes by slicing.
+        The network is lazily initialized on first forward pass.
+        """
+        if self.ffl_network is None:
+            # Create FFL with config parameters - properly type cast values
+            alpha = float(self.ffl_config.get("alpha", 1.0))
+            patch_factor = int(self.ffl_config.get("patch_factor", 1))
+            ave_spectrum = bool(self.ffl_config.get("ave_spectrum", False))
+            log_matrix = bool(self.ffl_config.get("log_matrix", False))
+            batch_matrix = bool(self.ffl_config.get("batch_matrix", False))
+            eps = float(self.ffl_config.get("eps", 1e-8))
+            axes_val = self.ffl_config.get("axes", (2, 3, 4))
+            # Ensure axes is a tuple of ints
+            if not isinstance(axes_val, tuple):
+                axes_val = tuple(axes_val) if isinstance(axes_val, list) else (2, 3, 4)
+            axes = cast(Tuple[int, ...], axes_val)
+            ratio = float(self.ffl_config.get("ratio", 1.0))
+
+            ffl = FocalFrequencyLoss(
+                loss_weight=1.0,  # Weight is applied in VAEGANLoss forward
+                alpha=alpha,
+                patch_factor=patch_factor,
+                ave_spectrum=ave_spectrum,
+                log_matrix=log_matrix,
+                batch_matrix=batch_matrix,
+                eps=eps,
+            )
+            # Wrap with SliceWiseFake3DLoss for 3D volumes
+            self.ffl_network = SliceWiseFake3DLoss(
+                loss2d=ffl,
+                axes=axes,
+                ratio=ratio,
+                reduction="mean",
+            )
+        # Type narrowing: ffl_network is now guaranteed to be non-None
+        network = self.ffl_network
         assert network is not None
         return network(fake_images, real_images)
 

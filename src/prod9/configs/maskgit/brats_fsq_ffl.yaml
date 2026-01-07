@@ -1,0 +1,238 @@
+# =============================================================================
+# prod9 Autoencoder Stage 1 Configuration with Focal Frequency Loss
+# Complete configuration for VQGAN-style autoencoder training with FSQ
+# Uses Focal Frequency Loss (FFL) instead of LPIPS for perceptual loss
+# =============================================================================
+
+# Output paths
+output_dir: "outputs/stage1_ffl"
+autoencoder_export_path: "outputs/autoencoder_ffl_final.pt"
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  # AutoencoderFSQ configuration
+  autoencoder:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 1
+    levels: [6, 6, 6, 5]  # 6^3*5 = 1080 codebook size
+    num_channels: [64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
+    attention_levels: [False, True, True, True]
+    num_res_blocks: [2, 2, 2, 2]
+    norm_num_groups: 32  # Group normalization groups
+    num_splits: 2  # No splitting for small 64^3 inputs (default is 16)
+
+  # MultiScalePatchDiscriminator configuration
+  discriminator:
+    spatial_dims: 3
+    in_channels: 1
+    out_channels: 1
+    num_d: 3  # Number of discriminators (multi-scale) - reduced to avoid error
+    channels: 64  # Base channel count
+    num_layers_d: 3  # Layers per discriminator
+    kernel_size: 4
+    activation: ["LEAKYRELU", {"negative_slope": 0.2}]
+    norm: "BATCH"
+    minimum_size_im: 64
+
+  # Modality configuration
+  num_classes: 4  # T1, T1ce, T2, FLAIR
+  contrast_embed_dim: 64
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  # Optimizer settings
+  optimizer:
+    lr_g: 1e-4  # Generator (autoencoder) learning rate
+    lr_d: 4e-4  # Discriminator learning rate
+    b1: 0.5  # Adam beta1
+    b2: 0.999  # Adam beta2
+    weight_decay: 1e-5
+
+  # Learning rate scheduler (optional, currently constant)
+  scheduler:
+    type: "constant"  # Options: constant, cosine, step
+
+  # Training loop settings
+  loop:
+    sample_every_n_steps: 100  # How often to generate samples during training
+
+  # Training stability settings
+  stability:
+    grad_norm_logging: true  # Log gradient norms for monitoring training health
+    warmup_enabled: true  # Enable learning rate warmup
+    warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
+    warmup_ratio: 0.02  # 2% of total training steps for warmup
+
+# =============================================================================
+# Data Configuration
+# =============================================================================
+data:
+  # Data paths
+  data_dir: "${BRATS_DATA_DIR:data/BraTS}"
+
+  # Modalities to use
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]
+
+  # Data loader settings
+  batch_size: 2
+  num_workers: 4
+  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
+  pin_memory: true
+  train_val_split: 0.8
+
+  # Training crop size
+  roi_size: [128, 128, 128]
+
+  # Preprocessing transforms
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions
+    spacing_mode: "bilinear"
+    orientation: "RAS"  # NIfTI orientation
+    intensity_a_min: 0.0  # ScaleIntensityRanged
+    intensity_a_max: 500.0
+    intensity_b_min: -1.0
+    intensity_b_max: 1.0
+    clip: true
+
+  # Data augmentation
+  augmentation:
+    # Random flip
+    flip_prob: 0.5
+    flip_axes: [0, 1, 2]  # Axial, coronal, sagittal
+
+    # Random rotation
+    rotate_prob: 0.5
+    rotate_max_k: 3  # 0-3 (90-degree multiples)
+    rotate_axes: [0, 1]  # Rotate in axial plane
+
+    # Random intensity shift
+    shift_intensity_prob: 0.5
+    shift_intensity_offset: 0.1  # +/- 10% shift
+
+# =============================================================================
+# Loss Configuration
+# =============================================================================
+loss:
+  # Loss type selector: "lpips" or "ffl"
+  loss_type: "ffl"
+
+  discriminator_iter_start: 15000  # Discriminator warmup
+
+  # Reconstruction loss (L1)
+  reconstruction:
+    weight: 1.0
+
+  # Perceptual Loss using Focal Frequency Loss (FFL)
+  # FFL computes frequency-domain distance with adaptive weighting
+  focal_frequency:
+    weight: 0.5  # Loss weight multiplier
+    alpha: 1.0  # Focusing exponent (higher = more focus on large errors)
+    patch_factor: 1  # Split image into patches before FFT (1 = no patching)
+    ave_spectrum: false  # Use minibatch-average spectrum
+    log_matrix: false  # Apply log(1 + w) before normalization
+    batch_matrix: false  # Normalize w using batch-level max
+    eps: 1e-8  # Numerical stability constant
+    # SliceWiseFake3DLoss parameters for 3D volumes
+    axes: [2, 3, 4]  # Slicing axes: 2=D (axial), 3=H (coronal), 4=W (sagittal)
+    ratio: 1.0  # Fraction of slices to use (1.0 = all slices)
+
+  # Fallback LPIPS config (kept for reference, not used when loss_type="ffl")
+  perceptual:
+    weight: 0.5
+    network_type: "medicalnet_resnet10_23datasets"
+
+  # Adversarial loss
+  adversarial:
+    weight: 0.1  # Base weight (scaled adaptively)
+    criterion: "least_squares"  # hinge, least_squares, bce
+
+  # Commitment loss (FSQ)
+  commitment:
+    weight: 0.25  # Beta in VQ terminology
+
+  # Adaptive weight calculation
+  adaptive:
+    max_weight: 10000.0  # Clamp adaptive weight
+    grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
+callbacks:
+  # Model checkpointing
+  checkpoint:
+    monitor: "val/loss"  # FFL doesn't have a separate validation metric
+    mode: "min"
+    save_top_k: 3
+    save_last: true
+    every_n_epochs: 1  # check every epoch
+
+  # Early stopping
+  early_stop:
+    enabled: true
+    monitor: "val/loss"
+    patience: 10
+    mode: "min"
+    min_delta: 0.0  # Minimum change to qualify as improvement
+
+  # Learning rate monitoring
+  lr_monitor: true
+
+  # PyTorch Profiler (disabled by default)
+  profiler:
+    enabled: false
+    profile_cpu: true
+    profile_cuda: true
+    record_shapes: true
+    with_stack: true
+    profile_memory: true
+    trace_dir: "profiler"
+
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
+trainer:
+  # Training settings
+  max_epochs: 100
+
+  # Hardware
+  hardware:
+    accelerator: "auto"  # Auto-detect: gpu/mps/cpu
+    devices: "auto"       # Use all available devices
+    precision: "bf16-mixed"  # 32, 16, bf16
+
+  # Logging
+  logging:
+    log_every_n_steps: 10
+    val_check_interval: 1.0  # Validate every N epochs
+    limit_train_batches: null  # null = all batches
+    limit_val_batches: 5
+    logger_version: null  # null = auto-increment
+
+  # Gradient handling
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
+
+  # Debugging/profiling
+  profiler: null  # null, simple, advanced, pytorch
+  detect_anomaly: false
+  benchmark: false
+
+# =============================================================================
+# Sliding Window Inference
+# =============================================================================
+sliding_window:
+  # Enable SW for validation (training always uses direct calls)
+  enabled: false
+
+  # Window configuration
+  roi_size: [128, 128, 128]
+  overlap: 0.5  # 0-1, higher = smoother but slower
+  sw_batch_size: 1  # Increase if GPU memory allows
+  mode: "gaussian"  # gaussian, constant, mean
