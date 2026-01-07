@@ -1,11 +1,13 @@
 # =============================================================================
-# prod9 MedMNIST 3D Stage 2 Configuration
+# prod9 MedMNIST 3D Stage 2 Configuration for FFL Autoencoder
 # Complete configuration for MaskGiT transformer training
+#
+# Stage 1 config: medmnist3d/stage1/ffl.yaml
 # =============================================================================
 
-# Paths
-autoencoder_path: ".output/medmnist3d_autoencoder.pt"
-output_dir: ".output/medmnist3d_stage2"
+# Paths (must match the output from stage1/ffl.yaml)
+autoencoder_path: ".output/medmnist3d_autoencoder_ffl.pt"
+output_dir: ".output/medmnist3d_stage2_ffl"
 
 # =============================================================================
 # Model Architecture
@@ -90,7 +92,7 @@ data:
   # Stage 2 specific
   cond_emb_dim: 128  # Condition embedding dimension
   unconditional_prob: 0.1  # 10% unconditional generation
-  cache_dir: ".output/medmnist3d_encoded"  # Pre-encoded data cache directory
+  cache_dir: ".output/medmnist3d_encoded_ffl"  # Pre-encoded data cache directory
 
 # =============================================================================
 # Loss Configuration
@@ -126,7 +128,6 @@ callbacks:
     profile_cpu: true
     profile_cuda: true
     record_shapes: true
-    with_stack: true
     profile_memory: true
     trace_dir: "profiler"
 

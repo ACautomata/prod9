@@ -7,6 +7,12 @@ This directory contains configuration files for training different models in the
 ```
 configs/
 ├── maskgit/           # MaskGiT-based models (FSQ autoencoder + transformer)
+│   ├── medmnist3d/    # MedMNIST 3D dataset configs
+│   │   ├── stage1/    # Autoencoder with FSQ
+│   │   └── stage2/    # Transformer for token generation
+│   └── brats/         # BraTS dataset configs
+│       ├── stage1/    # Autoencoder with FSQ
+│       └── stage2/    # Transformer for token generation
 ├── maisi/             # MAISI models (Rectified Flow diffusion)
 │   ├── autoencoder/   # MAISI Stage 1: VAE training
 │   └── diffusion/     # MAISI Stage 2+: Diffusion and ControlNet
@@ -19,24 +25,22 @@ The `maskgit/` directory contains configs for the two-stage MaskGiT pipeline:
 - **Stage 1 (FSQ)**: Autoencoder with Finite Scalar Quantization
 - **Stage 2 (Transformer)**: Transformer-based token generation
 
-### Available Configs
+See [maskgit/README.md](maskgit/README.md) for detailed documentation.
 
-| Config | Dataset | Stage | Description |
-|--------|---------|-------|-------------|
-| `brats_fsq.yaml` | BraTS | 1 | Autoencoder with FSQ for BraTS |
-| `brats.yaml` | BraTS | 2 | Transformer for BraTS |
-| `medmnist3d_fsq.yaml` | MedMNIST 3D | 1 | Autoencoder with FSQ for MedMNIST 3D |
-| `medmnist3d.yaml` | MedMNIST 3D | 2 | Transformer for MedMNIST 3D |
-| `brats_fsq_ffl.yaml` | BraTS | 1 | Autoencoder with FFL loss (experimental) |
-
-### Usage
+### Quick Start
 
 ```bash
-# Stage 1: Train autoencoder
-prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats_fsq.yaml
+# MedMNIST 3D - Stage 1: Train autoencoder
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stage1/base.yaml
 
-# Stage 2: Train transformer
-prod9-train-transformer train --config src/prod9/configs/maskgit/brats.yaml
+# MedMNIST 3D - Stage 2: Train transformer
+prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stage2/base.yaml
+
+# BraTS - Stage 1: Train autoencoder
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/base.yaml
+
+# BraTS - Stage 2: Train transformer
+prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 ```
 
 ## MAISI Models
