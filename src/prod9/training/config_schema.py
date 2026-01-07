@@ -41,10 +41,15 @@ class AutoencoderModelConfig(BaseModel):
     @field_validator("levels")
     @classmethod
     def validate_levels(cls, v: List[int]) -> List[int]:
-        """Validate FSQ levels configuration."""
-        if len(v) != 3:
-            raise ValueError("levels must have exactly 3 elements for 3D FSQ")
-        # All levels can be even - FSQ handles this with offset
+        """Validate FSQ levels configuration.
+
+        The FSQ codebook size is the product of all levels, so any number of
+        levels is supported (not just 3). The latent_dim must equal len(levels).
+        """
+        if len(v) == 0:
+            raise ValueError("levels must have at least 1 element")
+        if not all(level > 0 for level in v):
+            raise ValueError("all levels must be positive integers")
         return v
 
 
