@@ -663,10 +663,13 @@ class MAISIVAEModelConfig(BaseModel):
 
 
 class MAISIVAELossConfig(BaseModel):
-    """Configuration for MAISI VAE loss (no discriminator, no perceptual)."""
+    """Configuration for MAISI VAE loss with perceptual and adversarial components."""
 
     recon_weight: float = Field(default=1.0, ge=0, description="Reconstruction loss weight")
     kl_weight: float = Field(default=1e-6, ge=0, description="KL divergence loss weight")
+    perceptual_weight: float = Field(default=0.5, ge=0, description="LPIPS perceptual loss weight")
+    adv_weight: float = Field(default=0.1, ge=0, description="Adversarial loss base weight")
+    lpips_network: str = Field(default="alex", description="Pretrained network for LPIPS")
 
 
 class DiffusionModelConfig(BaseModel):
@@ -715,12 +718,48 @@ class ControlNetModelConfig(BaseModel):
 # =============================================================================
 
 
+class MAISIAutoencoderModelConfig(BaseModel):
+    """Configuration for MAISI VAE (KL-based, no FSQ levels).
+
+    MAISI uses a KL-divergence VAE from MONAI's AutoencoderKlMaisi, which
+    differs from the FSQ-based AutoencoderFSQ. Key differences:
+    - No 'levels' field (uses 'latent_channels' instead)
+    - No FSQ quantization (uses reparameterization trick)
+    """
+
+    # Basic spatial parameters
+    spatial_dims: int = Field(default=3, ge=1, le=3)
+    in_channels: int = Field(default=1, ge=1)
+    out_channels: int = Field(default=1, ge=1)
+
+    # REQUIRED: Core network architecture
+    latent_channels: int = Field(default=4, ge=1, description="Number of latent channels")
+    num_channels: Tuple[int, ...] = Field(default=(32, 64, 64, 64), description="Channel sizes per layer")
+    attention_levels: Tuple[bool, ...] = Field(default=(False, False, True, True), description="Attention layers")
+    num_res_blocks: Tuple[int, ...] = Field(default=(1, 1, 1, 1), description="Residual blocks per layer")
+
+    # Normalization parameter
+    norm_num_groups: int = Field(default=32, ge=1)
+
+    # Number of splits for latent space
+    num_splits: int = Field(default=2, ge=1, description="Number of splits for latent space")
+
+
+class MAISIModelConfig(BaseModel):
+    """Model configuration for MAISI VAE training.
+
+    Matches the YAML structure with nested 'autoencoder' key.
+    """
+
+    autoencoder: MAISIAutoencoderModelConfig = Field(default_factory=MAISIAutoencoderModelConfig)
+
+
 class MAISIVAEFullConfig(BaseModel):
     """Complete configuration for MAISI Stage 1 VAE training."""
 
     output_dir: str
     vae_export_path: Optional[str] = Field(default=None, description="Path to export trained VAE")
-    model: ModelConfig = Field(default_factory=ModelConfig)
+    model: MAISIModelConfig = Field(default_factory=MAISIModelConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     data: Union[DataConfig, MedMNIST3DDataConfig]
     loss: MAISIVAELossConfig = Field(default_factory=MAISIVAELossConfig)

@@ -90,7 +90,7 @@ data:
   download: true
 
   # Data loader settings
-  batch_size: 4
+  batch_size: 2
   num_workers: 4
   train_val_split: 0.9
 
@@ -119,13 +119,13 @@ loss:
 
   # Perceptual Loss (LPIPS-based using pretrained network)
   perceptual:
-    weight: 1.0  # Reduced from 1.0 for training stability
+    weight: 0.1  # Reduced from 1.0 for training stability
     network_type: "medicalnet_resnet10_23datasets"
 
   # Adversarial loss
   adversarial:
-    weight: 0.1  # Reduced from 1.0 for training stability
-    criterion: "hinge"  # hinge, least_squares, bce
+    weight: 0.05  # Reduced from 1.0 for training stability
+    criterion: "least_squares"  # hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:
