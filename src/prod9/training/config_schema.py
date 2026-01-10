@@ -58,6 +58,9 @@ class DiscriminatorConfig(BaseModel):
 
     Critical network architecture parameters are required and must be
     explicitly defined in the YAML configuration file.
+
+    Defaults are set for smaller images (e.g., MedMNIST3D 64³).
+    For larger images (e.g., BraTS), use num_d=3, num_layers_d=3.
     """
 
     # Basic spatial parameters (can have defaults)
@@ -65,10 +68,10 @@ class DiscriminatorConfig(BaseModel):
     in_channels: int = Field(default=1, ge=1)
     out_channels: int = Field(default=1, ge=1)
 
-    # REQUIRED: Core discriminator architecture - no defaults
-    num_d: int = Field(ge=1, description="Number of discriminators (multi-scale)")
-    channels: int = Field(ge=1, description="Base channel count")
-    num_layers_d: int = Field(ge=1, description="Layers per discriminator")
+    # Core discriminator architecture with sensible defaults for small images
+    num_d: int = Field(default=2, ge=1, description="Number of discriminators (multi-scale)")
+    channels: int = Field(default=32, ge=1, description="Base channel count")
+    num_layers_d: int = Field(default=2, ge=1, description="Layers per discriminator")
 
     # Other parameters (can have defaults)
     kernel_size: int = Field(default=4, ge=1)
@@ -763,6 +766,7 @@ class MAISIVAEFullConfig(BaseModel):
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     data: Union[DataConfig, MedMNIST3DDataConfig]
     loss: MAISIVAELossConfig = Field(default_factory=MAISIVAELossConfig)
+    discriminator: DiscriminatorConfig = Field(default_factory=DiscriminatorConfig)
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     sliding_window: SlidingWindowConfig = Field(default_factory=SlidingWindowConfig)

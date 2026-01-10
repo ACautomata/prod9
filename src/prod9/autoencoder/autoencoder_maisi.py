@@ -11,7 +11,7 @@ Key differences from AutoencoderFSQ:
 - Returns (z_mu, z_sigma) for reparameterization sampling
 """
 
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Sequence, cast
 
 import torch
 import torch.nn as nn
@@ -112,10 +112,11 @@ class AutoencoderMAISI(AutoencoderKlMaisi):
         Returns:
             The weight tensor of the decoder's final convolution layer.
         """
-        decoder_blocks = nn.ModuleList(self.decoder.blocks)
-        last_block = decoder_blocks[-1]
-        last_conv = last_block.conv
-        return last_conv.conv.weight
+        # The decoder.blocks is an nn.ModuleList from MONAI's AutoencoderKlMaisi
+        decoder_blocks: nn.ModuleList = self.decoder.blocks  # type: ignore[assignment]
+        last_block: nn.Module = decoder_blocks[-1]  # type: ignore[assignment]
+        last_conv = cast(nn.Module, last_block.conv)
+        return cast(torch.Tensor, last_conv.conv.weight)  # type: ignore[attr-defined]
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """

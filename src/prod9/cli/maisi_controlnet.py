@@ -2,7 +2,7 @@
 
 import argparse
 import os
-from typing import Mapping
+from typing import Mapping, cast
 
 import torch
 
@@ -184,7 +184,7 @@ def generate_maisi_controlnet(
     load_image = LoadImage(image_only=True)
     ensure_channel = EnsureChannelFirst(channel_dim="no_channel")
 
-    condition = ensure_channel(load_image(condition_path))
+    condition = ensure_channel(cast(torch.Tensor, load_image(condition_path)))
     condition = condition.unsqueeze(0).to(device)
 
     # Create output directory

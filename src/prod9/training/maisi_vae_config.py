@@ -15,6 +15,7 @@ from prod9.training.config_schema import (
     MAISIAutoencoderModelConfig,
     TrainingConfig,
     MAISIVAELossConfig,
+    DiscriminatorConfig,
 )
 from prod9.training.maisi_vae import MAISIVAELightning
 
@@ -60,14 +61,17 @@ class MAISIVAELightningConfig:
         optimizer_config = training_config.optimizer
         loop_config = training_config.loop
 
+        # Get discriminator configuration
+        discriminator_config: DiscriminatorConfig = validated_config.discriminator
+
         # Create discriminator for VAEGAN training
         discriminator = MultiScalePatchDiscriminator(
-            num_d=3,
-            num_layers_d=3,
-            spatial_dims=3,
-            channels=64,
-            in_channels=1,
-            out_channels=1,
+            num_d=discriminator_config.num_d,
+            num_layers_d=discriminator_config.num_layers_d,
+            spatial_dims=discriminator_config.spatial_dims,
+            channels=discriminator_config.channels,
+            in_channels=discriminator_config.in_channels,
+            out_channels=discriminator_config.out_channels,
         )
 
         # Create Lightning module

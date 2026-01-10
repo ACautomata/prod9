@@ -4,7 +4,7 @@ ControlNet model wrapper for MAISI Stage 3.
 This module wraps MONAI's ControlNetMaisi for conditional generation.
 """
 
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence, cast
 
 import torch
 import torch.nn as nn
@@ -88,7 +88,9 @@ class ControlNetRF(nn.Module):
         """
         # Get the state dicts
         controlnet_state_dict = self.model.state_dict()
-        diffusion_state_dict = diffusion_model.model.state_dict()
+        # diffusion_model is expected to have a .model attribute (DiffusionModelRF)
+        diffusion_model_with_model = cast(Any, diffusion_model)
+        diffusion_state_dict = diffusion_model_with_model.model.state_dict()
 
         # Copy matching keys (encoder and middle block)
         for key in diffusion_state_dict:
