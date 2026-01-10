@@ -72,12 +72,12 @@ class TestGradientNormLogging(unittest.TestCase):
         loss = y.sum()
         loss.backward()
 
-        # Filter for "layer" parameters
-        grad_norm = self.callback._compute_grad_norm(self.model, param_name_filter="layer")
+        # Filter for "layer" submodule
+        grad_norm = self.callback._compute_grad_norm(self.model, submodule_path="layer")
         self.assertGreater(grad_norm, 0.0)
 
-        # Filter for non-existent parameters
-        grad_norm_none = self.callback._compute_grad_norm(self.model, param_name_filter="nonexistent")
+        # Filter for non-existent submodule
+        grad_norm_none = self.callback._compute_grad_norm(self.model, submodule_path="nonexistent")
         self.assertEqual(grad_norm_none, 0.0)
 
     def test_on_after_backward_automatic_optimization(self):
@@ -96,6 +96,30 @@ class TestGradientNormLogging(unittest.TestCase):
 
         # Call the callback
         self.callback.on_after_backward(self.trainer, self.model)
+
+        # For automatic optimization, on_after_backward returns early
+        # Logging happens in on_before_optimizer_step instead
+        self.model.log.assert_not_called()
+
+    def test_on_before_optimizer_step_automatic_optimization(self):
+        """Test callback behavior with automatic optimization on before_optimizer_step."""
+        # Set up automatic optimization
+        self.model.automatic_optimization = True
+
+        # Mock the log method
+        self.model.log = MagicMock()
+
+        # Create loss and backward to generate gradients
+        x = torch.randn(2, 10)
+        y = self.model(x)
+        loss = y.sum()
+        loss.backward()
+
+        # Create mock optimizer
+        mock_optimizer = MagicMock()
+
+        # Call the callback (on_before_optimizer_step is where logging happens for auto opt)
+        self.callback.on_before_optimizer_step(self.trainer, self.model, mock_optimizer)
 
         # Verify log was called
         self.model.log.assert_called_once()
@@ -129,6 +153,9 @@ class TestGradientNormLogging(unittest.TestCase):
         # Set log_interval to 10
         callback = GradientNormLogging(log_interval=10)
 
+        # Set automatic optimization mode
+        self.model.automatic_optimization = True
+
         # Mock the log method
         self.model.log = MagicMock()
 
@@ -138,14 +165,17 @@ class TestGradientNormLogging(unittest.TestCase):
         loss = y.sum()
         loss.backward()
 
+        # Create mock optimizer
+        mock_optimizer = MagicMock()
+
         # Set global_step to 5 (not divisible by 10)
         self.trainer.global_step = 5
-        callback.on_after_backward(self.trainer, self.model)
+        callback.on_before_optimizer_step(self.trainer, self.model, mock_optimizer)
         self.model.log.assert_not_called()
 
         # Set global_step to 10 (divisible by 10)
         self.trainer.global_step = 10
-        callback.on_after_backward(self.trainer, self.model)
+        callback.on_before_optimizer_step(self.trainer, self.model, mock_optimizer)
         self.model.log.assert_called()
 
     def test_grad_norm_l2_formula(self):

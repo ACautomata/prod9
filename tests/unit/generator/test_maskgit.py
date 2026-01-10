@@ -366,28 +366,37 @@ class TestMaskGiTSampler:
 
     def test_sample_device_mismatch(self, sampler_log):
         """Test that sample raises error on device mismatch."""
+        # The sample method now uses cond.device instead of checking transformer/vae devices
+        # This test is no longer applicable - the method uses the device from cond tensor
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cuda')
+
+        # Mock with proper return values
+        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_transformer.return_value = torch.randn(1, 32, 8, 8, 1)
+
+        def mock_embed(tid):
+            B, K = tid.shape
+            return torch.randn(B, K, 4)
+
+        mock_vae.embed = mock_embed
 
         shape = (1, 4, 8, 8, 1)
-        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
+        cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning on CPU
         uncond = torch.zeros_like(cond)
 
-        with pytest.raises(Exception, match='!=' or 'cuda'):
-            sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
+        # Should not raise an exception - uses cond.device
+        result = sampler_log.sample(mock_transformer, mock_vae, shape, cond, uncond)
+        assert result.shape == (1, 4, 8, 8, 1)
 
     def test_sample_initial_state(self, sampler_log):
         """Test that sample starts with fully masked tensor."""
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
 
-        # Mock decode output (returns decoded image)
+        # Mock decode_stage_2_outputs output (returns decoded image)
         mock_output = torch.randn(1, 4, 8, 8, 1)
-        mock_vae.decode.return_value = mock_output
+        mock_vae.decode_stage_2_outputs.return_value = mock_output
 
         # Mock transformer - returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 1), seq_len = 64
@@ -454,8 +463,6 @@ class TestMaskGiTSampler:
         """Test sample with conditional input."""
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 1), seq_len = 64
@@ -468,7 +475,7 @@ class TestMaskGiTSampler:
             return torch.randn(B, K, 4)
 
         mock_vae.embed = mock_embed
-        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         cond = torch.randn(1, 4, 8, 8, 1)
@@ -651,8 +658,6 @@ class TestEdgeCases:
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 1), seq_len = 64
@@ -660,7 +665,7 @@ class TestEdgeCases:
         h, w, d = 8, 8, 1
         mock_transformer.return_value = torch.randn(1, vocab_size, h, w, d)
         mock_vae.embed.return_value = torch.randn(1, 64, 4)
-        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
@@ -763,8 +768,6 @@ class TestEdgeCases:
 
             mock_transformer = Mock()
             mock_vae = Mock()
-            mock_transformer.device = torch.device('cpu')
-            mock_vae.device = torch.device('cpu')
 
             # Transformer returns spatial logits [B, vocab_size, H, W, D]
             # For spatial shape (8, 8, 1), seq_len = 64
@@ -777,7 +780,7 @@ class TestEdgeCases:
                 return torch.randn(B, K, 4)
 
             mock_vae.embed = mock_embed
-            mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
+            mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
 
             shape = (1, 4, 8, 8, 1)
             cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning
@@ -794,13 +797,11 @@ class TestUnconditionalGeneration:
         """Test that step works with zero conditioning tensor."""
         sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
 
-        # Create mock transformer
-        mock_transformer = Mock()
+        # Create mock transformer with side_effect
         batch_size, seq_len, vocab_size = 2, 16, 32
         embed_dim = 4
 
         # Create different logits for conditional vs unconditional calls
-        # This allows us to verify both calls happen
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (4, 2, 2), seq_len = 16
         h, w, d = 4, 2, 2
@@ -818,8 +819,7 @@ class TestUnconditionalGeneration:
             else:
                 return logits_cond
 
-        mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer = Mock(side_effect=mock_transformer_call)
 
         # Create mock VAE
         mock_vae = Mock()
@@ -829,7 +829,6 @@ class TestUnconditionalGeneration:
             return torch.randn(B, K, embed_dim)
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
 
         # Prepare inputs with zero conditioning (unconditional)
         h, w, d = 4, 2, 2  # Spatial dimensions from cond shape below
@@ -909,6 +908,7 @@ class TestUnconditionalGeneration:
 
         mock_vae.embed = mock_embed
         mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning for unconditional generation
@@ -1072,8 +1072,6 @@ class TestNoGradDecorator:
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 1), seq_len = 64
@@ -1086,7 +1084,7 @@ class TestNoGradDecorator:
             return torch.randn(B, K, 4)
 
         mock_vae.embed = mock_embed
-        mock_vae.decode.return_value = torch.randn(1, 4, 8, 8, 1)
+        mock_vae.decode_stage_2_outputs.return_value = torch.randn(1, 4, 8, 8, 1)
 
         shape = (1, 4, 8, 8, 1)
         cond = torch.zeros(1, 4, 8, 8, 1)  # Zero conditioning

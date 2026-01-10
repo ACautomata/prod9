@@ -58,8 +58,6 @@ class TestVAEGANLoss(unittest.TestCase):
         loss_dict = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=100
         )
@@ -97,8 +95,6 @@ class TestVAEGANLoss(unittest.TestCase):
                 loss_dict = self.vaegan_loss(
                     real_images=real_images,
                     fake_images=fake_images,
-                    encoder_output=encoder_output,
-                    quantized_output=quantized_output,
                     discriminator_output=discriminator_output,
                     global_step=100
                 )
@@ -136,8 +132,6 @@ class TestVAEGANLoss(unittest.TestCase):
         loss_dict = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=100
         )
@@ -159,25 +153,11 @@ class TestVAEGANLoss(unittest.TestCase):
             device=self.device,
             requires_grad=True
         )
-        encoder_output = torch.randn(
-            self.batch_size, 4,
-            self.spatial_size // 2, self.spatial_size // 2, self.spatial_size // 2,
-            device=self.device,
-            requires_grad=True
-        )
-        # quantized_output is detached in commitment loss, so no grad needed
-        quantized_output = torch.randn(
-            self.batch_size, 4,
-            self.spatial_size // 2, self.spatial_size // 2, self.spatial_size // 2,
-            device=self.device
-        )
         discriminator_output = [torch.randn(self.batch_size, 1, device=self.device)]
 
         loss_dict = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=100
         )
@@ -188,11 +168,7 @@ class TestVAEGANLoss(unittest.TestCase):
 
         # Check gradients exist for inputs that require grad
         # fake_images: used in recon and perceptual losses
-        # encoder_output: NOT used in FSQ (commitment loss is disabled for FSQ)
-        # quantized_output: detached in commitment loss, so no gradient
         self.assertIsNotNone(fake_images.grad)
-        # Note: encoder_output.grad is None for FSQ since commitment loss is disabled
-        # (FSQ uses straight-through estimator instead)
 
     def test_vaegan_loss_perfect_reconstruction(self):
         """Value test: loss should be minimal for perfect reconstruction."""
@@ -204,26 +180,16 @@ class TestVAEGANLoss(unittest.TestCase):
         )
         fake_images = real_images.clone()
 
-        # Matching encoder and quantized outputs (minimizes commitment)
-        encoder_output = torch.randn(
-            self.batch_size, 4,
-            self.spatial_size // 2, self.spatial_size // 2, self.spatial_size // 2,
-            device=self.device
-        )
-        quantized_output = encoder_output.clone()
-
         discriminator_output = [torch.randn(self.batch_size, 1, device=self.device)]
 
         loss_dict = self.vaegan_loss(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=100
         )
 
-        # Reconstruction and commitment losses should be near zero
+        # Reconstruction loss should be near zero
         self.assertAlmostEqual(loss_dict['recon'].item(), 0.0, places=5)
         self.assertAlmostEqual(loss_dict['commitment'].item(), 0.0, places=5)
 
@@ -234,15 +200,11 @@ class TestVAEGANLoss(unittest.TestCase):
 
         real_images_cpu = torch.randn(2, 1, 8, 8, 8)
         fake_images_cpu = torch.randn(2, 1, 8, 8, 8)
-        encoder_output_cpu = torch.randn(2, 4, 4, 4, 4)
-        quantized_output_cpu = torch.randn(2, 4, 4, 4, 4)
         discriminator_output_cpu = [torch.randn(2, 1)]
 
         loss_dict_cpu = loss_cpu(
             real_images=real_images_cpu,
             fake_images=fake_images_cpu,
-            encoder_output=encoder_output_cpu,
-            quantized_output=quantized_output_cpu,
             discriminator_output=discriminator_output_cpu,
             global_step=100
         )
@@ -252,15 +214,11 @@ class TestVAEGANLoss(unittest.TestCase):
         if torch.backends.mps.is_available():
             real_images_mps = torch.randn(2, 1, 8, 8, 8, device=self.device)
             fake_images_mps = torch.randn(2, 1, 8, 8, 8, device=self.device)
-            encoder_output_mps = torch.randn(2, 4, 4, 4, 4, device=self.device)
-            quantized_output_mps = torch.randn(2, 4, 4, 4, 4, device=self.device)
             discriminator_output_mps = [torch.randn(2, 1, device=self.device)]
 
             loss_dict_mps = self.vaegan_loss(
                 real_images=real_images_mps,
                 fake_images=fake_images_mps,
-                encoder_output=encoder_output_mps,
-                quantized_output=quantized_output_mps,
                 discriminator_output=discriminator_output_mps,
                 global_step=100
             )
@@ -505,8 +463,6 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         loss_dict = self.vaegan_loss.forward(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=1000,
             last_layer=last_layer,
@@ -531,16 +487,12 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         batch_size = 2
         real_images = torch.randn(batch_size, 1, 16, 16, 16).to(self.device)
         fake_images = torch.randn(batch_size, 1, 16, 16, 16).to(self.device)
-        encoder_output = torch.randn(batch_size, 32, 8, 8, 8).to(self.device)
-        quantized_output = torch.randn(batch_size, 32, 8, 8, 8).to(self.device)
         discriminator_output = torch.randn(batch_size, 1, 4, 4, 4).to(self.device)
 
         # Compute loss WITHOUT last_layer (uses fixed weight)
         loss_dict = self.vaegan_loss.forward(
             real_images=real_images,
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=quantized_output,
             discriminator_output=discriminator_output,
             global_step=1000,
             last_layer=None,  # No adaptive weight

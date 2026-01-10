@@ -1118,17 +1118,9 @@ class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
 
         # Create mock autoencoder
         mock_autoencoder = MagicMock()
-        mock_autoencoder.encode.return_value = (torch.randn(1, 4, 8, 8, 8), None)
+        mock_autoencoder.encode.return_value = (torch.randn(1, 4, 8, 8, 8), torch.randn(1, 4, 8, 8, 8))
         mock_autoencoder.quantize.return_value = torch.randint(0, 512, (8 * 8 * 8,))
-
-        # Create transforms that return tensors
-        mock_transforms = MagicMock()
-        mock_transforms.return_value = {
-            "T1": torch.randn(1, 1, 64, 64, 64),
-            "T1ce": torch.randn(1, 1, 64, 64, 64),
-            "T2": torch.randn(1, 1, 64, 64, 64),
-            "FLAIR": torch.randn(1, 1, 64, 64, 64),
-        }
+        mock_autoencoder.quantize_stage_2_inputs.return_value = torch.randint(0, 512, (1, 8 * 8 * 8))
 
         dm = BraTSDataModuleStage2(
             data_dir="/fake/data",
@@ -1138,9 +1130,22 @@ class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
         )
         dm._autoencoder = mock_autoencoder
 
-        # Patch _get_brats_files and transforms
+        # Patch _get_brats_files and _CachedAllModalitiesDataset to bypass file loading
         with patch('prod9.training.brats_data._get_brats_files', return_value=patient_files):
-            with patch.object(dm, '_get_transforms', return_value=mock_transforms):
+            # Mock the cached dataset to return pre-transformed data directly
+            mock_data = {
+                "T1": torch.randn(1, 1, 64, 64, 64),
+                "T1ce": torch.randn(1, 1, 64, 64, 64),
+                "T2": torch.randn(1, 1, 64, 64, 64),
+                "FLAIR": torch.randn(1, 1, 64, 64, 64),
+            }
+            with patch('prod9.training.brats_data._CachedAllModalitiesDataset') as mock_dataset_class:
+                # Create a mock dataset that acts like a list
+                mock_dataset = MagicMock()
+                mock_dataset.__len__.return_value = 8  # 80% of 10 patients
+                mock_dataset.__getitem__.side_effect = lambda i: mock_data
+                mock_dataset_class.return_value = mock_dataset
+
                 result = dm._pre_encode_data(split="train")
 
         # Verify torch.save was called to cache the data
@@ -1256,7 +1261,7 @@ class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
         # Use 10 patients so train split has 8 patients
         mock_listdir.return_value = [f"patient_{i:03d}" for i in range(10)]
 
-        # Create mock autoencoder that fails on second patient (after 4 successful encode calls for first patient)
+        # Create mock autoencoder that fails on second patient
         mock_autoencoder = MagicMock()
         call_count = [0]
 
@@ -1265,24 +1270,17 @@ class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
             # First patient has 4 modalities (4 encode calls), fail on the 5th call (second patient)
             if call_count[0] > 4:
                 raise RuntimeError("Encoding failed")
-            return (torch.randn(1, 4, 8, 8, 8), None)
+            return (torch.randn(1, 4, 8, 8, 8), torch.randn(1, 4, 8, 8, 8))
 
         mock_autoencoder.encode.side_effect = side_effect_encode
         mock_autoencoder.quantize.return_value = torch.randint(0, 512, (512,))
+        mock_autoencoder.quantize_stage_2_inputs.return_value = torch.randint(0, 512, (1, 512))
 
         patient_files = {
             "T1": "/fake/patient_t1.nii.gz",
             "T1ce": "/fake/patient_t1ce.nii.gz",
             "T2": "/fake/patient_t2.nii.gz",
             "FLAIR": "/fake/patient_flair.nii.gz",
-        }
-
-        mock_transforms = MagicMock()
-        mock_transforms.return_value = {
-            "T1": torch.randn(1, 1, 64, 64, 64),
-            "T1ce": torch.randn(1, 1, 64, 64, 64),
-            "T2": torch.randn(1, 1, 64, 64, 64),
-            "FLAIR": torch.randn(1, 1, 64, 64, 64),
         }
 
         dm = BraTSDataModuleStage2(
@@ -1293,8 +1291,22 @@ class TestBraTSDataModuleStage2PreEncoding(unittest.TestCase):
         )
         dm._autoencoder = mock_autoencoder
 
+        # Mock data returned by dataset
+        mock_data = {
+            "T1": torch.randn(1, 1, 64, 64, 64),
+            "T1ce": torch.randn(1, 1, 64, 64, 64),
+            "T2": torch.randn(1, 1, 64, 64, 64),
+            "FLAIR": torch.randn(1, 1, 64, 64, 64),
+        }
+
         with patch('prod9.training.brats_data._get_brats_files', return_value=patient_files):
-            with patch.object(dm, '_get_transforms', return_value=mock_transforms):
+            with patch('prod9.training.brats_data._CachedAllModalitiesDataset') as mock_dataset_class:
+                # Create a mock dataset that acts like a list
+                mock_dataset = MagicMock()
+                mock_dataset.__len__.return_value = 8  # 80% of 10 patients
+                mock_dataset.__getitem__.side_effect = lambda i: mock_data
+                mock_dataset_class.return_value = mock_dataset
+
                 # Should not raise, should handle error gracefully
                 result = dm._pre_encode_data(split="train")
 

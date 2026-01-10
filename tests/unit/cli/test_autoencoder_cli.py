@@ -41,6 +41,8 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_resolve.return_value = "test.yaml"
         mock_load_vcfg.return_value = config
         mock_trainer_instance = MagicMock()
+        # Mock best_model_path to return empty string (no checkpoint to load)
+        mock_trainer_instance.checkpoint_callback.best_model_path = ""
         mock_trainer.return_value = mock_trainer_instance
 
         mock_model_instance = MagicMock()
@@ -77,6 +79,8 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_resolve.return_value = "test.yaml"
         mock_load_vcfg.return_value = config
         mock_trainer_instance = MagicMock()
+        # Mock best_model_path to return empty string (no checkpoint to load)
+        mock_trainer_instance.checkpoint_callback.best_model_path = ""
         mock_trainer.return_value = mock_trainer_instance
         mock_model_instance = MagicMock()
         mock_model_cfg.return_value = mock_model_instance

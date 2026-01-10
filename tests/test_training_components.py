@@ -27,6 +27,10 @@ class TestVAEGANLoss:
         with patch('prod9.training.losses.PerceptualLoss') as mock_perc_loss:
             mock_instance = Mock()
             mock_instance.return_value = torch.tensor(0.5)
+            # Mock parameters() to return empty iterator (for gradient norm computation)
+            mock_instance.parameters = Mock(return_value=iter([]))
+            # Mock .to() to return self (device placement)
+            mock_instance.to = Mock(return_value=mock_instance)
             mock_perc_loss.return_value = mock_instance
             yield VAEGANLoss()
 
@@ -47,8 +51,6 @@ class TestVAEGANLoss:
         losses = loss_fn(
             real_images=sample_batch["real_images"],
             fake_images=sample_batch["fake_images"],
-            encoder_output=sample_batch["encoder_output"],
-            quantized_output=sample_batch["quantized_output"],
             discriminator_output=sample_batch["discriminator_output"],
         )
 
@@ -63,8 +65,6 @@ class TestVAEGANLoss:
         losses = loss_fn(
             real_images=sample_batch["real_images"],
             fake_images=sample_batch["fake_images"],
-            encoder_output=sample_batch["encoder_output"],
-            quantized_output=sample_batch["quantized_output"],
             discriminator_output=sample_batch["discriminator_output"],
         )
 
@@ -97,8 +97,6 @@ class TestVAEGANLoss:
         losses = loss_fn(
             real_images=sample_batch["real_images"],
             fake_images=sample_batch["fake_images"],
-            encoder_output=sample_batch["encoder_output"],
-            quantized_output=sample_batch["quantized_output"],
             discriminator_output=multiscale_disc_output,
         )
 
@@ -160,13 +158,10 @@ class TestVAEGANLoss:
     def test_vaegan_loss_gradients(self, loss_fn, sample_batch):
         """Test that gradients flow properly through the loss."""
         fake_images = sample_batch["fake_images"].requires_grad_(True)
-        encoder_output = sample_batch["encoder_output"].requires_grad_(True)
 
         losses = loss_fn(
             real_images=sample_batch["real_images"],
             fake_images=fake_images,
-            encoder_output=encoder_output,
-            quantized_output=sample_batch["quantized_output"],
             discriminator_output=sample_batch["discriminator_output"],
         )
 
@@ -174,7 +169,6 @@ class TestVAEGANLoss:
         total_loss.backward()
 
         assert fake_images.grad is not None, "Gradients should flow to fake_images"
-        assert encoder_output.grad is not None, "Gradients should flow to encoder_output"
         assert not torch.isnan(fake_images.grad).any(), "Gradients should not be NaN"
 
 

@@ -421,8 +421,13 @@ class TestValidationStep(unittest.TestCase):
         self.assertIn("Autoencoder not loaded", str(ctx.exception))
 
     @patch('prod9.generator.maskgit.MaskGiTSampler')
-    def test_validation_step_logs_metrics(self, mock_sampler_class):
-        """Test validation_step logs PSNR, SSIM, LPIPS."""
+    @patch('prod9.training.metrics.FIDMetric3D.update')
+    @patch('prod9.training.metrics.FIDMetric3D.compute')
+    def test_validation_step_logs_metrics(self, mock_fid_compute, mock_fid_update, mock_sampler_class):
+        """Test validation_step calls metric update and returns modality_metrics key."""
+        # Mock FID to avoid issues with autoencoder decode
+        mock_fid_compute.return_value = torch.tensor(1.0)
+
         # Setup model with autoencoder
         model = TransformerLightning(
             autoencoder_path=self.checkpoint_path,
@@ -430,12 +435,9 @@ class TestValidationStep(unittest.TestCase):
         )
         model.setup(stage="fit")
 
-        # Mock sampler - returns z in 5D spatial format [B, C, H, W, D]
+        # Mock sampler - sample() should return a generated image
         mock_sampler = MagicMock()
-        mock_sampler.step.return_value = (
-            torch.randn(1, 4, 8, 8, 8),  # z in 5D spatial format [B, C, H, W, D]
-            torch.arange(8*8*8)[None, :].repeat(1, 1),  # last_indices
-        )
+        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)  # [B, C, H, W, D] generated image
         mock_sampler_class.return_value = mock_sampler
 
         batch = {
@@ -447,15 +449,14 @@ class TestValidationStep(unittest.TestCase):
 
         result = model.validation_step(batch, 0)
 
-        # validation_step should return a dict with metrics
+        # validation_step should return a dict with modality_metrics key
+        # (actual metrics like FID, IS are computed at epoch end)
         from typing import cast
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
         self.assertIn("modality_metrics", result_dict)
-        modality_metrics = cast(dict, result_dict["modality_metrics"])
-        self.assertIn("psnr", modality_metrics)
-        self.assertIn("ssim", modality_metrics)
-        self.assertIn("lpips", modality_metrics)
+        # Verify FID and IS metrics were updated (computed at epoch end)
+        mock_fid_update.assert_called_once()
 
     @patch('prod9.generator.maskgit.MaskGiTSampler')
     @patch('prod9.training.transformer.TransformerLightning.logger', new=None)
@@ -467,12 +468,9 @@ class TestValidationStep(unittest.TestCase):
         )
         model.setup(stage="fit")
 
-        # Mock sampler - returns z in 5D spatial format [B, C, H, W, D]
+        # Mock sampler - sample() should return a generated image
         mock_sampler = MagicMock()
-        mock_sampler.step.return_value = (
-            torch.randn(1, 4, 8, 8, 8),  # z in 5D spatial format [B, C, H, W, D]
-            torch.arange(8*8*8)[None, :].repeat(1, 1),
-        )
+        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)  # [B, C, H, W, D] generated image
         mock_sampler_class.return_value = mock_sampler
 
         batch = {
