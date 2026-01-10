@@ -62,6 +62,10 @@ class MAISIVAELightning(pl.LightningModule):
         adv_criterion: Adversarial loss criterion (default: "least_squares")
         sample_every_n_steps: Log samples every N steps (default: 100)
         discriminator_iter_start: Step to start discriminator training (default: 0)
+        warmup_enabled: Enable learning rate warmup (default: True)
+        warmup_steps: Explicit warmup steps, or None to auto-calculate (default: None)
+        warmup_ratio: Ratio of total steps for warmup (default: 0.02)
+        warmup_eta_min: Minimum LR ratio after warmup (default: 0.0)
     """
 
     def __init__(
@@ -80,6 +84,11 @@ class MAISIVAELightning(pl.LightningModule):
         adv_criterion: str = "least_squares",
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
+        # Training stability parameters
+        warmup_enabled: bool = True,
+        warmup_steps: Optional[int] = None,
+        warmup_ratio: float = 0.02,
+        warmup_eta_min: float = 0.0,
     ):
         super().__init__()
 
@@ -114,6 +123,12 @@ class MAISIVAELightning(pl.LightningModule):
 
         # Logging config
         self.sample_every_n_steps = sample_every_n_steps
+
+        # Training stability config
+        self.warmup_enabled = warmup_enabled
+        self.warmup_steps = warmup_steps
+        self.warmup_ratio = warmup_ratio
+        self.warmup_eta_min = warmup_eta_min
 
         # Marker for gradient norm logging callback
         self._current_backward_branch: Optional[str] = None
@@ -292,6 +307,18 @@ class MAISIVAELightning(pl.LightningModule):
         # Step the optimizer
         optimizer.step()
 
+        # Step the corresponding scheduler if warmup is enabled
+        # In manual optimization, Lightning doesn't auto-step schedulers
+        if self.warmup_enabled:
+            schedulers = self.lr_schedulers()
+            # lr_schedulers() can return a single scheduler, a list, or a dict
+            # We expect a list when warmup is enabled (one per optimizer)
+            if isinstance(schedulers, list) and schedulers and optimizer_idx < len(schedulers):
+                scheduler = schedulers[optimizer_idx]
+                # Warmup scheduler is LambdaLR (from create_warmup_scheduler)
+                # which doesn't require metrics parameter
+                cast(torch.optim.lr_scheduler.LambdaLR, scheduler).step()
+
         # Manually increment global_step since we're using manual optimization
         # Only increment once per training step (after generator optimizer)
         if optimizer_idx == 0:
@@ -340,7 +367,7 @@ class MAISIVAELightning(pl.LightningModule):
         return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
 
     def configure_optimizers(self):
-        """Configure separate optimizers for generator and discriminator."""
+        """Configure separate optimizers for generator and discriminator, with optional warmup."""
         lr_g = float(getattr(self.hparams, "lr_g", 1e-4))
         lr_d = float(getattr(self.hparams, "lr_d", 4e-4))
         b1 = float(getattr(self.hparams, "b1", 0.5))
@@ -356,6 +383,41 @@ class MAISIVAELightning(pl.LightningModule):
             lr=lr_d,
             betas=(b1, b2),
         )
+
+        # Configure schedulers with warmup if enabled
+        if self.warmup_enabled:
+            from prod9.training.schedulers import create_warmup_scheduler
+
+            # Estimate total training steps
+            total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
+            if total_steps is None:
+                # Fallback estimate: 100 epochs * estimated batches per epoch
+                num_epochs = getattr(self.trainer, "max_epochs", 100)
+                # We don't know the dataset size yet, use a reasonable default
+                total_steps = num_epochs * 1000  # Will be conservative
+
+            # Calculate warmup steps
+            warmup_steps = self.warmup_steps
+            if warmup_steps is None:
+                warmup_steps = max(100, int(self.warmup_ratio * total_steps))
+
+            # Create schedulers
+            scheduler_g = create_warmup_scheduler(
+                opt_g,
+                warmup_steps=warmup_steps,
+                total_steps=total_steps,
+                warmup_ratio=self.warmup_ratio,
+                eta_min=self.warmup_eta_min,
+            )
+            scheduler_d = create_warmup_scheduler(
+                opt_d,
+                warmup_steps=warmup_steps,
+                total_steps=total_steps,
+                warmup_ratio=self.warmup_ratio,
+                eta_min=self.warmup_eta_min,
+            )
+
+            return [opt_g, opt_d], [scheduler_g, scheduler_d]
 
         return [opt_g, opt_d]
 

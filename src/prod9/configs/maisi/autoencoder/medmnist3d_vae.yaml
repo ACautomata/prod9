@@ -26,14 +26,21 @@ model:
 # =============================================================================
 training:
   optimizer:
-    lr_g: 1e-4
-    lr_d: 2e-4
+    lr_g: 5e-5
+    lr_d: 1e-4
     b1: 0.5
     b2: 0.9
     weight_decay: 1e-5
 
   loop:
     sample_every_n_steps: 100
+
+  stability:
+    grad_norm_logging: true
+    warmup_enabled: true
+    warmup_steps: null
+    warmup_ratio: 0.02
+    warmup_eta_min: 0.0
 
 # =============================================================================
 # Data Configuration (MedMNIST 3D)
@@ -115,7 +122,7 @@ trainer:
   hardware:
     accelerator: "auto"
     devices: "auto"
-    precision: "16-mixed"
+    precision: "bf16-mixed"
 
   logging:
     log_every_n_steps: 10

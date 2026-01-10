@@ -61,6 +61,9 @@ class MAISIVAELightningConfig:
         optimizer_config = training_config.optimizer
         loop_config = training_config.loop
 
+        # Get stability config for warmup
+        stability_config = training_config.stability
+
         # Get discriminator configuration
         discriminator_config: DiscriminatorConfig = validated_config.discriminator
 
@@ -88,6 +91,11 @@ class MAISIVAELightningConfig:
             adv_weight=loss_config.adv_weight,
             perceptual_network_type=loss_config.lpips_network,
             sample_every_n_steps=loop_config.sample_every_n_steps,
+            # Warmup settings from stability config
+            warmup_enabled=stability_config.warmup_enabled,
+            warmup_steps=stability_config.warmup_steps,
+            warmup_ratio=stability_config.warmup_ratio,
+            warmup_eta_min=stability_config.warmup_eta_min,
         )
 
         return lightning_module

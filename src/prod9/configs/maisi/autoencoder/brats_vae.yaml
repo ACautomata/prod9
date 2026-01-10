@@ -35,6 +35,13 @@ training:
   loop:
     sample_every_n_steps: 100
 
+  stability:
+    grad_norm_logging: true
+    warmup_enabled: true
+    warmup_steps: null
+    warmup_ratio: 0.02
+    warmup_eta_min: 0.0
+
 # =============================================================================
 # Data Configuration (BraTS)
 # =============================================================================

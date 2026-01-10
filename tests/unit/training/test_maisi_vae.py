@@ -239,18 +239,30 @@ class TestMAISIVAELightningInitialization(unittest.TestCase):
             adv_weight=0.1,
         )
 
+        # Mock the trainer for configure_optimizers (needed for warmup)
+        class MockTrainer:
+            max_epochs = 100
+            estimated_stepping_batches = 10000
+
+        lightning_module.trainer = MockTrainer()
+        lightning_module.on_train_start()  # This sets up hparams
+
         optimizers = lightning_module.configure_optimizers()
 
-        self.assertIsInstance(optimizers, list)
-        self.assertEqual(len(optimizers), 2)
+        # With warmup enabled by default, configure_optimizers returns a tuple
+        self.assertIsInstance(optimizers, tuple)
+        optimizers_list, schedulers = optimizers
+        self.assertEqual(len(optimizers_list), 2)
+        self.assertEqual(len(schedulers), 2)
 
-        opt_g, opt_d = cast(list[torch.optim.Adam], optimizers)
+        opt_g, opt_d = cast(list[torch.optim.Adam], optimizers_list)
         self.assertIsInstance(opt_g, torch.optim.Adam)
         self.assertIsInstance(opt_d, torch.optim.Adam)
 
         # Check learning rates
-        self.assertEqual(opt_g.param_groups[0]['lr'], 1e-4)
-        self.assertEqual(opt_d.param_groups[0]['lr'], 4e-4)
+        # With warmup enabled, LR starts at 0.0 at step 0
+        self.assertEqual(opt_g.param_groups[0]['lr'], 0.0)
+        self.assertEqual(opt_d.param_groups[0]['lr'], 0.0)
 
     def test_maisi_vae_lightning_has_loss_components(self):
         """Test MAISI VAELightning has all required loss components."""
@@ -387,6 +399,182 @@ class TestMAISIVAELightningExport(unittest.TestCase):
         self.assertIsInstance(args[0], dict)
         self.assertIn("state_dict", args[0])
         self.assertIn("config", args[0])
+
+
+class TestMAISIVAELightningWarmup(unittest.TestCase):
+    """Test suite for MAISI VAE warmup scheduler functionality."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('cpu')
+
+    def test_warmup_scheduler_created_when_enabled(self):
+        """Test that warmup schedulers are created when warmup_enabled=True."""
+        vae = AutoencoderMAISI(
+            spatial_dims=3,
+            latent_channels=4,
+            in_channels=1,
+            out_channels=1,
+            num_channels=(32, 64, 64, 64),
+            attention_levels=(False, False, True, True),
+            num_res_blocks=(1, 1, 1, 1),
+            norm_num_groups=32,
+            num_splits=4,
+        )
+
+        discriminator = MultiScalePatchDiscriminator(
+            num_d=1,
+            num_layers_d=2,
+            spatial_dims=3,
+            channels=32,
+            in_channels=1,
+            out_channels=1,
+            minimum_size_im=32,
+        )
+
+        lightning_module = MAISIVAELightning(
+            vae=vae,
+            discriminator=discriminator,
+            warmup_enabled=True,
+            warmup_steps=100,
+            warmup_ratio=0.02,
+            warmup_eta_min=0.0,
+        )
+
+        # Mock the trainer for configure_optimizers
+        class MockTrainer:
+            max_epochs = 100
+            estimated_stepping_batches = 10000
+
+        lightning_module.trainer = MockTrainer()
+        lightning_module.on_train_start()  # This sets up hparams
+
+        result = lightning_module.configure_optimizers()
+
+        # Should return optimizers and schedulers
+        self.assertIsInstance(result, tuple)
+        optimizers, schedulers = result
+        self.assertEqual(len(optimizers), 2)
+        self.assertEqual(len(schedulers), 2)
+
+        # Verify schedulers are LambdaLR (warmup schedulers)
+        from torch.optim.lr_scheduler import LambdaLR
+        self.assertIsInstance(schedulers[0], LambdaLR)
+        self.assertIsInstance(schedulers[1], LambdaLR)
+
+    def test_no_scheduler_when_warmup_disabled(self):
+        """Test that no schedulers are created when warmup_enabled=False."""
+        vae = AutoencoderMAISI(
+            spatial_dims=3,
+            latent_channels=4,
+            in_channels=1,
+            out_channels=1,
+            num_channels=(32, 64, 64, 64),
+            attention_levels=(False, False, True, True),
+            num_res_blocks=(1, 1, 1, 1),
+            norm_num_groups=32,
+            num_splits=4,
+        )
+
+        discriminator = MultiScalePatchDiscriminator(
+            num_d=1,
+            num_layers_d=2,
+            spatial_dims=3,
+            channels=32,
+            in_channels=1,
+            out_channels=1,
+            minimum_size_im=32,
+        )
+
+        lightning_module = MAISIVAELightning(
+            vae=vae,
+            discriminator=discriminator,
+            warmup_enabled=False,
+        )
+
+        result = lightning_module.configure_optimizers()
+
+        # Should return only optimizers (list, not tuple)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+
+        opt_g, opt_d = cast(list[torch.optim.Adam], result)
+        self.assertIsInstance(opt_g, torch.optim.Adam)
+        self.assertIsInstance(opt_d, torch.optim.Adam)
+
+    def test_warmup_config_stored_correctly(self):
+        """Test that warmup config is stored correctly in Lightning module."""
+        vae = AutoencoderMAISI(
+            spatial_dims=3,
+            latent_channels=4,
+            in_channels=1,
+            out_channels=1,
+            num_channels=(32, 64, 64, 64),
+            attention_levels=(False, False, True, True),
+            num_res_blocks=(1, 1, 1, 1),
+            norm_num_groups=32,
+            num_splits=4,
+        )
+
+        discriminator = MultiScalePatchDiscriminator(
+            num_d=1,
+            num_layers_d=2,
+            spatial_dims=3,
+            channels=32,
+            in_channels=1,
+            out_channels=1,
+            minimum_size_im=32,
+        )
+
+        lightning_module = MAISIVAELightning(
+            vae=vae,
+            discriminator=discriminator,
+            warmup_enabled=True,
+            warmup_steps=500,
+            warmup_ratio=0.05,
+            warmup_eta_min=0.1,
+        )
+
+        self.assertTrue(lightning_module.warmup_enabled)
+        self.assertEqual(lightning_module.warmup_steps, 500)
+        self.assertEqual(lightning_module.warmup_ratio, 0.05)
+        self.assertEqual(lightning_module.warmup_eta_min, 0.1)
+
+    def test_warmup_defaults_match_fsq(self):
+        """Test that warmup defaults match FSQ implementation."""
+        vae = AutoencoderMAISI(
+            spatial_dims=3,
+            latent_channels=4,
+            in_channels=1,
+            out_channels=1,
+            num_channels=(32, 64, 64, 64),
+            attention_levels=(False, False, True, True),
+            num_res_blocks=(1, 1, 1, 1),
+            norm_num_groups=32,
+            num_splits=4,
+        )
+
+        discriminator = MultiScalePatchDiscriminator(
+            num_d=1,
+            num_layers_d=2,
+            spatial_dims=3,
+            channels=32,
+            in_channels=1,
+            out_channels=1,
+            minimum_size_im=32,
+        )
+
+        # Create with default warmup parameters
+        lightning_module = MAISIVAELightning(
+            vae=vae,
+            discriminator=discriminator,
+        )
+
+        # Verify defaults match FSQ
+        self.assertTrue(lightning_module.warmup_enabled)
+        self.assertIsNone(lightning_module.warmup_steps)
+        self.assertEqual(lightning_module.warmup_ratio, 0.02)
+        self.assertEqual(lightning_module.warmup_eta_min, 0.0)
 
 
 if __name__ == '__main__':
