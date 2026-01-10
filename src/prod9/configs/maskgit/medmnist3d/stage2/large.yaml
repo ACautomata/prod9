@@ -21,7 +21,7 @@ model:
     cond_dim: 256  # Reduced from 512 for smaller dataset
     num_heads: 4  # Reduced from 8 for smaller dataset
     num_blocks: 6  # Reduced from 12 for smaller dataset
-    codebook_size: 1080  # FSQ codebook size (8*8*6*5 for levels=[8,8,6,5])
+    codebook_size: 15360  # FSQ codebook size (8*8*6*5 for levels=[8,8,6,5])
     mlp_ratio: 4.0
     dropout: 0.1
 

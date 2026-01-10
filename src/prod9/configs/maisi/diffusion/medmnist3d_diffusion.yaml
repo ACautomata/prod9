@@ -12,11 +12,11 @@ output_dir: "outputs/medmnist3d_maisi_stage2"
 model:
   diffusion:
     spatial_dims: 3
-    in_channels: 4
-    num_channels: [32, 64, 64, 64]
-    attention_levels: [False, False, True, True]
-    num_res_blocks: [1, 1, 1, 1]
-    num_head_channels: [0, 0, 32, 32]
+    in_channels: 16
+    num_channels: [64, 128, 128, 256]
+    attention_levels: [False, True, True, True]
+    num_res_blocks: [2, 2, 2, 2]
+    num_head_channels: [0, 0, 64, 64]
     norm_num_groups: 32
 
 # =============================================================================

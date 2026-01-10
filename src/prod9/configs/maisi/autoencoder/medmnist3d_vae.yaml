@@ -12,12 +12,12 @@ vae_export_path: "outputs/medmnist3d_maisi_vae.pt"
 model:
   autoencoder:
     spatial_dims: 3
-    latent_channels: 4
+    latent_channels: 16
     in_channels: 1
     out_channels: 1
-    num_channels: [32, 64, 64, 64]
-    attention_levels: [False, False, True, True]
-    num_res_blocks: [1, 1, 1, 1]
+    num_channels: [64, 128, 128, 256]
+    attention_levels: [False, True, True, True]
+    num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32
     num_splits: 2
 
