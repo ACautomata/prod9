@@ -17,11 +17,11 @@ model:
   transformer:
     latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
-    hidden_dim: 256  # Reduced from 512 for smaller dataset
-    cond_dim: 256  # Reduced from 512 for smaller dataset
-    num_heads: 4  # Reduced from 8 for smaller dataset
-    num_blocks: 6  # Reduced from 12 for smaller dataset
-    codebook_size: 512  # FSQ codebook size (8*8*8 for levels=[8,8,8])
+    hidden_dim: 512  # Reduced from 512 for smaller dataset
+    cond_dim: 512  # Reduced from 512 for smaller dataset
+    num_heads: 8  # Reduced from 8 for smaller dataset
+    num_blocks: 12  # Reduced from 12 for smaller dataset
+    codebook_size: 15360  # FSQ codebook size (8*8*8 for levels=[8,8,8])
     mlp_ratio: 4.0
     dropout: 0.1
 
@@ -39,7 +39,7 @@ training:
   optimizer:
     learning_rate: 1e-4
     beta1: 0.9
-    beta2: 0.999
+    beta2: 0.95
     weight_decay: 0.01
 
   # Learning rate scheduler
