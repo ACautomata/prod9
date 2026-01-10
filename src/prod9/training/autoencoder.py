@@ -336,6 +336,17 @@ class AutoencoderLightning(pl.LightningModule):
             optimizer: The optimizer to step.
             optimizer_idx: Index of the optimizer (0 for generator, 1 for discriminator).
         """
+        # Clip gradients manually (required for manual optimization)
+        # PyTorch Lightning doesn't support automatic gradient clipping with manual optimization
+        clip_val = self.trainer.gradient_clip_val
+        if clip_val is not None and clip_val > 0:
+            clip_alg = self.trainer.gradient_clip_algorithm
+            self.clip_gradients(
+                optimizer,
+                clip_val=clip_val,
+                gradient_clip_algorithm=clip_alg,
+            )
+
         # Step the optimizer
         optimizer.step()
 

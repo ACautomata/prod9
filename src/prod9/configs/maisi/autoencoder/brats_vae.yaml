@@ -27,7 +27,8 @@ model:
 training:
   optimizer:
     lr_g: 1e-4
-    b1: 0.9
+    lr_d: 4e-4
+    b1: 0.5
     b2: 0.999
     weight_decay: 1e-5
 
@@ -79,8 +80,8 @@ loss:
 # Discriminator Configuration
 # =============================================================================
 discriminator:
-  num_d: 3
-  num_layers_d: 2
+  num_d: 1
+  num_layers_d: 3
   channels: 64
 
 # =============================================================================
@@ -126,6 +127,11 @@ trainer:
     log_every_n_steps: 10
     val_check_interval: 1.0
     limit_val_batches: 5
+
+  # Gradient handling
+  gradient_clip_val: null
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
 
 # =============================================================================
 # Sliding Window Inference
