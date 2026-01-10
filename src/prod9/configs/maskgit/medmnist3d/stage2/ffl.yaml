@@ -6,8 +6,8 @@
 # =============================================================================
 
 # Paths (must match the output from stage1/ffl.yaml)
-autoencoder_path: ".output/medmnist3d_autoencoder_ffl.pt"
-output_dir: ".output/medmnist3d_stage2_ffl"
+autoencoder_path: "outputs/medmnist3d_autoencoder_ffl.pt"
+output_dir: "outputs/medmnist3d_stage2_ffl"
 
 # =============================================================================
 # Model Architecture
@@ -92,7 +92,7 @@ data:
   # Stage 2 specific
   cond_emb_dim: 128  # Condition embedding dimension
   unconditional_prob: 0.1  # 10% unconditional generation
-  cache_dir: ".output/medmnist3d_encoded_ffl"  # Pre-encoded data cache directory
+  cache_dir: "outputs/medmnist3d_encoded_ffl"  # Pre-encoded data cache directory
 
 # =============================================================================
 # Loss Configuration

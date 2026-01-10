@@ -5,8 +5,8 @@
 # =============================================================================
 
 # Output paths
-output_dir: ".output/medmnist3d_stage1_ffl"
-autoencoder_export_path: ".output/medmnist3d_autoencoder_ffl.pt"
+output_dir: "outputs/medmnist3d_stage1_ffl"
+autoencoder_export_path: "outputs/medmnist3d_autoencoder_ffl.pt"
 
 # =============================================================================
 # Model Architecture

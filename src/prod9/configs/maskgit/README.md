@@ -140,7 +140,7 @@ Each config file specifies its own output directory. Stage 2 configs reference t
 
 | Stage 1 Config | Autoencoder Export | Stage 2 Config |
 |----------------|-------------------|----------------|
-| `medmnist3d/stage1/base.yaml` | `.output/medmnist3d_autoencoder.pt` | `medmnist3d/stage2/base.yaml` |
-| `medmnist3d/stage1/large_fsq.yaml` | `.output/medmnist3d_autoencoder-large.pt` | - |
-| `medmnist3d/stage1/ffl.yaml` | `.output/medmnist3d_autoencoder_ffl.pt` | `medmnist3d/stage2/ffl.yaml` |
+| `medmnist3d/stage1/base.yaml` | `outputs/medmnist3d_autoencoder.pt` | `medmnist3d/stage2/base.yaml` |
+| `medmnist3d/stage1/large_fsq.yaml` | `outputs/medmnist3d_autoencoder-large.pt` | - |
+| `medmnist3d/stage1/ffl.yaml` | `outputs/medmnist3d_autoencoder_ffl.pt` | `medmnist3d/stage2/ffl.yaml` |
 | `brats/stage1/base.yaml` | `outputs/autoencoder_final.pt` | `brats/stage2/base.yaml` |

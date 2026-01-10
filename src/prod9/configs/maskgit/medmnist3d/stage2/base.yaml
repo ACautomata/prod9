@@ -6,8 +6,8 @@
 # =============================================================================
 
 # Paths (must match the output from stage1/base.yaml)
-autoencoder_path: ".output/medmnist3d_autoencoder.pt"
-output_dir: ".output/medmnist3d_stage2"
+autoencoder_path: "outputs/medmnist3d_autoencoder.pt"
+output_dir: "outputs/medmnist3d_stage2"
 
 # =============================================================================
 # Model Architecture
@@ -92,7 +92,7 @@ data:
   # Stage 2 specific
   cond_emb_dim: 128  # Condition embedding dimension
   unconditional_prob: 0.1  # 10% unconditional generation
-  cache_dir: ".output/medmnist3d_encoded"  # Pre-encoded data cache directory
+  cache_dir: "outputs/medmnist3d_encoded"  # Pre-encoded data cache directory
 
 # =============================================================================
 # Loss Configuration
