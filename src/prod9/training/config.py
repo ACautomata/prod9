@@ -153,17 +153,17 @@ def load_validated_config(
         ) from e
 
     # MAISI schemas - optional import
-    MAISI_SCHEMAS_AVAILABLE = False  # type: ignore[assignment]
-    MAISIVAEFullConfig = None  # type: ignore[assignment]
-    MAISIDiffusionFullConfig = None  # type: ignore[assignment]
-    MAISIControlNetFullConfig = None  # type: ignore[assignment]
+    MAISI_SCHEMAS_AVAILABLE: bool = False
+    MAISIVAEFullConfig: type[Any] | None = None
+    MAISIDiffusionFullConfig: type[Any] | None = None
+    MAISIControlNetFullConfig: type[Any] | None = None
     try:
         from prod9.training.config_schema import (
             MAISIVAEFullConfig,
             MAISIDiffusionFullConfig,
             MAISIControlNetFullConfig,
         )
-        MAISI_SCHEMAS_AVAILABLE = True  # type: ignore[assignment]
+        MAISI_SCHEMAS_AVAILABLE = True
     except ImportError:
         pass
 

@@ -9,7 +9,7 @@ unpad_from_sliding_window() from prod9.autoencoder.padding for padding operation
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Union, cast
 
 import torch
 from monai.inferers.inferer import SlidingWindowInferer
@@ -22,7 +22,12 @@ else:
     try:
         from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
     except ImportError:
-        AutoencoderMAISI = None  # type: ignore
+        # MAISI module not available - create a placeholder for runtime
+        # This will only be used if someone tries to use MAISI without the module installed
+        class _AutoencoderMAISIPlaceholder:
+            """Placeholder class when MAISI is not available."""
+            pass
+        AutoencoderMAISI = cast(Any, _AutoencoderMAISIPlaceholder)
 
 
 def _compute_scale_factor(autoencoder: Union[AutoencoderFSQ, "AutoencoderMAISI"]) -> int:
@@ -207,9 +212,10 @@ class AutoencoderInferenceWrapper:
         inferer = self._create_inferer()
 
         # Wrap encode method for SW
-        # Note: AutoencoderFSQ.encode() now returns (z_q, z_mu) where z_q is quantized
+        # Note: AutoencoderFSQ.encode() returns (z_q, z_mu) where z_q is quantized
         def _encode_fn(x: torch.Tensor) -> torch.Tensor:
-            z_q, z_mu = self.autoencoder.encode(x)  # type: ignore[misc]
+            ae = cast(AutoencoderFSQ, self.autoencoder)
+            z_q, _z_mu = ae.encode(x)
             return z_q  # Return quantized latent for decode (correct for FSQ)
 
         # Apply SW - handle different return types
@@ -238,7 +244,7 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, C, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(z, self.autoencoder.decode)  # type: ignore[arg-type]
+        result = inferer(z, cast(Any, self.autoencoder.decode))
 
         # Handle different return types
         if isinstance(result, tuple):
@@ -262,7 +268,8 @@ class AutoencoderInferenceWrapper:
         """
         # Delegate to autoencoder's quantize_stage_2_inputs() which handles
         # the new (z_q, z_mu) signature correctly
-        return self.autoencoder.quantize_stage_2_inputs(x)  # type: ignore[return-value]
+        ae = cast(AutoencoderFSQ, self.autoencoder)
+        return ae.quantize_stage_2_inputs(x)
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """
@@ -277,7 +284,8 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, 1, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(latent, self.autoencoder.decode_stage_2_outputs)  # type: ignore[arg-type]
+        ae = cast(AutoencoderFSQ, self.autoencoder)
+        result = inferer(latent, ae.decode_stage_2_outputs)
 
         if isinstance(result, tuple):
             result = result[0]
@@ -298,7 +306,8 @@ class AutoencoderInferenceWrapper:
         Returns:
             Embedded continuous vectors [B, C, H, W, D]
         """
-        return self.autoencoder.embed(indices)  # type: ignore[return-value]
+        ae = cast(AutoencoderFSQ, self.autoencoder)
+        return ae.embed(indices)
 
     def quantize(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -312,7 +321,8 @@ class AutoencoderInferenceWrapper:
         Returns:
             Token indices [B, H, W, D]
         """
-        return self.autoencoder.quantize(z)  # type: ignore[return-value]
+        ae = cast(AutoencoderFSQ, self.autoencoder)
+        return ae.quantize(z)
 
     def encode_with_sw(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -342,7 +352,7 @@ class AutoencoderInferenceWrapper:
             Decoded image [B, C, H, W, D]
         """
         inferer = self._create_inferer(for_decode=True)
-        result = inferer(z, self.autoencoder.decode)  # type: ignore[arg-type]
+        result = inferer(z, cast(Any, self.autoencoder.decode))
         if isinstance(result, tuple):
             return result[0]
         elif isinstance(result, dict):
@@ -364,7 +374,8 @@ class AutoencoderInferenceWrapper:
         """
         # Delegate to autoencoder's quantize_stage_2_inputs() which handles
         # the new (z_q, z_mu) signature correctly
-        return self.autoencoder.quantize_stage_2_inputs(x)  # type: ignore[return-value]
+        ae = cast(AutoencoderFSQ, self.autoencoder)
+        return ae.quantize_stage_2_inputs(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

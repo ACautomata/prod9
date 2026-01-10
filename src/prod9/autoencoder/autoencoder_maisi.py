@@ -113,10 +113,19 @@ class AutoencoderMAISI(AutoencoderKlMaisi):
             The weight tensor of the decoder's final convolution layer.
         """
         # The decoder.blocks is an nn.ModuleList from MONAI's AutoencoderKlMaisi
-        decoder_blocks: nn.ModuleList = self.decoder.blocks  # type: ignore[assignment]
-        last_block: nn.Module = decoder_blocks[-1]  # type: ignore[assignment]
-        last_conv = cast(nn.Module, last_block.conv)
-        return cast(torch.Tensor, last_conv.conv.weight)  # type: ignore[attr-defined]
+        decoder_blocks = cast(nn.ModuleList, self.decoder.blocks)
+        last_block = cast(nn.Module, decoder_blocks[-1])
+        # The conv attribute has a weight attribute (Parameter)
+        conv_module = cast(nn.Module, last_block.conv)
+        weight = getattr(conv_module, "weight", None)
+        if weight is None:
+            # Try accessing via the nested conv attribute
+            weight = getattr(conv_module, "conv", None)
+            if weight is not None:
+                weight = getattr(weight, "weight", None)
+        if weight is None:
+            raise RuntimeError("Could not find weight tensor in decoder's last layer")
+        return cast(torch.Tensor, weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """

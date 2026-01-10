@@ -425,4 +425,4 @@ def _sample_with_controlnet(
 
 
 # Monkey patch the sampler
-RectifiedFlowSampler.sample_with_controlnet = _sample_with_controlnet  # type: ignore[attr-defined]
+setattr(RectifiedFlowSampler, "sample_with_controlnet", _sample_with_controlnet)

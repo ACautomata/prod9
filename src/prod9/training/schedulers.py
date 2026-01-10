@@ -152,17 +152,21 @@ def create_warmup_scheduler(
     if total_steps is None:
         raise ValueError("total_steps is required for cosine decay calculation")
 
+    # Type narrowing: warmup_steps and total_steps are guaranteed non-None here
+    assert warmup_steps is not None
+    assert total_steps is not None
+
     def lr_lambda(step: int) -> float:
         """Combined warmup + cosine decay LR multiplier."""
         # Handle negative step (initial state before first step call)
         if step < 0:
             return 0.0
-        if step < warmup_steps:  # type: ignore
+        if step < warmup_steps:
             # Linear warmup
-            return step / max(1, warmup_steps)  # type: ignore
+            return step / max(1, warmup_steps)
         else:
             # Cosine decay
-            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)  # type: ignore
+            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
             # eta_min is scaled relative to base_lr
             # We'll assume eta_min is a ratio, not absolute value
             return eta_min + (1.0 - eta_min) * 0.5 * (1.0 + __import__("torch").cos(

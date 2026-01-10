@@ -341,11 +341,12 @@ class AutoencoderLightning(pl.LightningModule):
         clip_val = self.trainer.gradient_clip_val
         if clip_val is not None and clip_val > 0:
             clip_alg = self.trainer.gradient_clip_algorithm
-            self.clip_gradients(
-                optimizer,
-                clip_val=clip_val,
-                gradient_clip_algorithm=clip_alg,
-            )
+            # Gather all parameters from all parameter groups
+            params = [p for group in optimizer.param_groups for p in group["params"]]
+            if clip_alg == "norm":
+                torch.nn.utils.clip_grad_norm_(params, clip_val)
+            else:  # clip_alg == "value"
+                torch.nn.utils.clip_grad_value_(params, clip_val)
 
         # Step the optimizer
         optimizer.step()

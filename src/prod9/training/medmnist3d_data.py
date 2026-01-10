@@ -12,7 +12,7 @@ Key features:
 """
 
 import os
-from typing import Literal, cast, Optional, Any, Union, Sequence
+from typing import Literal, cast, Optional, Any, Union, Sequence, Sized
 
 import medmnist
 import numpy as np
@@ -130,7 +130,8 @@ class _CachedMedMNIST3DStage1Dataset(CacheDataset):
         # Type guard: ensure dataset is Sized
         if not hasattr(dataset, "__len__"):
             raise TypeError(f"Dataset must implement __len__, got {type(dataset)}")
-        dataset_len = len(dataset)  # type: ignore
+        sized_dataset = cast(Sized, dataset)
+        dataset_len = len(sized_dataset)
         for i in range(dataset_len):
             img, _ = dataset[i]
             # Ensure single channel
