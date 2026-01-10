@@ -14,7 +14,7 @@ model:
     spatial_dims: 3
     in_channels: 16
     num_channels: [64, 128, 128, 256]
-    attention_levels: [False, True, True, True]
+    attention_levels: [False, False, False, True]
     num_res_blocks: [2, 2, 2, 2]
     num_head_channels: [0, 0, 64, 64]
     norm_num_groups: 32
@@ -97,7 +97,7 @@ callbacks:
 # Trainer Configuration
 # =============================================================================
 trainer:
-  max_epochs: 50
+  max_epochs: 100
 
   hardware:
     accelerator: "auto"

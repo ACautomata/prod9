@@ -16,7 +16,7 @@ model:
     in_channels: 16
     condition_dim: 4
     num_channels: [64, 128, 128, 256]
-    attention_levels: [False, True, True, True]
+    attention_levels: [False, False, False, True]
     num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32
 

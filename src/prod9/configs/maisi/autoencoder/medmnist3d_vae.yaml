@@ -16,7 +16,7 @@ model:
     in_channels: 1
     out_channels: 1
     num_channels: [64, 128, 128, 256]
-    attention_levels: [False, True, True, True]
+    attention_levels: [False, False, False, True]
     num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32
     num_splits: 2
@@ -67,7 +67,7 @@ loss:
   kl_weight: 1.0e-6
   perceptual_weight: 0.5
   adv_weight: 0.1
-  lpips_network: "alex"
+  lpips_network: "medicalnet_resnet10_23datasets"
 
 # =============================================================================
 # Discriminator Configuration
@@ -109,7 +109,7 @@ callbacks:
 # Trainer Configuration
 # =============================================================================
 trainer:
-  max_epochs: 20
+  max_epochs: 100
 
   hardware:
     accelerator: "auto"
