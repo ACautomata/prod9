@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 from monai.losses.adversarial_loss import PatchAdversarialLoss
 from monai.losses.perceptual import PerceptualLoss
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 
 class SliceWiseFake3DLoss(nn.Module):
@@ -309,26 +309,26 @@ class FocalFrequencyLoss(nn.Module):
 
 class VAEGANLoss(nn.Module):
     """
-    Combined loss for VQGAN-style autoencoder training.
+    Combined loss for VAE-GAN training (supports both FSQ and VAE modes).
 
-    Combines four loss terms:
-    1. Reconstruction loss (L1): Pixel-wise reconstruction accuracy
-    2. Perceptual loss: Feature-based similarity (LPIPS or Focal Frequency Loss)
-    3. Adversarial loss: Realism via discriminator (using MONAI's PatchAdversarialLoss)
-    4. Commitment loss: FSQ codebook commitment
+    Combines multiple loss terms depending on mode:
+    - FSQ mode: Reconstruction (L1), Perceptual (LPIPS/FFL), Adversarial, Commitment
+    - VAE mode: Reconstruction (L1), Perceptual (LPIPS), Adversarial, KL divergence
 
     The adversarial loss weight is computed adaptively based on gradient norms,
     following the VQGAN paper implementation.
 
     Args:
+        loss_mode: "fsq" for FSQ/commitment loss, "vae" for KL divergence
         recon_weight: Weight for L1 reconstruction loss
         perceptual_weight: Weight for perceptual loss
+        kl_weight: Weight for KL divergence loss (used in vae mode)
         loss_type: Type of perceptual loss ("lpips" or "ffl")
         ffl_config: Configuration for Focal Frequency Loss (required if loss_type="ffl")
         spatial_dims: Spatial dimensions (3 for 3D medical images)
         perceptual_network_type: Pretrained network for perceptual loss (used if loss_type="lpips")
         adv_weight: Weight for adversarial loss (base weight, scaled adaptively)
-        commitment_weight: Weight for commitment loss (beta in VQ terminology)
+        commitment_weight: Weight for commitment loss (used in fsq mode)
         adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
         discriminator_iter_start: Step number to start discriminator training (warmup)
     """
@@ -339,8 +339,10 @@ class VAEGANLoss(nn.Module):
 
     def __init__(
         self,
+        loss_mode: Literal["fsq", "vae"] = "fsq",
         recon_weight: float = 1.0,
         perceptual_weight: float = 0.5,
+        kl_weight: float = 1e-6,
         loss_type: str = "lpips",
         ffl_config: Optional[Dict[str, Union[float, int, bool]]] = None,
         spatial_dims: int = 3,
@@ -355,8 +357,13 @@ class VAEGANLoss(nn.Module):
         if loss_type not in ("lpips", "ffl"):
             raise ValueError(f"loss_type must be 'lpips' or 'ffl', got '{loss_type}'")
 
+        if loss_mode not in ("fsq", "vae"):
+            raise ValueError(f"loss_mode must be 'fsq' or 'vae', got '{loss_mode}'")
+
+        self.loss_mode = loss_mode
         self.recon_weight = recon_weight
         self.perceptual_weight = perceptual_weight
+        self.kl_weight = kl_weight
         self.loss_type = loss_type
         self.ffl_config = ffl_config or {}
         self.disc_factor = adv_weight  # Base discriminator weight
@@ -448,6 +455,8 @@ class VAEGANLoss(nn.Module):
         discriminator_output: Union[torch.Tensor, List[torch.Tensor]],
         global_step: int = 0,
         last_layer: Optional[torch.Tensor] = None,
+        z_mu: Optional[torch.Tensor] = None,
+        z_sigma: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Compute combined VAE-GAN loss with optional adaptive weighting.
@@ -455,12 +464,12 @@ class VAEGANLoss(nn.Module):
         Args:
             real_images: Ground truth images [B, C, H, W, D]
             fake_images: Reconstructed images [B, C, H, W, D]
-            encoder_output: Output from encoder before quantization [B, C, H, W, D]
-            quantized_output: Output from quantizer (FSQ) [B, C, H, W, D]
             discriminator_output: Discriminator output for fake images
                 (can be tensor or list of tensors for multi-scale)
             global_step: Current training step (for warmup)
             last_layer: Last layer weights for adaptive weight calculation
+            z_mu: Mean of latent distribution (required in vae mode) [B, latent_dim, ...]
+            z_sigma: Standard deviation of latent distribution (required in vae mode) [B, latent_dim, ...]
 
         Returns:
             Dictionary containing:
@@ -468,18 +477,34 @@ class VAEGANLoss(nn.Module):
                 - 'recon': L1 reconstruction loss
                 - 'perceptual': Perceptual loss
                 - 'generator_adv': Adversarial loss for generator
-                - 'commitment': Commitment loss (encoder-quantizer mismatch)
+                - 'commitment': Commitment loss (zero in vae mode)
+                - 'kl': KL divergence loss (zero in fsq mode)
                 - 'adv_weight': Adaptive adversarial weight (if computed)
         """
         recon_loss = self._compute_reconstruction_loss(fake_images, real_images)
         perceptual_loss = self._compute_perceptual_loss(fake_images, real_images)
         generator_adv_loss = self._compute_generator_adv_loss(discriminator_output)
 
-        # FSQ doesn't need commitment loss - straight-through estimator handles commitment
-        commitment_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
+        # Compute regularization loss based on mode
+        if self.loss_mode == "vae":
+            if z_mu is None or z_sigma is None:
+                raise ValueError("z_mu and z_sigma required for vae mode")
+            reg_loss = self.kl_weight * self._compute_kl_loss(z_mu, z_sigma)
+            commitment_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
+            kl_loss = reg_loss  # For returning
+        else:  # fsq mode
+            reg_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
+            kl_loss = reg_loss  # For returning
+            # FSQ doesn't need commitment loss - straight-through estimator handles commitment
+            commitment_loss = torch.tensor(0.0, device=fake_images.device, dtype=fake_images.dtype)
 
         # Combined reconstruction loss (nll_loss in VQGAN terminology)
-        nll_loss = self.recon_weight * recon_loss + self.perceptual_weight * perceptual_loss
+        # Includes reg_loss (KL loss in vae mode, zero in fsq mode)
+        nll_loss = (
+            self.recon_weight * recon_loss
+            + self.perceptual_weight * perceptual_loss
+            + reg_loss
+        )
 
         # Compute adaptive adversarial weight (if last_layer provided)
         if last_layer is not None:
@@ -498,7 +523,6 @@ class VAEGANLoss(nn.Module):
             adv_weight = torch.tensor(disc_factor, device=nll_loss.device, dtype=nll_loss.dtype)
 
         # Total generator loss with adaptive adversarial weight
-        # NOTE: FSQ doesn't need commitment loss - straight-through estimator handles it
         total_generator_loss = (
             nll_loss
             + adv_weight * generator_adv_loss
@@ -510,6 +534,7 @@ class VAEGANLoss(nn.Module):
             "perceptual": perceptual_loss,
             "generator_adv": generator_adv_loss,
             "commitment": commitment_loss,
+            "kl": kl_loss,
             "adv_weight": adv_weight,  # For logging/monitoring
         }
 
@@ -623,6 +648,29 @@ class VAEGANLoss(nn.Module):
     ) -> torch.Tensor:
         """Compute commitment loss between encoder output and quantized output."""
         return nn.functional.mse_loss(quantized_output.detach(), encoder_output)
+
+    def _compute_kl_loss(
+        self, z_mu: torch.Tensor, z_sigma: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute KL divergence: KL(N(mu, sigma) || N(0, 1)).
+
+        This measures the difference between the learned latent distribution
+        and the standard normal prior. Used in VAE mode.
+
+        Formula: KL = -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+
+        Args:
+            z_mu: Mean of latent distribution [B, latent_dim, ...]
+            z_sigma: Standard deviation of latent distribution [B, latent_dim, ...]
+
+        Returns:
+            KL divergence loss (normalized by number of elements)
+        """
+        kl_loss = -0.5 * torch.sum(
+            1 + torch.log(z_sigma**2 + 1e-8) - z_mu**2 - z_sigma**2
+        )
+        return kl_loss / z_mu.numel()
 
     def _compute_total_loss(
         self,

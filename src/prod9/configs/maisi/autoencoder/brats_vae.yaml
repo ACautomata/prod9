@@ -75,6 +75,7 @@ loss:
   perceptual_weight: 0.5
   adv_weight: 0.1
   lpips_network: "medicalnet_resnet10_23datasets"
+  discriminator_iter_start: 1500
 
 # =============================================================================
 # Discriminator Configuration
@@ -121,7 +122,7 @@ trainer:
   hardware:
     accelerator: "auto"
     devices: "auto"
-    precision: "bf16-mixed"
+    precision: "16-mixed"
 
   logging:
     log_every_n_steps: 10

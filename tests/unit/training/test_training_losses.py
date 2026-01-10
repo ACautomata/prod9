@@ -848,5 +848,194 @@ class TestSliceWiseFake3DLoss(unittest.TestCase):
         self.assertGreater(loss.item(), 0.0)
 
 
+class TestVAEGANLossVAEMode(unittest.TestCase):
+    """Test suite for VAEGANLoss in VAE mode."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.batch_size = 2
+        self.channels = 1
+        self.spatial_size = 16
+        self.latent_channels = 4
+
+    def test_vae_mode_initialization(self):
+        """Test VAEGANLoss with loss_mode='vae'."""
+        loss = VAEGANLoss(
+            loss_mode="vae",
+            kl_weight=1e-6,
+        )
+        self.assertEqual(loss.loss_mode, "vae")
+        self.assertEqual(loss.kl_weight, 1e-6)
+
+    def test_fsq_mode_is_default(self):
+        """Test that FSQ mode is the default."""
+        loss = VAEGANLoss()
+        self.assertEqual(loss.loss_mode, "fsq")
+
+    def test_invalid_loss_mode_raises_error(self):
+        """Test that invalid loss_mode raises ValueError."""
+        with self.assertRaises(ValueError):
+            VAEGANLoss(loss_mode="invalid")
+
+    def test_kl_loss_computation(self):
+        """Test KL loss is computed correctly."""
+        loss = VAEGANLoss(loss_mode="vae", kl_weight=1e-6)
+        z_mu = torch.randn(2, self.latent_channels, 8, 8, 8)
+        z_sigma = torch.exp(torch.randn(2, self.latent_channels, 8, 8, 8))  # Positive
+
+        kl = loss._compute_kl_loss(z_mu, z_sigma)
+
+        # KL loss should be positive (divergence from standard normal)
+        self.assertIsInstance(kl, torch.Tensor)
+        self.assertEqual(kl.dim(), 0)  # Scalar
+        self.assertGreater(kl.item(), 0.0)
+
+    def test_kl_loss_zero_for_standard_normal(self):
+        """Test KL loss is near zero for standard normal distribution."""
+        loss = VAEGANLoss(loss_mode="vae", kl_weight=1.0)
+        # Standard normal: mu=0, sigma=1
+        z_mu = torch.zeros(2, self.latent_channels, 4, 4, 4)
+        z_sigma = torch.ones(2, self.latent_channels, 4, 4, 4)
+
+        kl = loss._compute_kl_loss(z_mu, z_sigma)
+
+        # KL(N(0,1) || N(0,1)) should be near zero
+        self.assertLess(kl.item(), 1e-3)
+
+    def test_forward_with_vae_params(self):
+        """Test forward() with z_mu and z_sigma in VAE mode."""
+        loss = VAEGANLoss(loss_mode="vae", kl_weight=1e-6)
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(2, 1, 16, 16, 16)
+        z_mu = torch.randn(2, self.latent_channels, 8, 8, 8, requires_grad=True)
+        z_sigma = torch.exp(torch.randn(2, self.latent_channels, 8, 8, 8))
+        disc_output = [torch.randn(2, 1)]
+
+        result = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
+        )
+
+        self.assertIn("kl", result)
+        self.assertGreater(result["kl"].item(), 0)
+        self.assertIn("total", result)
+        self.assertIn("recon", result)
+        self.assertIn("perceptual", result)
+        self.assertIn("generator_adv", result)
+        self.assertIn("adv_weight", result)
+
+    def test_vae_mode_requires_z_mu_z_sigma(self):
+        """Test that VAE mode raises error when z_mu/z_sigma not provided."""
+        loss = VAEGANLoss(loss_mode="vae")
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(2, 1, 16, 16, 16)
+        disc_output = [torch.randn(2, 1)]
+
+        with self.assertRaises(ValueError):
+            loss(
+                real_images=real_images,
+                fake_images=fake_images,
+                discriminator_output=disc_output,
+            )
+
+    def test_fsq_mode_kl_is_zero(self):
+        """Test that FSQ mode returns zero KL loss."""
+        loss = VAEGANLoss(loss_mode="fsq")  # Default mode
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(2, 1, 16, 16, 16)
+        disc_output = [torch.randn(2, 1)]
+
+        result = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+        )
+
+        self.assertEqual(result["kl"].item(), 0.0)
+
+    def test_vae_mode_commitment_is_zero(self):
+        """Test that VAE mode returns zero commitment loss."""
+        loss = VAEGANLoss(loss_mode="vae")
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(2, 1, 16, 16, 16)
+        z_mu = torch.randn(2, self.latent_channels, 8, 8, 8)
+        z_sigma = torch.exp(torch.randn(2, self.latent_channels, 8, 8, 8))
+        disc_output = [torch.randn(2, 1)]
+
+        result = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
+        )
+
+        self.assertEqual(result["commitment"].item(), 0.0)
+
+    def test_vae_mode_backward_pass(self):
+        """Test backward pass in VAE mode."""
+        loss = VAEGANLoss(loss_mode="vae", kl_weight=1e-6)
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(
+            2, 1, 16, 16, 16,
+            requires_grad=True
+        )
+        z_mu = torch.randn(2, self.latent_channels, 8, 8, 8, requires_grad=True)
+        z_sigma = torch.exp(torch.randn(2, self.latent_channels, 8, 8, 8))
+        disc_output = [torch.randn(2, 1)]
+
+        result = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
+        )
+
+        result["total"].backward()
+
+        # Gradients should exist for inputs that require grad
+        self.assertIsNotNone(fake_images.grad)
+        self.assertIsNotNone(z_mu.grad)
+
+    def test_vae_mode_discriminator_warmup(self):
+        """Test discriminator_iter_start warmup in VAE mode."""
+        loss = VAEGANLoss(
+            loss_mode="vae",
+            discriminator_iter_start=100
+        )
+        real_images = torch.randn(2, 1, 16, 16, 16)
+        fake_images = torch.randn(2, 1, 16, 16, 16)
+        z_mu = torch.randn(2, self.latent_channels, 8, 8, 8)
+        z_sigma = torch.exp(torch.randn(2, self.latent_channels, 8, 8, 8))
+        disc_output = [torch.randn(2, 1)]
+
+        # Before warmup threshold
+        result_before = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+            global_step=50,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
+        )
+        self.assertEqual(result_before["adv_weight"].item(), 0.0)
+
+        # At/after warmup threshold
+        result_after = loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=disc_output,
+            global_step=150,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
+        )
+        self.assertGreater(result_after["adv_weight"].item(), 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

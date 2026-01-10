@@ -676,6 +676,9 @@ class MAISIVAELossConfig(BaseModel):
         default="medicalnet_resnet10_23datasets",
         description="Pretrained network for perceptual loss (MedicalNet)",
     )
+    discriminator_iter_start: int = Field(
+        default=0, ge=0, description="Discriminator warmup steps"
+    )
 
 
 class DiffusionModelConfig(BaseModel):

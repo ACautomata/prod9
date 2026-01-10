@@ -27,9 +27,9 @@ model:
 training:
   optimizer:
     lr_g: 1e-4
-    lr_d: 4e-4
+    lr_d: 2e-4
     b1: 0.5
-    b2: 0.999
+    b2: 0.9
     weight_decay: 1e-5
 
   loop:
@@ -68,6 +68,7 @@ loss:
   perceptual_weight: 0.5
   adv_weight: 0.1
   lpips_network: "medicalnet_resnet10_23datasets"
+  discriminator_iter_start: 1500
 
 # =============================================================================
 # Discriminator Configuration

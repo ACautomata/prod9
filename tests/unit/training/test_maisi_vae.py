@@ -16,11 +16,12 @@ from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscrimina
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
-from prod9.training.maisi_vae import MAISIVAELightning, MAISIVAEGANLoss
+from prod9.training.losses import VAEGANLoss
+from prod9.training.maisi_vae import MAISIVAELightning
 
 
 class TestMAISIVAEGANLoss(unittest.TestCase):
-    """Test suite for MAISIVAEGANLoss."""
+    """Test suite for MAISI VAE-GAN loss (using VAEGANLoss with vae mode)."""
 
     def setUp(self) -> None:
         """Set up test fixtures."""
@@ -28,9 +29,9 @@ class TestMAISIVAEGANLoss(unittest.TestCase):
         self.batch_size = 2
         self.spatial_size = 32
 
-        # Create loss function with minimal weights for testing
-        # Use medicalnet_resnet10_23datasets for perceptual network (alex is not supported)
-        self.loss = MAISIVAEGANLoss(
+        # Create loss function with VAE mode
+        self.loss = VAEGANLoss(
+            loss_mode="vae",
             recon_weight=1.0,
             perceptual_weight=0.1,  # Low weight to avoid slow downloads
             kl_weight=1e-6,
@@ -42,12 +43,12 @@ class TestMAISIVAEGANLoss(unittest.TestCase):
     def test_loss_initialization(self):
         """Test MAISI VAEGAN loss initializes correctly."""
         self.assertIsNotNone(self.loss)
+        self.assertEqual(self.loss.loss_mode, "vae")
         self.assertEqual(self.loss.recon_weight, 1.0)
         self.assertEqual(self.loss.perceptual_weight, 0.1)
         self.assertEqual(self.loss.kl_weight, 1e-6)
         self.assertEqual(self.loss.disc_factor, 0.5)
         self.assertIsNotNone(self.loss.l1_loss)
-        self.assertIsNotNone(self.loss.adv_loss)
 
     def test_l1_reconstruction_loss(self):
         """Test L1 reconstruction loss computation."""
@@ -285,7 +286,7 @@ class TestMAISIVAELightningInitialization(unittest.TestCase):
         )
 
         # Check loss module is initialized
-        self.assertIsInstance(lightning_module.vaegan_loss, MAISIVAEGANLoss)
+        self.assertIsInstance(lightning_module.vaegan_loss, VAEGANLoss)
         self.assertEqual(lightning_module.vaegan_loss.recon_weight, 1.0)
         self.assertEqual(lightning_module.vaegan_loss.perceptual_weight, 0.5)
         self.assertEqual(lightning_module.vaegan_loss.kl_weight, 1e-6)

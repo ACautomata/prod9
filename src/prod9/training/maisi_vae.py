@@ -9,199 +9,19 @@ This module implements VAEGAN training for MAISI VAE with:
 """
 
 import os
-from typing import TYPE_CHECKING, Dict, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Dict, Optional, cast
 
 import torch
-import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-from monai.losses.adversarial_loss import PatchAdversarialLoss
-from monai.losses.perceptual import PerceptualLoss
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
+from prod9.training.losses import VAEGANLoss
 from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
 
 # Import Optimizer for runtime use (not just type checking)
 from torch.optim import Optimizer
-
-
-class MAISIVAEGANLoss(nn.Module):
-    """
-    Combined loss for MAISI VAEGAN training.
-
-    Combines four loss terms:
-    1. Reconstruction loss (L1): Pixel-wise reconstruction accuracy
-    2. Perceptual loss (LPIPS): Feature-based similarity
-    3. KL divergence: KL regularization for VAE latent space
-    4. Adversarial loss: Realism via discriminator
-
-    The adversarial loss weight is computed adaptively based on gradient norms,
-    following the VQGAN paper implementation.
-
-    Args:
-        recon_weight: Weight for L1 reconstruction loss
-        perceptual_weight: Weight for perceptual loss
-        kl_weight: Weight for KL divergence loss
-        adv_weight: Base weight for adversarial loss (scaled adaptively)
-        spatial_dims: Spatial dimensions (3 for 3D medical images)
-        perceptual_network_type: Pretrained network for perceptual loss
-        adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
-        discriminator_iter_start: Step number to start discriminator training (warmup)
-    """
-
-    # Class constants for magic numbers
-    MAX_ADAPTIVE_WEIGHT: float = 1e4
-    GRADIENT_NORM_EPS: float = 1e-4
-
-    def __init__(
-        self,
-        recon_weight: float = 1.0,
-        perceptual_weight: float = 0.5,
-        kl_weight: float = 1e-6,
-        adv_weight: float = 0.1,
-        spatial_dims: int = 3,
-        perceptual_network_type: str = "medicalnet_resnet10_23datasets",
-        adv_criterion: str = "least_squares",
-        discriminator_iter_start: int = 0,
-    ):
-        super().__init__()
-
-        self.recon_weight = recon_weight
-        self.perceptual_weight = perceptual_weight
-        self.kl_weight = kl_weight
-        self.disc_factor = adv_weight
-        self.spatial_dims = spatial_dims
-        self.perceptual_network_type = perceptual_network_type
-        self.discriminator_iter_start = discriminator_iter_start
-
-        # L1 loss for reconstruction
-        self.l1_loss = nn.L1Loss()
-
-        # Perceptual network (lazy initialization on first use)
-        self.perceptual_network: Optional[PerceptualLoss] = None
-
-        # Adversarial loss using MONAI's PatchAdversarialLoss
-        self.adv_loss = PatchAdversarialLoss(criterion=adv_criterion, reduction="mean")
-
-    def calculate_adaptive_weight(
-        self,
-        nll_loss: torch.Tensor,
-        g_loss: torch.Tensor,
-        last_layer: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Calculate adaptive adversarial weight based on gradient norms.
-
-        This is the CORRECT implementation from VQGAN paper (Esser et al., 2021).
-        The weight balances reconstruction vs adversarial loss by comparing
-        their gradient magnitudes at the output layer.
-
-        Formula: d_weight = ||nll_grads|| / (||g_grads|| + 1e-4)
-        Then clamp to [0, 1e4] and scale by base discriminator weight.
-
-        Reference: taming-transformers/taming/modules/losses/vqperceptual.py
-
-        Args:
-            nll_loss: Reconstruction loss (recon + perceptual + kl)
-            g_loss: Generator adversarial loss
-            last_layer: The last layer weights to compute gradients for
-
-        Returns:
-            Adaptive weight for scaling adversarial loss
-        """
-        # Compute gradients with respect to the last layer
-        nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
-        g_grads = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
-
-        # Ratio of gradient norms
-        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + self.GRADIENT_NORM_EPS)
-
-        # Clamp to prevent extreme values
-        d_weight = torch.clamp(d_weight, 0.0, self.MAX_ADAPTIVE_WEIGHT).detach()
-
-        # Scale by base discriminator weight
-        d_weight = d_weight * self.disc_factor
-        return d_weight
-
-    def adopt_weight(
-        self,
-        global_step: int,
-        threshold: int = 0,
-        value: float = 0.0,
-    ) -> float:
-        """
-        Gradually introduce discriminator loss during training warmup.
-
-        Returns 0 before threshold, otherwise returns configured weight.
-
-        Args:
-            global_step: Current training step
-            threshold: Step number to start applying discriminator loss
-            value: Value to return before threshold (default: 0.0)
-
-        Returns:
-            Weight factor for discriminator loss
-        """
-        if global_step < threshold:
-            return value
-        return self.disc_factor
-
-    def _compute_perceptual_loss(
-        self, fake_images: torch.Tensor, real_images: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Compute LPIPS perceptual loss using pretrained network features.
-
-        Uses MONAI's PerceptualLoss with MedicalNet ResNet10 for 3D medical images.
-        The network is lazily initialized on first forward pass.
-        """
-        if self.perceptual_network is None:
-            perceptual_loss = PerceptualLoss(
-                spatial_dims=self.spatial_dims,
-                network_type=self.perceptual_network_type,
-                is_fake_3d=False,
-            ).to(fake_images.device)
-            # Freeze pretrained network weights to prevent training instability
-            for param in perceptual_loss.parameters():
-                param.requires_grad = False
-            self.perceptual_network = perceptual_loss
-        # Type narrowing: perceptual_network is now guaranteed to be non-None
-        network = cast(PerceptualLoss, self.perceptual_network)
-        return network(fake_images, real_images)
-
-    def _compute_generator_adv_loss(
-        self, discriminator_output: Union[torch.Tensor, List[torch.Tensor]]
-    ) -> torch.Tensor:
-        """
-        Compute adversarial loss for generator.
-
-        Uses MONAI's PatchAdversarialLoss with:
-        - target_is_real=True (generator wants to fool discriminator)
-        - for_discriminator=False
-        """
-        return self.adv_loss(discriminator_output, target_is_real=True, for_discriminator=False)
-
-    def discriminator_loss(
-        self,
-        real_output: Union[torch.Tensor, List[torch.Tensor]],
-        fake_output: Union[torch.Tensor, List[torch.Tensor]],
-    ) -> torch.Tensor:
-        """
-        Compute discriminator loss only.
-
-        Uses MONAI's PatchAdversarialLoss for both real and fake outputs.
-
-        Args:
-            real_output: Discriminator output for real images
-            fake_output: Discriminator output for fake images
-
-        Returns:
-            Discriminator loss (scalar)
-        """
-        real_loss = self.adv_loss(real_output, target_is_real=True, for_discriminator=True)
-        fake_loss = self.adv_loss(fake_output, target_is_real=False, for_discriminator=True)
-        return (real_loss + fake_loss) / 2
 
 
 class MAISIVAELightning(pl.LightningModule):
@@ -274,8 +94,9 @@ class MAISIVAELightning(pl.LightningModule):
         # Store reference to last layer for adaptive weight calculation
         self.last_layer: torch.Tensor = self.vae.get_last_layer()
 
-        # Loss functions
-        self.vaegan_loss = MAISIVAEGANLoss(
+        # Loss functions - use unified VAEGANLoss with VAE mode
+        self.vaegan_loss = VAEGANLoss(
+            loss_mode="vae",
             recon_weight=recon_weight,
             perceptual_weight=perceptual_weight,
             kl_weight=kl_weight,
@@ -290,9 +111,6 @@ class MAISIVAELightning(pl.LightningModule):
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
         self.lpips = LPIPSMetric()
-
-        # L1 loss for reconstruction
-        self.l1_loss = nn.L1Loss()
 
         # Logging config
         self.sample_every_n_steps = sample_every_n_steps
@@ -422,54 +240,33 @@ class MAISIVAELightning(pl.LightningModule):
         # Discriminator outputs for fake images
         fake_outputs, _ = self.discriminator(fake_images)
 
-        # Reconstruction loss (L1)
-        recon_loss = self.l1_loss(fake_images, real_images)
-
-        # Perceptual loss (LPIPS)
-        perceptual_loss = self.vaegan_loss._compute_perceptual_loss(fake_images, real_images)
-
-        # KL divergence: KL(N(mu, sigma) || N(0, 1))
-        # KL = -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-        kl_loss = -0.5 * torch.sum(1 + torch.log(z_sigma**2 + 1e-8) - z_mu**2 - z_sigma**2)
-        kl_loss = kl_loss / real_images.numel()  # Normalize by number of elements
-
-        # Adversarial loss for generator
-        adv_loss_g = self.vaegan_loss._compute_generator_adv_loss(fake_outputs)
-
-        # Combined reconstruction loss (recon + perceptual + kl)
-        nll_loss = (
-            self.vaegan_loss.recon_weight * recon_loss
-            + self.vaegan_loss.perceptual_weight * perceptual_loss
-            + self.vaegan_loss.kl_weight * kl_loss
+        # Use unified VAEGANLoss.forward() method
+        losses = self.vaegan_loss(
+            real_images=real_images,
+            fake_images=fake_images,
+            discriminator_output=fake_outputs,
+            global_step=self.global_step,
+            last_layer=self.last_layer,
+            z_mu=z_mu,
+            z_sigma=z_sigma,
         )
-
-        # Compute adaptive adversarial weight
-        if self.global_step < self.vaegan_loss.discriminator_iter_start:
-            adv_weight = torch.tensor(0.0, device=nll_loss.device, dtype=nll_loss.dtype)
-        else:
-            adv_weight = self.vaegan_loss.calculate_adaptive_weight(
-                nll_loss, adv_loss_g, self.last_layer
-            )
-
-        # Total generator loss
-        total_loss = nll_loss + adv_weight * adv_loss_g
 
         # Set marker for gradient norm logging callback
         self._current_backward_branch = "gen"
 
         # Backward
-        self.manual_backward(total_loss)
+        self.manual_backward(losses["total"])
 
         self._optimizer_step(opt_g, optimizer_idx=0)
         self._optimizer_zero_grad(opt_g)
 
         return {
-            "total": total_loss,
-            "recon": recon_loss,
-            "perceptual": perceptual_loss,
-            "kl": kl_loss,
-            "adv_g": adv_loss_g,
-            "adv_weight": adv_weight,
+            "total": losses["total"],
+            "recon": losses["recon"],
+            "perceptual": losses["perceptual"],
+            "kl": losses["kl"],
+            "adv_g": losses["generator_adv"],
+            "adv_weight": losses["adv_weight"],
         }
 
     def _optimizer_step(
@@ -488,7 +285,7 @@ class MAISIVAELightning(pl.LightningModule):
             clip_alg = self.trainer.gradient_clip_algorithm
             self.clip_gradients(
                 optimizer,
-                clip_val=clip_val,
+                gradient_clip_val=clip_val,
                 gradient_clip_algorithm=clip_alg,
             )
 
