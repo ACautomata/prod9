@@ -90,7 +90,8 @@ Uses MONAI's PerceptualLoss with MedicalNet ResNet10 pre-trained on 23 medical d
 loss:
   perceptual:
     weight: 0.1
-    network_type: "medicalnet_resnet10_23datasets"
+    network_type: "alex"
+    is_fake_3d: true
 ```
 
 ### Focal Frequency Loss (FFL)

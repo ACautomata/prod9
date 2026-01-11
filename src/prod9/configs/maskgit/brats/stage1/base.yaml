@@ -131,7 +131,9 @@ loss:
   # Perceptual Loss (LPIPS-based using pretrained network)
   perceptual:
     weight: 0.5
-    network_type: "medicalnet_resnet10_23datasets"
+    network_type: "alex"
+    is_fake_3d: true
+    fake_3d_ratio: 0.5
 
   # Adversarial loss
   adversarial:
