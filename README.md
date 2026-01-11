@@ -86,7 +86,8 @@ data:
 
 ```
 prod9/
-├── configs/
+├── src/prod9/configs/
+│   ├── README.md                # Config system overview
 │   ├── maskgit/                 # MaskGiT configurations
 │   │   ├── brats/
 │   │   │   ├── stage1/          # Autoencoder configs
@@ -113,37 +114,63 @@ prod9/
 │           └── brats_controlnet.yaml
 ├── src/prod9/
 │   ├── autoencoder/             # Autoencoder implementations
-│   │   ├── ae_fsq.py           # AutoencoderFSQ (MaskGiT)
+│   │   ├── autoencoder_fsq.py  # AutoencoderFSQ (MaskGiT)
 │   │   ├── autoencoder_maisi.py # AutoencoderKlMaisi (MAISI)
-│   │   └── inference.py        # Sliding window inference
+│   │   ├── inference.py        # Sliding window inference
+│   │   └── padding.py          # Sliding window padding
 │   ├── generator/               # MaskGiT Transformer
 │   │   ├── maskgit.py          # MaskGiTSampler, MaskGiTScheduler
 │   │   ├── modules.py          # AdaLNZeroBlock, SinCosPosEmbed
-│   │   └── transformer.py      # TransformerDecoder
+│   │   ├── transformer.py      # TransformerDecoder
+│   │   └── utils.py            # Generator utilities
 │   ├── controlnet/              # MAISI ControlNet
 │   │   ├── controlnet_model.py
 │   │   └── condition_encoder.py
 │   ├── diffusion/               # Rectified Flow scheduler
-│   │   └── scheduler.py
+│   │   ├── diffusion_model.py  # Diffusion model
+│   │   ├── scheduler.py        # Rectified Flow scheduler
+│   │   └── sampling.py         # Sampling utilities
 │   ├── training/                # Training infrastructure
 │   │   ├── lightning_module.py # MaskGiT Lightning modules
+│   │   ├── autoencoder.py      # MaskGiT Stage 1 loop
+│   │   ├── transformer.py      # MaskGiT Stage 2 loop
 │   │   ├── maisi_vae.py        # MAISI VAE Lightning
 │   │   ├── maisi_diffusion.py  # MAISI Diffusion Lightning
 │   │   ├── controlnet_lightning.py # ControlNet Lightning
 │   │   ├── config.py           # Config loading
-│   │   ├── data.py             # Data modules
-│   │   └── losses.py           # Loss functions
+│   │   ├── config_schema.py    # Pydantic config schemas
+│   │   ├── autoencoder_config.py # Autoencoder config schema
+│   │   ├── transformer_config.py # Transformer config schema
+│   │   ├── maisi_vae_config.py # MAISI VAE config schema
+│   │   ├── maisi_diffusion_config.py # MAISI diffusion config schema
+│   │   ├── maisi_controlnet_config.py # ControlNet config schema
+│   │   ├── schedulers.py       # LR schedulers
+│   │   ├── brats_data.py       # BraTS data module
+│   │   ├── medmnist3d_data.py  # MedMNIST3D data module
+│   │   ├── brats_controlnet_data.py # ControlNet data module
+│   │   ├── losses.py           # Loss functions
+│   │   ├── metrics.py          # Metrics
+│   │   └── callbacks.py        # Training callbacks
 │   └── cli/                     # Command-line interfaces
 │       ├── autoencoder.py       # prod9-train-autoencoder
 │       ├── transformer.py       # prod9-train-transformer
 │       ├── maisi_vae.py         # prod9-train-maisi-vae
 │       ├── maisi_diffusion.py   # prod9-train-maisi-diffusion
-│       └── maisi_controlnet.py  # prod9-train-maisi-controlnet
+│       ├── maisi_controlnet.py  # prod9-train-maisi-controlnet
+│       └── shared.py           # Shared CLI utilities
 └── tests/
     ├── unit/                    # Unit tests
     ├── integration/             # CLI integration tests
     └── system/                  # End-to-end tests
 ```
+
+## Documentation
+
+- `CLAUDE.md` for development workflows and code conventions
+- `AGENTS.md` for automation rules and quality gates
+- `src/prod9/configs/README.md` for configuration system overview
+- `src/prod9/configs/maskgit/README.md` for MaskGiT config details
+- `src/prod9/configs/maisi/README.md` for MAISI config details
 
 ## Quick Start
 
@@ -151,18 +178,18 @@ prod9/
 
 **Stage 1: Train Autoencoder**
 ```bash
-prod9-train-autoencoder train --config configs/maskgit/brats/stage1/base.yaml
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/base.yaml
 ```
 
 **Stage 2: Train Transformer**
 ```bash
-prod9-train-transformer train --config configs/maskgit/brats/stage2/base.yaml
+prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 ```
 
 **Generate Samples**
 ```bash
 prod9-train-transformer generate \
-    --config configs/maskgit/brats/stage2/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
     --checkpoint outputs/stage2/best.ckpt \
     --output outputs/generated \
     --num-samples 10
@@ -172,18 +199,18 @@ prod9-train-transformer generate \
 
 **Stage 1: Train VAE**
 ```bash
-prod9-train-maisi-vae train --config configs/maisi/autoencoder/brats_vae.yaml
+prod9-train-maisi-vae train --config src/prod9/configs/maisi/autoencoder/brats_vae.yaml
 ```
 
 **Stage 2: Train Diffusion**
 ```bash
-prod9-train-maisi-diffusion train --config configs/maisi/diffusion/brats_diffusion.yaml
+prod9-train-maisi-diffusion train --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml
 ```
 
 **Generate Samples** (10-30 steps vs 1000 for DDPM)
 ```bash
 prod9-train-maisi-diffusion generate \
-    --config configs/maisi/diffusion/brats_diffusion.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt \
     --output outputs/generated \
     --num-samples 10 \
@@ -192,7 +219,7 @@ prod9-train-maisi-diffusion generate \
 
 **Stage 3: Train ControlNet** (Optional, for conditional generation)
 ```bash
-prod9-train-maisi-controlnet train --config configs/maisi/diffusion/brats_controlnet.yaml
+prod9-train-maisi-controlnet train --config src/prod9/configs/maisi/diffusion/brats_controlnet.yaml
 ```
 
 ## CLI Usage
@@ -205,21 +232,21 @@ All CLI commands require the `--config` parameter. There are no default configur
 
 ```bash
 # Train
-prod9-train-autoencoder train --config configs/maskgit/brats/stage1/base.yaml
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/base.yaml
 
 # Validate
 prod9-train-autoencoder validate \
-    --config configs/maskgit/brats/stage1/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
     --checkpoint outputs/stage1/best.ckpt
 
 # Test
 prod9-train-autoencoder test \
-    --config configs/maskgit/brats/stage1/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
     --checkpoint outputs/stage1/best.ckpt
 
 # Inference with sliding window
 prod9-train-autoencoder infer \
-    --config configs/maskgit/brats/stage1/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
     --checkpoint outputs/stage1/best.ckpt \
     --input volume.nii.gz \
     --output reconstructed.nii.gz \
@@ -232,21 +259,21 @@ prod9-train-autoencoder infer \
 
 ```bash
 # Train
-prod9-train-transformer train --config configs/maskgit/brats/stage2/base.yaml
+prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 
 # Validate
 prod9-train-transformer validate \
-    --config configs/maskgit/brats/stage2/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
     --checkpoint outputs/stage2/best.ckpt
 
 # Test
 prod9-train-transformer test \
-    --config configs/maskgit/brats/stage2/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
     --checkpoint outputs/stage2/best.ckpt
 
 # Generate samples
 prod9-train-transformer generate \
-    --config configs/maskgit/brats/stage2/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
     --checkpoint outputs/stage2/best.ckpt \
     --output outputs/generated \
     --num-samples 10 \
@@ -259,21 +286,21 @@ prod9-train-transformer generate \
 
 ```bash
 # Train
-prod9-train-maisi-vae train --config configs/maisi/autoencoder/brats_vae.yaml
+prod9-train-maisi-vae train --config src/prod9/configs/maisi/autoencoder/brats_vae.yaml
 
 # Validate
 prod9-train-maisi-vae validate \
-    --config configs/maisi/autoencoder/brats_vae.yaml \
+    --config src/prod9/configs/maisi/autoencoder/brats_vae.yaml \
     --checkpoint outputs/maisi_vae/best.ckpt
 
 # Test
 prod9-train-maisi-vae test \
-    --config configs/maisi/autoencoder/brats_vae.yaml \
+    --config src/prod9/configs/maisi/autoencoder/brats_vae.yaml \
     --checkpoint outputs/maisi_vae/best.ckpt
 
 # Inference
 prod9-train-maisi-vae infer \
-    --config configs/maisi/autoencoder/brats_vae.yaml \
+    --config src/prod9/configs/maisi/autoencoder/brats_vae.yaml \
     --checkpoint outputs/maisi_vae/best.ckpt \
     --input volume.nii.gz \
     --output reconstructed.nii.gz
@@ -283,21 +310,21 @@ prod9-train-maisi-vae infer \
 
 ```bash
 # Train
-prod9-train-maisi-diffusion train --config configs/maisi/diffusion/brats_diffusion.yaml
+prod9-train-maisi-diffusion train --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml
 
 # Validate
 prod9-train-maisi-diffusion validate \
-    --config configs/maisi/diffusion/brats_diffusion.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt
 
 # Test
 prod9-train-maisi-diffusion test \
-    --config configs/maisi/diffusion/brats_diffusion.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt
 
 # Generate samples
 prod9-train-maisi-diffusion generate \
-    --config configs/maisi/diffusion/brats_diffusion.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt \
     --output outputs/generated \
     --num-samples 10 \
@@ -308,16 +335,16 @@ prod9-train-maisi-diffusion generate \
 
 ```bash
 # Train
-prod9-train-maisi-controlnet train --config configs/maisi/diffusion/brats_controlnet.yaml
+prod9-train-maisi-controlnet train --config src/prod9/configs/maisi/diffusion/brats_controlnet.yaml
 
 # Validate
 prod9-train-maisi-controlnet validate \
-    --config configs/maisi/diffusion/brats_controlnet.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_controlnet.yaml \
     --checkpoint outputs/maisi_controlnet/best.ckpt
 
 # Test
 prod9-train-maisi-controlnet test \
-    --config configs/maisi/diffusion/brats_controlnet.yaml \
+    --config src/prod9/configs/maisi/diffusion/brats_controlnet.yaml \
     --checkpoint outputs/maisi_controlnet/best.ckpt
 ```
 
@@ -329,29 +356,29 @@ prod9-train-maisi-controlnet test \
 
 | Dataset | Stage | Config File |
 |---------|-------|-------------|
-| BraTS | Stage 1 (Autoencoder) | `configs/maskgit/brats/stage1/base.yaml` |
-| BraTS | Stage 1 (with FFL) | `configs/maskgit/brats/stage1/ffl.yaml` |
-| BraTS | Stage 2 (Transformer) | `configs/maskgit/brats/stage2/base.yaml` |
-| MedMNIST 3D | Stage 1 (Base) | `configs/maskgit/medmnist3d/stage1/base.yaml` |
-| MedMNIST 3D | Stage 1 (FFL) | `configs/maskgit/medmnist3d/stage1/ffl.yaml` |
-| MedMNIST 3D | Stage 1 (Large) | `configs/maskgit/medmnist3d/stage1/large.yaml` |
-| MedMNIST 3D | Stage 2 (Base) | `configs/maskgit/medmnist3d/stage2/base.yaml` |
-| MedMNIST 3D | Stage 2 (FFL) | `configs/maskgit/medmnist3d/stage2/ffl.yaml` |
-| MedMNIST 3D | Stage 2 (Large) | `configs/maskgit/medmnist3d/stage2/large.yaml` |
+| BraTS | Stage 1 (Autoencoder) | `src/prod9/configs/maskgit/brats/stage1/base.yaml` |
+| BraTS | Stage 1 (with FFL) | `src/prod9/configs/maskgit/brats/stage1/ffl.yaml` |
+| BraTS | Stage 2 (Transformer) | `src/prod9/configs/maskgit/brats/stage2/base.yaml` |
+| MedMNIST 3D | Stage 1 (Base) | `src/prod9/configs/maskgit/medmnist3d/stage1/base.yaml` |
+| MedMNIST 3D | Stage 1 (FFL) | `src/prod9/configs/maskgit/medmnist3d/stage1/ffl.yaml` |
+| MedMNIST 3D | Stage 1 (Large) | `src/prod9/configs/maskgit/medmnist3d/stage1/large.yaml` |
+| MedMNIST 3D | Stage 2 (Base) | `src/prod9/configs/maskgit/medmnist3d/stage2/base.yaml` |
+| MedMNIST 3D | Stage 2 (FFL) | `src/prod9/configs/maskgit/medmnist3d/stage2/ffl.yaml` |
+| MedMNIST 3D | Stage 2 (Large) | `src/prod9/configs/maskgit/medmnist3d/stage2/large.yaml` |
 
 **MAISI Configs**:
 
 | Dataset | Stage | Config File |
 |---------|-------|-------------|
-| BraTS | Stage 1 (VAE) | `configs/maisi/autoencoder/brats_vae.yaml` |
-| MedMNIST 3D | Stage 1 (VAE) | `configs/maisi/autoencoder/medmnist3d_vae.yaml` |
-| BraTS | Stage 2 (Diffusion) | `configs/maisi/diffusion/brats_diffusion.yaml` |
-| MedMNIST 3D | Stage 2 (Diffusion) | `configs/maisi/diffusion/medmnist3d_diffusion.yaml` |
-| BraTS | Stage 3 (ControlNet) | `configs/maisi/diffusion/brats_controlnet.yaml` |
+| BraTS | Stage 1 (VAE) | `src/prod9/configs/maisi/autoencoder/brats_vae.yaml` |
+| MedMNIST 3D | Stage 1 (VAE) | `src/prod9/configs/maisi/autoencoder/medmnist3d_vae.yaml` |
+| BraTS | Stage 2 (Diffusion) | `src/prod9/configs/maisi/diffusion/brats_diffusion.yaml` |
+| MedMNIST 3D | Stage 2 (Diffusion) | `src/prod9/configs/maisi/diffusion/medmnist3d_diffusion.yaml` |
+| BraTS | Stage 3 (ControlNet) | `src/prod9/configs/maisi/diffusion/brats_controlnet.yaml` |
 
 ### MaskGiT Configuration Structure
 
-**Stage 1 (Autoencoder)** - `configs/maskgit/brats/stage1/base.yaml`:
+**Stage 1 (Autoencoder)** - `src/prod9/configs/maskgit/brats/stage1/base.yaml`:
 - `model`: AutoencoderFSQ + discriminator architecture
 - `training`: Learning rate, epochs, optimizer settings
 - `data`: Dataset paths, batch_size, roi_size
@@ -360,7 +387,7 @@ prod9-train-maisi-controlnet test \
 - `callbacks`: Checkpointing, early stopping
 - `trainer`: Accelerator (gpu/cpu/mps), precision, devices
 
-**Stage 2 (Transformer)** - `configs/maskgit/brats/stage2/base.yaml`:
+**Stage 2 (Transformer)** - `src/prod9/configs/maskgit/brats/stage2/base.yaml`:
 - `model`: Transformer architecture (hidden_dim, num_heads, num_layers)
 - `training`: Learning rate, epochs, optimizer settings
 - `sampler`: MaskGiT sampling (num_steps, scheduler_type)
@@ -369,21 +396,21 @@ prod9-train-maisi-controlnet test \
 
 ### MAISI Configuration Structure
 
-**Stage 1 (VAE)** - `configs/maisi/autoencoder/brats_vae.yaml`:
+**Stage 1 (VAE)** - `src/prod9/configs/maisi/autoencoder/brats_vae.yaml`:
 - `model`: VAE architecture (spatial_dims, latent_channels, num_channels)
 - `training`: Learning rate, epochs, optimizer settings
 - `data`: Dataset paths, batch_size, roi_size
 - `loss`: Weights for reconstruction, KL, perceptual, adversarial
 - `vae_export_path`: Path to save trained VAE
 
-**Stage 2 (Diffusion)** - `configs/maisi/diffusion/brats_diffusion.yaml`:
+**Stage 2 (Diffusion)** - `src/prod9/configs/maisi/diffusion/brats_diffusion.yaml`:
 - `model`: Diffusion U-Net architecture
 - `scheduler`: Rectified Flow scheduler (num_train_timesteps, num_inference_steps)
 - `vae_path`: Path to trained Stage 1 VAE
 - `training`: Learning rate, epochs, optimizer settings
 - `data`: Dataset configuration
 
-**Stage 3 (ControlNet)** - `configs/maisi/diffusion/brats_controlnet.yaml`:
+**Stage 3 (ControlNet)** - `src/prod9/configs/maisi/diffusion/brats_controlnet.yaml`:
 - `model`: ControlNet architecture
 - `vae_path`: Path to trained Stage 1 VAE
 - `diffusion_path`: Path to trained Stage 2 diffusion model
@@ -414,7 +441,7 @@ sliding_window:
 
 ```bash
 prod9-train-autoencoder infer \
-    --config configs/maskgit/brats/stage1/base.yaml \
+    --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
     --checkpoint outputs/stage1/best.ckpt \
     --input large_volume.nii.gz \
     --output reconstructed.nii.gz \
@@ -467,7 +494,7 @@ hatch build
 ### MaskGiT: Autoencoder
 
 ```python
-from prod9.autoencoder.ae_fsq import AutoencoderFSQ
+from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.inference import (
     AutoencoderInferenceWrapper,
     SlidingWindowConfig

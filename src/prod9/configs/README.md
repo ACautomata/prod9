@@ -5,7 +5,8 @@ This directory contains configuration files for training different models in the
 ## Directory Structure
 
 ```
-configs/
+src/prod9/configs/
+├── README.md          # This file
 ├── maskgit/           # MaskGiT-based models (FSQ autoencoder + transformer)
 │   ├── medmnist3d/    # MedMNIST 3D dataset configs
 │   │   ├── stage1/    # Autoencoder with FSQ
@@ -13,10 +14,9 @@ configs/
 │   └── brats/         # BraTS dataset configs
 │       ├── stage1/    # Autoencoder with FSQ
 │       └── stage2/    # Transformer for token generation
-├── maisi/             # MAISI models (Rectified Flow diffusion)
-│   ├── autoencoder/   # MAISI Stage 1: VAE training
-│   └── diffusion/     # MAISI Stage 2+: Diffusion and ControlNet
-└── README.md          # This file
+└── maisi/             # MAISI models (Rectified Flow diffusion)
+    ├── autoencoder/   # MAISI Stage 1: VAE training
+    └── diffusion/     # MAISI Stage 2+: Diffusion and ControlNet
 ```
 
 ## MaskGiT Models
@@ -54,6 +54,7 @@ The `maisi/` directory contains configs for the MAISI (Rectified Flow) pipeline.
 | `autoencoder/brats_vae.yaml` | BraTS | 1 | MAISI VAE for BraTS |
 | `autoencoder/medmnist3d_vae.yaml` | MedMNIST 3D | 1 | MAISI VAE for MedMNIST 3D |
 | `diffusion/brats_diffusion.yaml` | BraTS | 2 | Rectified Flow diffusion for BraTS |
+| `diffusion/medmnist3d_diffusion.yaml` | MedMNIST 3D | 2 | Rectified Flow diffusion for MedMNIST 3D |
 | `diffusion/brats_controlnet.yaml` | BraTS | 3 | ControlNet for conditional generation |
 
 ## Perceptual Loss Options

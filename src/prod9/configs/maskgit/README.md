@@ -9,7 +9,7 @@ maskgit/
 ├── medmnist3d/
 │   ├── stage1/          # Autoencoder with FSQ
 │   │   ├── base.yaml    # Standard FSQ configuration (levels=[8,8,8])
-│   │   ├── large_fsq.yaml # Large FSQ configuration (levels=[8,8,6,5])
+│   │   ├── large.yaml # Large FSQ configuration (levels=[8,8,6,5])
 │   │   └── ffl.yaml     # With Focal Frequency Loss (instead of LPIPS)
 │   └── stage2/          # Transformer for token generation
 │       ├── base.yaml    # Standard transformer (matches stage1/base.yaml)
@@ -31,7 +31,7 @@ Stage 1 trains an autoencoder with Finite Scalar Quantization (FSQ) to compress 
 | Config | Dataset | FSQ Levels | Loss Type | Description |
 |--------|---------|------------|-----------|-------------|
 | `medmnist3d/stage1/base.yaml` | OrganMNIST3D | [8,8,8] (512) | LPIPS | Standard configuration |
-| `medmnist3d/stage1/large_fsq.yaml` | All MedMNIST3D | [8,8,6,5] (2400) | LPIPS | Large codebook for all datasets |
+| `medmnist3d/stage1/large.yaml` | All MedMNIST3D | [8,8,6,5] (2400) | LPIPS | Large codebook for all datasets |
 | `medmnist3d/stage1/ffl.yaml` | OrganMNIST3D | [8,8,8] (512) | FFL | Focal Frequency Loss |
 | `brats/stage1/base.yaml` | BraTS | [6,6,6,5] (1080) | LPIPS | 4-modality configuration |
 | `brats/stage1/ffl.yaml` | BraTS | [6,6,6,5] (1080) | FFL | Focal Frequency Loss |
@@ -55,7 +55,7 @@ Stage 2 trains a transformer to generate latent tokens autoregressively using ma
 prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stage1/base.yaml
 
 # MedMNIST 3D - Large FSQ (all datasets)
-prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stage1/large_fsq.yaml
+prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stage1/large.yaml
 
 # MedMNIST 3D - With FFL
 prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stage1/ffl.yaml
@@ -141,6 +141,6 @@ Each config file specifies its own output directory. Stage 2 configs reference t
 | Stage 1 Config | Autoencoder Export | Stage 2 Config |
 |----------------|-------------------|----------------|
 | `medmnist3d/stage1/base.yaml` | `outputs/medmnist3d_autoencoder.pt` | `medmnist3d/stage2/base.yaml` |
-| `medmnist3d/stage1/large_fsq.yaml` | `outputs/medmnist3d_autoencoder-large.pt` | - |
+| `medmnist3d/stage1/large.yaml` | `outputs/medmnist3d_autoencoder-large.pt` | - |
 | `medmnist3d/stage1/ffl.yaml` | `outputs/medmnist3d_autoencoder_ffl.pt` | `medmnist3d/stage2/ffl.yaml` |
 | `brats/stage1/base.yaml` | `outputs/autoencoder_final.pt` | `brats/stage2/base.yaml` |

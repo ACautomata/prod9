@@ -15,4 +15,5 @@ This directory contains configuration files for the MAISI (Rectified Flow) model
 
 ### Diffusion (Stage 2+)
 - `diffusion/brats_diffusion.yaml` - Rectified Flow for BraTS dataset
+- `diffusion/medmnist3d_diffusion.yaml` - Rectified Flow for MedMNIST 3D dataset
 - `diffusion/brats_controlnet.yaml` - ControlNet for conditional generation
