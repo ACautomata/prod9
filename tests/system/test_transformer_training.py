@@ -71,14 +71,16 @@ class TestTransformerTraining:
         model = model.to(device)
 
         # Verify transformer was created
-        assert model.transformer is not None, "Transformer should be auto-created"
-        assert isinstance(model.transformer, TransformerDecoder), "Should be TransformerDecoder"
+        transformer = model.transformer
+        assert transformer is not None, "Transformer should be auto-created"
+        assert isinstance(transformer, TransformerDecoder), "Should be TransformerDecoder"
         # Run a minimal forward to ensure weights are usable
         latent = torch.randn(1, model.latent_channels, 8, 8, 8, device=device)
         cond = torch.randn_like(latent)
         with torch.no_grad():
-            output = model.transformer(latent, cond)
-        expected_shape = (1, model.transformer.out_proj.out_channels, 8, 8, 8)
+            output = transformer(latent, cond)
+        expected_channels = config.get("model", {}).get("transformer", {}).get("codebook_size", 512)
+        expected_shape = (1, expected_channels, 8, 8, 8)
         assert output.shape == expected_shape
         assert torch.isfinite(output).all()
 
@@ -110,13 +112,15 @@ class TestTransformerTraining:
         cond_latent = torch.randn_like(source_latent)
 
         # Forward pass through transformer should yield logits
+        transformer = model.transformer
+        assert transformer is not None
         with torch.no_grad():
-            logits = model.transformer(source_latent, cond_latent)
+            logits = transformer(source_latent, cond_latent)
 
-        expected_shape = (1, model.transformer.out_proj.out_channels, 16, 16, 16)
+        expected_channels = config.get("model", {}).get("transformer", {}).get("codebook_size", 512)
+        expected_shape = (1, expected_channels, 16, 16, 16)
         assert logits.shape == expected_shape
         assert torch.isfinite(logits).all()
-        assert model.transformer is not None
         assert hasattr(model, "condition_generator")
 
     def test_unconditional_generation(self, minimal_config: Dict[str, Any], device: torch.device):

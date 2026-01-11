@@ -50,6 +50,7 @@ data:
   modalities: ["T1", "T1ce", "T2", "FLAIR"]
   batch_size: 2
   num_workers: 4
+  cache_num_workers: 0
   train_val_split: 0.8
   roi_size: [64, 64, 64]
   cache_rate: 0.5

@@ -87,6 +87,7 @@ data:
   # Data loader
   batch_size: 8
   num_workers: 4
+  cache_num_workers: 0
   train_val_split: 0.9
 
   # Stage 2 specific

@@ -13,6 +13,7 @@ import unittest
 import torch
 import torch.nn as nn
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+from pytorch_lightning import Trainer
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
@@ -244,7 +245,7 @@ class TestMAISIVAELightningInitialization(unittest.TestCase):
             max_epochs = 100
             estimated_stepping_batches = 10000
 
-        lightning_module.trainer = MockTrainer()
+        lightning_module.trainer = cast(Trainer, MockTrainer())
         lightning_module.on_train_start()  # This sets up hparams
 
         optimizers = lightning_module.configure_optimizers()
@@ -252,6 +253,10 @@ class TestMAISIVAELightningInitialization(unittest.TestCase):
         # With warmup enabled by default, configure_optimizers returns a tuple
         self.assertIsInstance(optimizers, tuple)
         optimizers_list, schedulers = optimizers
+        self.assertIsInstance(optimizers_list, list)
+        self.assertIsInstance(schedulers, list)
+        if not isinstance(optimizers_list, list) or not isinstance(schedulers, list):
+            self.fail("Expected optimizer and scheduler lists")
         self.assertEqual(len(optimizers_list), 2)
         self.assertEqual(len(schedulers), 2)
 
@@ -446,7 +451,7 @@ class TestMAISIVAELightningWarmup(unittest.TestCase):
             max_epochs = 100
             estimated_stepping_batches = 10000
 
-        lightning_module.trainer = MockTrainer()
+        lightning_module.trainer = cast(Trainer, MockTrainer())
         lightning_module.on_train_start()  # This sets up hparams
 
         result = lightning_module.configure_optimizers()
@@ -454,13 +459,18 @@ class TestMAISIVAELightningWarmup(unittest.TestCase):
         # Should return optimizers and schedulers
         self.assertIsInstance(result, tuple)
         optimizers, schedulers = result
+        self.assertIsInstance(optimizers, list)
+        self.assertIsInstance(schedulers, list)
+        if not isinstance(optimizers, list) or not isinstance(schedulers, list):
+            self.fail("Expected optimizer and scheduler lists")
         self.assertEqual(len(optimizers), 2)
         self.assertEqual(len(schedulers), 2)
 
         # Verify schedulers are LambdaLR (warmup schedulers)
         from torch.optim.lr_scheduler import LambdaLR
-        self.assertIsInstance(schedulers[0], LambdaLR)
-        self.assertIsInstance(schedulers[1], LambdaLR)
+        schedulers_list = cast(list[LambdaLR], schedulers)
+        self.assertIsInstance(schedulers_list[0], LambdaLR)
+        self.assertIsInstance(schedulers_list[1], LambdaLR)
 
     def test_no_scheduler_when_warmup_disabled(self):
         """Test that no schedulers are created when warmup_enabled=False."""

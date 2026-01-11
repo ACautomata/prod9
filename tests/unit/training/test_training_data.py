@@ -17,7 +17,7 @@ import numpy as np
 from prod9.training.brats_data import (
     BraTSDataModuleStage1,
     BraTSDataModuleStage2,
-    _RandomModalityDataset,
+    _CachedRandomModalityDataset,
     _PreEncodedDataset,
     PreEncodedSample,
 )
@@ -109,11 +109,29 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
         try:
             data_module.setup(stage="fit")
             # Verify datasets were created (singular form)
-            self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
-            self.assertIsInstance(data_module.val_dataset, _RandomModalityDataset)
+            self.assertIsInstance(data_module.train_dataset, _CachedRandomModalityDataset)
+            self.assertIsInstance(data_module.val_dataset, _CachedRandomModalityDataset)
         except (FileNotFoundError, RuntimeError):
             # If no real data files exist, skip test gracefully
             self.skipTest("Real data files not available for setup test")
+
+    @patch("prod9.training.brats_data._CachedRandomModalityDataset")
+    def test_cache_dataset_uses_cache_num_workers(self, mock_cached_dataset: MagicMock) -> None:
+        """CacheDataset should respect cache_num_workers setting."""
+        mock_cached_dataset.return_value = MagicMock()
+        data_module = BraTSDataModuleStage1(
+            data_dir=str(self.braats_root),
+            batch_size=2,
+            num_workers=2,
+            cache_num_workers=0,
+            train_val_split=0.8,
+        )
+
+        data_module.setup(stage="fit")
+
+        self.assertEqual(mock_cached_dataset.call_count, 2)
+        for call in mock_cached_dataset.call_args_list:
+            self.assertEqual(call.kwargs.get("num_workers"), 0)
 
     def test_train_dataloader(self):
         """Test training dataloader creation."""
@@ -194,7 +212,7 @@ class TestBraTSDataModuleStage1(unittest.TestCase):
             data_module.setup(stage="fit")
             # Verify that the dataset uses random modality sampling
             self.assertIsNotNone(data_module.train_dataset)
-            self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
+            self.assertIsInstance(data_module.train_dataset, _CachedRandomModalityDataset)
             # The dataset should have access to all modalities
             if data_module.train_dataset is not None:
                 self.assertEqual(data_module.train_dataset.modalities, data_module.modalities)
@@ -247,6 +265,33 @@ class TestBraTSDataModuleStage2(unittest.TestCase):
 
         self.assertEqual(data_module.batch_size, 2)
         self.assertEqual(data_module.num_workers, 0)
+
+    @patch("prod9.training.brats_data.torch.save")
+    @patch("prod9.training.brats_data._CachedAllModalitiesDataset")
+    def test_stage2_cache_dataset_uses_cache_num_workers(
+        self,
+        mock_cached_dataset: MagicMock,
+        mock_save: MagicMock,
+    ) -> None:
+        """Stage2 pre-encoding should respect cache_num_workers."""
+        mock_dataset = MagicMock()
+        mock_dataset.__len__.return_value = 0
+        mock_cached_dataset.return_value = mock_dataset
+
+        data_module = BraTSDataModuleStage2(
+            data_dir=str(self.braats_root),
+            cache_dir=str(self.temp_dir / "cache"),
+            batch_size=2,
+            num_workers=2,
+            cache_num_workers=0,
+        )
+        data_module._autoencoder = MagicMock()
+
+        data_module._pre_encode_data(split="train")
+
+        self.assertEqual(mock_cached_dataset.call_count, 1)
+        self.assertEqual(mock_cached_dataset.call_args.kwargs.get("num_workers"), 0)
+        mock_save.assert_called_once()
 
     def test_stage2_requires_autoencoder(self):
         """Test that Stage2 requires autoencoder for setup."""
@@ -342,7 +387,7 @@ class TestIntegration(unittest.TestCase):
                 # Check if dataset was created
                 if hasattr(data_module, 'train_dataset') and data_module.train_dataset is not None:
                     # Dataset should be created
-                    self.assertIsInstance(data_module.train_dataset, _RandomModalityDataset)
+                    self.assertIsInstance(data_module.train_dataset, _CachedRandomModalityDataset)
             except (FileNotFoundError, RuntimeError, ImportError):
                 # If no real data files or nibabel not available, skip test gracefully
                 self.skipTest("Toy dataset or nibabel not available for integration test")

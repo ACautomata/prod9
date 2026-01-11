@@ -167,7 +167,8 @@ class TestMedMNIST3DStage1Dataset:
 
     def test_tensor_output_is_float(self) -> None:
         """Test output tensor is float type (with preprocessing transform)."""
-        from monai.transforms import Compose, ToTensord
+        from monai.transforms.compose import Compose
+        from monai.transforms.utility.dictionary import ToTensord
 
         # Create preprocessing transform that converts to tensor
         preprocessing_transform = Compose([
@@ -716,9 +717,39 @@ class TestMedMNIST3DDataModuleStage1:
         assert len(dm.dataset_names) == 2
         assert dm.dataset_names == ["organmnist3d", "nodulemnist3d"]
 
+    @patch("prod9.training.medmnist3d_data._CachedMedMNIST3DStage1Dataset")
+    @patch("medmnist.OrganMNIST3D")
+    def test_cache_dataset_respects_cache_num_workers(
+        self,
+        mock_dataset_class: MagicMock,
+        mock_cached_dataset: MagicMock,
+    ) -> None:
+        """CacheDataset construction should use cache_num_workers setting."""
+        mock_dataset = MagicMock()
+        mock_dataset.__len__.return_value = 6
+        mock_dataset.__getitem__.side_effect = lambda i: (
+            np.random.rand(1, 64, 64, 64).astype(np.float32),
+            0,
+        )
+        mock_dataset_class.return_value = mock_dataset
+        mock_cached_dataset.return_value = MagicMock()
+
+        dm = MedMNIST3DDataModuleStage1(
+            download=False,
+            num_workers=2,
+            cache_num_workers=0,
+        )
+        dm.setup()
+
+        assert mock_cached_dataset.call_count == 2
+        for call in mock_cached_dataset.call_args_list:
+            assert call.kwargs.get("num_workers") == 0
+
 
 class TestMedMNIST3DDataModuleStage2:
+
     """Tests for MedMNIST3DDataModuleStage2 class."""
+
 
     def setup_method(self) -> None:
         """Create temp directory and mocks for testing."""

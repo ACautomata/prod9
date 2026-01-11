@@ -52,6 +52,7 @@ data:
   data_dir: "${BRATS_DATA_DIR:data/BraTS}"
   batch_size: 1
   num_workers: 4
+  cache_num_workers: 0
   roi_size: [64, 64, 64]
   train_val_split: 0.8
 

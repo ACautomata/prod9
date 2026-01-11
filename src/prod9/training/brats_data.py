@@ -245,7 +245,7 @@ class _CachedRandomModalityDataset(CacheDataset):
         augmentation_transform: Compose | None = None,
         modalities: Optional[List[str]] = None,
         cache_rate: float = 1.0,
-        num_workers: int = 4  # Default number of workers for caching
+        num_workers: int = 0  # Default to 0 to avoid nested multiprocessing
     ) -> None:
         # Prepare data for CacheDataset: list of dictionaries
         # Each dictionary contains file path and metadata for one modality
@@ -351,7 +351,7 @@ class _CachedAllModalitiesDataset(CacheDataset):
         augmentation_transform: Compose | None = None,
         modalities: Optional[List[str]] = None,
         cache_rate: float = 1.0,
-        num_workers: int = 4  # Default number of workers for caching
+        num_workers: int = 0  # Default to 0 to avoid nested multiprocessing
     ) -> None:
         # Prepare data for CacheDataset: list of dictionaries
         # Each dictionary contains file paths for all modalities
@@ -493,6 +493,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         data_dir: Root directory containing BraTS data
         batch_size: Batch size
         num_workers: Number of dataloader workers
+        cache_num_workers: Number of CacheDataset workers (use 0 to avoid nested multiprocessing)
         cache_rate: Cache rate for MONAI CacheDataset (1.0 = full cache for faster training)
         val_batch_size: Validation batch size (increase to utilize GPU better)
         prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
@@ -522,6 +523,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         data_dir: str,
         batch_size: int = 2,
         num_workers: int = 4,
+        cache_num_workers: int = 0,
         cache_rate: float = 1.0,
         val_batch_size: int = 1,
         prefetch_factor: int = 2,
@@ -553,6 +555,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.cache_num_workers = cache_num_workers
         self.cache_rate = cache_rate
         self.val_batch_size = val_batch_size
         self.prefetch_factor = prefetch_factor
@@ -611,6 +614,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
             data_dir=data_config["data_dir"],
             batch_size=data_config.get("batch_size", 2),
             num_workers=data_config.get("num_workers", 4),
+            cache_num_workers=data_config.get("cache_num_workers", 0),
             cache_rate=data_config.get("cache_rate", 1.0),
             val_batch_size=data_config.get("val_batch_size", 1),
             prefetch_factor=data_config.get("prefetch_factor", 2),
@@ -696,7 +700,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
                 augmentation_transform=train_augmentation_transforms,
                 modalities=self.modalities,
                 cache_rate=self.cache_rate,
-                num_workers=self.num_workers,
+                num_workers=self.cache_num_workers,
             )
             self.val_dataset = _CachedRandomModalityDataset(
                 data_files=val_files,
@@ -704,7 +708,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
                 augmentation_transform=val_augmentation_transforms,  # No augmentation
                 modalities=self.modalities,
                 cache_rate=self.cache_rate,
-                num_workers=self.num_workers,
+                num_workers=self.cache_num_workers,
             )
 
     def _get_preprocessing_transforms(self) -> Compose:
@@ -927,6 +931,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         autoencoder_path: Path to autoencoder checkpoint (if autoencoder not provided)
         batch_size: Batch size
         num_workers: Number of dataloader workers
+        cache_num_workers: Number of CacheDataset workers (use 0 to avoid nested multiprocessing)
         cache_rate: Cache rate for MONAI CacheDataset (1.0 = full cache for faster training)
         val_batch_size: Validation batch size (increase to utilize GPU better)
         prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
@@ -954,6 +959,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         autoencoder_path: Optional[str] = None,
         batch_size: int = 2,
         num_workers: int = 4,
+        cache_num_workers: int = 0,
         cache_rate: float = 1.0,
         val_batch_size: int = 1,
         prefetch_factor: int = 2,
@@ -985,6 +991,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         self.autoencoder_path = autoencoder_path
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.cache_num_workers = cache_num_workers
         self.cache_rate = cache_rate
         self.val_batch_size = val_batch_size
         self.prefetch_factor = prefetch_factor
@@ -1041,6 +1048,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             data_dir=data_config["data_dir"],
             batch_size=data_config.get("batch_size", 2),
             num_workers=data_config.get("num_workers", 4),
+            cache_num_workers=data_config.get("cache_num_workers", 0),
             cache_rate=data_config.get("cache_rate", 1.0),
             val_batch_size=data_config.get("val_batch_size", 1),
             prefetch_factor=data_config.get("prefetch_factor", 2),
@@ -1168,7 +1176,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             augmentation_transform=augmentation_transforms,
             modalities=self.modalities,
             cache_rate=self.cache_rate,
-            num_workers=self.num_workers,
+            num_workers=self.cache_num_workers,
         )
 
         # Pre-encode all patients using cached dataset

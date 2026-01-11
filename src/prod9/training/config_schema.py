@@ -273,6 +273,7 @@ class DataConfig(BaseModel):
     data_dir: Optional[str] = Field(default=None)
     batch_size: int = Field(default=2, ge=1)
     num_workers: int = Field(default=4, ge=0)
+    cache_num_workers: int = Field(default=0, ge=0, description="CacheDataset worker count")
     val_batch_size: int = Field(default=1, ge=1, description="Validation batch size")
     prefetch_factor: int = Field(default=2, ge=1, description="Batches to prefetch per worker")
     persistent_workers: bool = Field(default=True, description="Keep workers alive between epochs")
@@ -588,6 +589,7 @@ class MedMNIST3DDataConfig(BaseModel):
 
     batch_size: int = Field(default=8, ge=1)
     num_workers: int = Field(default=4, ge=0)
+    cache_num_workers: int = Field(default=0, ge=0, description="CacheDataset worker count")
     val_batch_size: int = Field(default=8, ge=1, description="Validation batch size")
     prefetch_factor: int = Field(default=2, ge=1, description="Batches to prefetch per worker")
     persistent_workers: bool = Field(default=True, description="Keep workers alive between epochs")

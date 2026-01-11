@@ -52,6 +52,7 @@ data:
   download: true
   batch_size: 2
   num_workers: 4
+  cache_num_workers: 0
 
   # Pre-encoded data cache directory (Stage 2)
   cache_dir: "outputs/medmnist3d_encoded"

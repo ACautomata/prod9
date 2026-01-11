@@ -5,8 +5,10 @@ Tests VAEGAN loss with PerceptualLoss, FocalFrequencyLoss, and SliceWiseFake3DLo
 from prod9.training.losses.
 """
 import unittest
-import torch
+from typing import Any, cast
 from urllib.error import HTTPError
+
+import torch
 
 from prod9.training.losses import VAEGANLoss, FocalFrequencyLoss, SliceWiseFake3DLoss
 
@@ -670,7 +672,8 @@ class TestFocalFrequencyLoss(unittest.TestCase):
 
         # Check that gradients are computed
         self.assertIsNotNone(pred.grad)
-        self.assertGreater(torch.abs(pred.grad).sum().item(), 0.0)
+        grad = cast(torch.Tensor, pred.grad)
+        self.assertGreater(torch.abs(grad).sum().item(), 0.0)
 
     def test_ffl_alpha_parameter(self):
         """Test that alpha parameter affects loss computation."""
@@ -820,7 +823,8 @@ class TestSliceWiseFake3DLoss(unittest.TestCase):
 
         # Check that gradients are computed
         self.assertIsNotNone(pred.grad)
-        self.assertGreater(torch.abs(pred.grad).sum().item(), 0.0)
+        grad = cast(torch.Tensor, pred.grad)
+        self.assertGreater(torch.abs(grad).sum().item(), 0.0)
 
     def test_slice_wise_with_ffl(self):
         """Test SliceWiseFake3DLoss wrapping FocalFrequencyLoss."""
@@ -876,7 +880,7 @@ class TestVAEGANLossVAEMode(unittest.TestCase):
     def test_invalid_loss_mode_raises_error(self):
         """Test that invalid loss_mode raises ValueError."""
         with self.assertRaises(ValueError):
-            VAEGANLoss(loss_mode="invalid")
+            VAEGANLoss(loss_mode=cast(Any, "invalid"))
 
     def test_kl_loss_computation(self):
         """Test KL loss is computed correctly."""

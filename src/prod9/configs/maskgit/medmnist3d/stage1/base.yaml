@@ -92,6 +92,7 @@ data:
   # Data loader settings
   batch_size: 4
   num_workers: 4
+  cache_num_workers: 0
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)

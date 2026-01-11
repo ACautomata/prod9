@@ -122,8 +122,8 @@ class _CachedMedMNIST3DStage1Dataset(CacheDataset):
         augmentation_transform: Compose | None = None,
         modality_name: str = "mnist3d",
         cache_rate: float = 1.0,
-        num_workers: int = 4,  # Default number of workers for caching
-    ):
+        num_workers: int = 0,  # Default to 0 to avoid nested multiprocessing
+    ) -> None:
         # Prepare data for CacheDataset: list of (data_dict, modality_name) tuples
         # CacheDataset expects items to be dictionaries or hashable objects
         data = []
@@ -247,6 +247,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         download: Whether to download data if not present
         batch_size: Batch size for DataLoader
         num_workers: Number of workers for DataLoader
+        cache_num_workers: Workers for CacheDataset preprocessing (use 0 to avoid nested multiprocessing)
         val_batch_size: Validation batch size (increase to utilize GPU better)
         prefetch_factor: Number of batches to prefetch per worker (2 is recommended)
         persistent_workers: Keep worker processes alive between epochs (reduces startup overhead)
@@ -282,7 +283,8 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         device: Optional[str] = None,
         pin_memory: bool = True,
         augmentation=None,
-    ):
+        cache_num_workers: int = 0,
+    ) -> None:
         super().__init__()  # Required by LightningDataModule
 
         self.size = size
@@ -290,6 +292,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.download = download
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.cache_num_workers = cache_num_workers
         self.val_batch_size = val_batch_size
         self.prefetch_factor = prefetch_factor
         self.persistent_workers = persistent_workers
@@ -383,7 +386,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
                     augmentation_transform=train_augmentation_transforms,
                     modality_name=ds_name,
                     cache_rate=1.0,  # Cache all preprocessing results
-                    num_workers=self.num_workers,
+                    num_workers=self.cache_num_workers,
                 )
             )
             val_datasets.append(
@@ -393,7 +396,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
                     augmentation_transform=val_augmentation_transforms,  # No augmentation
                     modality_name=ds_name,
                     cache_rate=1.0,
-                    num_workers=self.num_workers,
+                    num_workers=self.cache_num_workers,
                 )
             )
 
@@ -579,6 +582,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             device=data_config.get("device"),
             pin_memory=data_config.get("pin_memory", True),
             augmentation=augmentation,
+            cache_num_workers=data_config.get("cache_num_workers", 0),
         )
 
 

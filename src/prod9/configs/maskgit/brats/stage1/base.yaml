@@ -84,6 +84,7 @@ data:
   # Data loader settings
   batch_size: 2
   num_workers: 4
+  cache_num_workers: 0
   cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
   pin_memory: true
   train_val_split: 0.8

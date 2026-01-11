@@ -43,6 +43,7 @@ data:
   data_dir: "${BRATS_DATA_DIR:data/BraTS}"
   batch_size: 2
   num_workers: 4
+  cache_num_workers: 0
   roi_size: [64, 64, 64]
   cache_rate: 0.5
   pin_memory: true
