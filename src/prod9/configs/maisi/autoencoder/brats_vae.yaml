@@ -82,7 +82,9 @@ loss:
   kl_weight: 1.0e-6
   perceptual_weight: 0.5
   adv_weight: 0.1
-  lpips_network: "medicalnet_resnet10_23datasets"
+  lpips_network: "alex"
+  is_fake_3d: true
+  fake_3d_ratio: 0.5
   discriminator_iter_start: 1500
 
 # =============================================================================
