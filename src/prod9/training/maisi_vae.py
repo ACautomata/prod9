@@ -126,6 +126,7 @@ class MAISIVAELightning(pl.LightningModule):
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
         self.lpips = LPIPSMetric(
+            network_type=perceptual_network_type,
             is_fake_3d=is_fake_3d,
             fake_3d_ratio=fake_3d_ratio,
         )

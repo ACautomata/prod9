@@ -272,11 +272,15 @@ class TestLPIPSMetric(unittest.TestCase):
         with patch("monai.losses.perceptual.PerceptualLoss") as mock_loss:
             mock_loss.return_value = MagicMock()
 
-            metric = LPIPSMetric(is_fake_3d=True, fake_3d_ratio=0.3)
+            metric = LPIPSMetric(
+                network_type="alex",
+                is_fake_3d=True,
+                fake_3d_ratio=0.3,
+            )
             self.assertIsNotNone(metric)
             mock_loss.assert_called_once_with(
                 spatial_dims=3,
-                network_type="medicalnet_resnet10_23datasets",
+                network_type="alex",
                 is_fake_3d=True,
                 fake_3d_ratio=0.3,
             )
