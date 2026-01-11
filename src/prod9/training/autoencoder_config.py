@@ -4,13 +4,14 @@ Configuration class for AutoencoderLightning.
 Helper class to create LightningModule from config dictionary.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 import torch
+from monai.networks.nets.patchgan_discriminator import \
+    MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
 class AutoencoderLightningConfig:
@@ -96,6 +97,8 @@ class AutoencoderLightningConfig:
             loss_type=loss_type,
             ffl_config=ffl_config,
             perceptual_network_type=perceptual_config.get("network_type", "medicalnet_resnet10_23datasets"),
+            is_fake_3d=perceptual_config.get("is_fake_3d", False),
+            fake_3d_ratio=perceptual_config.get("fake_3d_ratio", 0.5),
             adv_weight=adv_config.get("weight", 0.1),
             adv_criterion=adv_criterion,
             commitment_weight=commitment_config.get("weight", 0.25),

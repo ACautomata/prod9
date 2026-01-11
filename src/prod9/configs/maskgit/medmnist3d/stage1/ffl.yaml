@@ -17,12 +17,12 @@ model:
     spatial_dims: 3
     in_channels: 1
     out_channels: 1
-    levels: [8, 8, 8]  # 8^3 = 512 codebook size
-    num_channels: [16, 32, 64, 64]  # Reduced channel sizes for memory efficiency (4 layers for 64^3 input)
+    levels: [8, 8, 8, 6, 5]  # 8^3 = 512 codebook size
+    num_channels: [64, 128, 256, 256]  # Reduced channel sizes for memory efficiency (4 layers for 64^3 input)
     attention_levels: [False, False, False, True]  # Attention only in deepest layer
     num_res_blocks: [2, 2, 2, 2]  # Residual blocks per layer (4 layers)
-    norm_num_groups: 8  # Group normalization groups
-    num_splits: 2  # No splitting for small 64^3 inputs (default is 16)
+    norm_num_groups: 32  # Group normalization groups
+    num_splits: 4  # No splitting for small 64^3 inputs (default is 16)
 
   # MultiScalePatchDiscriminator configuration
   discriminator:
@@ -47,7 +47,7 @@ model:
 training:
   # Optimizer settings
   optimizer:
-    lr_g: 5e-5  # Generator (autoencoder) learning rate (reduced for stability)
+    lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
     lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
     b1: 0.9  # Adam beta1
     b2: 0.95  # Adam beta2
@@ -76,7 +76,7 @@ training:
 data:
   # MedMNIST 3D dataset configuration
   # Option 1: Single dataset (backward compatible)
-  dataset_name: "organmnist3d"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
+  dataset_name: "all"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
   # Option 2: Multiple datasets (combines all specified datasets)
   dataset_names: null  # null = use dataset_name, or specify list: ["organmnist3d", "nodulemnist3d", ...]
 
@@ -89,8 +89,8 @@ data:
   download: true
 
   # Data loader settings
-  batch_size: 4
-  num_workers: 4
+  batch_size: 2
+  num_workers: 2
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)
@@ -113,7 +113,7 @@ loss:
   # Loss type selector: "lpips" or "ffl"
   loss_type: "ffl"
 
-  discriminator_iter_start: 500  # Discriminator warmup (reduced from 3000)
+  discriminator_iter_start: 1500  # Discriminator warmup (reduced from 3000)
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -215,7 +215,6 @@ trainer:
   profiler: null  # null, simple, advanced, pytorch
   detect_anomaly: false
   benchmark: false
-
 # =============================================================================
 # Sliding Window Inference
 # =============================================================================

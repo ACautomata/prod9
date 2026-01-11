@@ -11,17 +11,17 @@ This module implements VAEGAN training for MAISI VAE with:
 import os
 from typing import TYPE_CHECKING, Dict, Optional, cast
 
-import torch
 import pytorch_lightning as pl
+import torch
+from monai.networks.nets.patchgan_discriminator import \
+    MultiScalePatchDiscriminator
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+# Import Optimizer for runtime use (not just type checking)
+from torch.optim import Optimizer
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
-
-# Import Optimizer for runtime use (not just type checking)
-from torch.optim import Optimizer
+from prod9.training.metrics import LPIPSMetric, PSNRMetric, SSIMMetric
 
 
 class MAISIVAELightning(pl.LightningModule):
@@ -59,6 +59,8 @@ class MAISIVAELightning(pl.LightningModule):
         kl_weight: Weight for KL divergence loss (default: 1e-6)
         adv_weight: Base weight for adversarial loss (default: 0.1)
         perceptual_network_type: Pretrained network for perceptual loss (default: "medicalnet_resnet10_23datasets")
+        is_fake_3d: Whether to use 2.5D perceptual loss for 3D volumes
+        fake_3d_ratio: Fraction of slices used when is_fake_3d=True
         adv_criterion: Adversarial loss criterion (default: "least_squares")
         sample_every_n_steps: Log samples every N steps (default: 100)
         discriminator_iter_start: Step to start discriminator training (default: 0)
@@ -81,6 +83,8 @@ class MAISIVAELightning(pl.LightningModule):
         kl_weight: float = 1e-6,
         adv_weight: float = 0.1,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
+        is_fake_3d: bool = False,
+        fake_3d_ratio: float = 0.5,
         adv_criterion: str = "least_squares",
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
@@ -112,6 +116,8 @@ class MAISIVAELightning(pl.LightningModule):
             adv_weight=adv_weight,
             spatial_dims=3,
             perceptual_network_type=perceptual_network_type,
+            is_fake_3d=is_fake_3d,
+            fake_3d_ratio=fake_3d_ratio,
             adv_criterion=adv_criterion,
             discriminator_iter_start=discriminator_iter_start,
         )
@@ -119,7 +125,10 @@ class MAISIVAELightning(pl.LightningModule):
         # Metrics
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric()
+        self.lpips = LPIPSMetric(
+            is_fake_3d=is_fake_3d,
+            fake_3d_ratio=fake_3d_ratio,
+        )
 
         # Logging config
         self.sample_every_n_steps = sample_every_n_steps
@@ -388,13 +397,15 @@ class MAISIVAELightning(pl.LightningModule):
         if self.warmup_enabled:
             from prod9.training.schedulers import create_warmup_scheduler
 
-            # Estimate total training steps
             total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
             if total_steps is None:
-                # Fallback estimate: 100 epochs * estimated batches per epoch
-                num_epochs = getattr(self.trainer, "max_epochs", 100)
-                # We don't know the dataset size yet, use a reasonable default
-                total_steps = num_epochs * 1000  # Will be conservative
+                raise RuntimeError(
+                    "Trainer does not provide estimated_stepping_batches; "
+                    "ensure the trainer is initialized via fit before configuring warmup."
+                )
+            total_steps = int(total_steps)
+            if total_steps <= 0:
+                raise ValueError("Estimated total_steps must be positive for warmup scheduling.")
 
             # Calculate warmup steps
             warmup_steps = self.warmup_steps

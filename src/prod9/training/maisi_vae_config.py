@@ -7,16 +7,14 @@ from YAML configuration files.
 
 from typing import Any, Dict
 
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import \
+    MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
-from prod9.training.config_schema import (
-    MAISIVAEFullConfig,
-    MAISIAutoencoderModelConfig,
-    TrainingConfig,
-    MAISIVAELossConfig,
-    DiscriminatorConfig,
-)
+from prod9.training.config_schema import (DiscriminatorConfig,
+                                          MAISIAutoencoderModelConfig,
+                                          MAISIVAEFullConfig,
+                                          MAISIVAELossConfig, TrainingConfig)
 from prod9.training.maisi_vae import MAISIVAELightning
 
 
@@ -90,6 +88,8 @@ class MAISIVAELightningConfig:
             perceptual_weight=loss_config.perceptual_weight,
             adv_weight=loss_config.adv_weight,
             perceptual_network_type=loss_config.lpips_network,
+            is_fake_3d=loss_config.is_fake_3d,
+            fake_3d_ratio=loss_config.fake_3d_ratio,
             sample_every_n_steps=loop_config.sample_every_n_steps,
             # Warmup settings from stability config
             warmup_enabled=stability_config.warmup_enabled,

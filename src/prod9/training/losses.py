@@ -17,11 +17,13 @@ Reference for Focal Frequency Loss:
 """
 
 import math
+from typing import (Callable, Dict, List, Literal, Optional, Sequence, Tuple,
+                    Union, cast)
+
 import torch
 import torch.nn as nn
 from monai.losses.adversarial_loss import PatchAdversarialLoss
 from monai.losses.perceptual import PerceptualLoss
-from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 
 class SliceWiseFake3DLoss(nn.Module):
@@ -327,6 +329,8 @@ class VAEGANLoss(nn.Module):
         ffl_config: Configuration for Focal Frequency Loss (required if loss_type="ffl")
         spatial_dims: Spatial dimensions (3 for 3D medical images)
         perceptual_network_type: Pretrained network for perceptual loss (used if loss_type="lpips")
+        is_fake_3d: Whether to use 2.5D perceptual loss for 3D volumes
+        fake_3d_ratio: Fraction of slices used when is_fake_3d=True
         adv_weight: Weight for adversarial loss (base weight, scaled adaptively)
         commitment_weight: Weight for commitment loss (used in fsq mode)
         adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
@@ -347,6 +351,8 @@ class VAEGANLoss(nn.Module):
         ffl_config: Optional[Dict[str, Union[float, int, bool]]] = None,
         spatial_dims: int = 3,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
+        is_fake_3d: bool = False,
+        fake_3d_ratio: float = 0.5,
         adv_weight: float = 0.1,
         commitment_weight: float = 0.25,
         adv_criterion: str = "least_squares",
@@ -369,8 +375,16 @@ class VAEGANLoss(nn.Module):
         self.disc_factor = adv_weight  # Base discriminator weight
         self.commitment_weight = commitment_weight
         self.discriminator_iter_start = discriminator_iter_start
+        if not 0.0 <= fake_3d_ratio <= 1.0:
+            raise ValueError(
+                "fake_3d_ratio must be between 0.0 and 1.0, "
+                f"got {fake_3d_ratio}"
+            )
+
         self.spatial_dims = spatial_dims
         self.perceptual_network_type = perceptual_network_type
+        self.is_fake_3d = is_fake_3d
+        self.fake_3d_ratio = fake_3d_ratio
 
         # Perceptual network (lazy initialization on first use, for LPIPS)
         self.perceptual_network: Optional[PerceptualLoss] = None
@@ -576,7 +590,8 @@ class VAEGANLoss(nn.Module):
             self.perceptual_network = PerceptualLoss(
                 spatial_dims=self.spatial_dims,
                 network_type=self.perceptual_network_type,
-                is_fake_3d=False,
+                is_fake_3d=self.is_fake_3d,
+                fake_3d_ratio=self.fake_3d_ratio,
             ).to(fake_images.device)
             # Freeze pretrained network weights to prevent training instability
             for param in self.perceptual_network.parameters():

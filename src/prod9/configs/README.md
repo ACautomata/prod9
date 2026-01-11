@@ -65,6 +65,8 @@ The autoencoder configs support two perceptual loss types:
 - Uses MONAI's PerceptualLoss with MedicalNet ResNet10
 - Pre-trained on 23 medical datasets
 - Set `loss.loss_type: "lpips"` (or omit, as it's the default)
+- Enable 2.5D perceptual loss for 3D volumes via `loss.perceptual.is_fake_3d` (MaskGiT) or `loss.is_fake_3d` (MAISI)
+- Control slice usage with `fake_3d_ratio` (0.0-1.0) in the same loss section
 
 ### Focal Frequency Loss (FFL)
 - Frequency-domain loss from ICCV 2021

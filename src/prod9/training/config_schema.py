@@ -6,8 +6,8 @@ All configuration values are validated at load time, catching errors early.
 """
 
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # =============================================================================
 # Model Architecture Configuration
@@ -309,6 +309,16 @@ class PerceptualLossConfig(BaseModel):
     network_type: str = Field(
         default="medicalnet_resnet10_23datasets",
         description="Pretrained network for feature extraction (e.g., medicalnet_resnet10_23datasets)"
+    )
+    is_fake_3d: bool = Field(
+        default=False,
+        description="Use 2.5D perceptual loss for 3D volumes",
+    )
+    fake_3d_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of slices used when is_fake_3d=True",
     )
 
 
@@ -677,6 +687,16 @@ class MAISIVAELossConfig(BaseModel):
     lpips_network: str = Field(
         default="medicalnet_resnet10_23datasets",
         description="Pretrained network for perceptual loss (MedicalNet)",
+    )
+    is_fake_3d: bool = Field(
+        default=False,
+        description="Use 2.5D perceptual loss for 3D volumes",
+    )
+    fake_3d_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of slices used when is_fake_3d=True",
     )
     discriminator_iter_start: int = Field(
         default=0, ge=0, description="Discriminator warmup steps"

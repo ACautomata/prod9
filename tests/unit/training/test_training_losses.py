@@ -6,11 +6,14 @@ from prod9.training.losses.
 """
 import unittest
 from typing import Any, cast
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
 import torch
 
-from prod9.training.losses import VAEGANLoss, FocalFrequencyLoss, SliceWiseFake3DLoss
+from prod9.training.losses import (FocalFrequencyLoss, SliceWiseFake3DLoss,
+                                   VAEGANLoss)
+from prod9.training.metrics import LPIPSMetric
 
 
 class TestVAEGANLoss(unittest.TestCase):
@@ -29,6 +32,40 @@ class TestVAEGANLoss(unittest.TestCase):
             perceptual_weight=0.1,
             adv_weight=0.5
         ).to(self.device)
+
+    def test_perceptual_loss_uses_fake_3d(self):
+        """Ensure fake_3d settings are forwarded to PerceptualLoss."""
+        fake_images = torch.randn(
+            self.batch_size, self.channels,
+            self.spatial_size, self.spatial_size, self.spatial_size,
+            device=self.device
+        )
+        real_images = torch.randn(
+            self.batch_size, self.channels,
+            self.spatial_size, self.spatial_size, self.spatial_size,
+            device=self.device
+        )
+        with patch("prod9.training.losses.PerceptualLoss") as mock_loss:
+            mock_instance = MagicMock()
+            mock_instance.to.return_value = mock_instance
+            mock_instance.parameters.return_value = []
+            mock_instance.return_value = torch.tensor(0.0, device=self.device)
+            mock_loss.return_value = mock_instance
+
+            loss = VAEGANLoss(
+                perceptual_weight=0.1,
+                is_fake_3d=True,
+                fake_3d_ratio=0.25,
+            ).to(self.device)
+            loss_value = loss._compute_lpips_loss(fake_images, real_images)
+
+            self.assertIsInstance(loss_value, torch.Tensor)
+            mock_loss.assert_called_once_with(
+                spatial_dims=loss.spatial_dims,
+                network_type=loss.perceptual_network_type,
+                is_fake_3d=True,
+                fake_3d_ratio=0.25,
+            )
 
     def test_vaegan_loss_forward(self):
         """Smoke test: basic forward pass."""
@@ -227,6 +264,24 @@ class TestVAEGANLoss(unittest.TestCase):
             self.assertIsInstance(loss_dict_mps['total'], torch.Tensor)
 
 
+class TestLPIPSMetric(unittest.TestCase):
+    """Test suite for LPIPSMetric configuration."""
+
+    def test_lpips_metric_uses_fake_3d(self):
+        """Ensure fake_3d settings are forwarded to PerceptualLoss."""
+        with patch("monai.losses.perceptual.PerceptualLoss") as mock_loss:
+            mock_loss.return_value = MagicMock()
+
+            metric = LPIPSMetric(is_fake_3d=True, fake_3d_ratio=0.3)
+            self.assertIsNotNone(metric)
+            mock_loss.assert_called_once_with(
+                spatial_dims=3,
+                network_type="medicalnet_resnet10_23datasets",
+                is_fake_3d=True,
+                fake_3d_ratio=0.3,
+            )
+
+
 class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
     """Test suite for VAEGANLoss adaptive weight calculation."""
 
@@ -415,8 +470,10 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
 
         # Create a real autoencoder and discriminator to establish proper computational graph
         # Use configuration where num_channels matches len(levels)
+        from monai.networks.nets.patchgan_discriminator import \
+            MultiScalePatchDiscriminator
+
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-        from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
         ae = AutoencoderFSQ(
             spatial_dims=3,
@@ -515,8 +572,10 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create a real autoencoder and discriminator to establish proper computational graph
+        from monai.networks.nets.patchgan_discriminator import \
+            MultiScalePatchDiscriminator
+
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-        from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
         ae = AutoencoderFSQ(
             spatial_dims=3,

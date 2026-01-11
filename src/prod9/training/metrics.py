@@ -9,9 +9,10 @@ This module implements metrics for evaluating generated/reconstructed images:
 - IS: Inception Score (3D medical images)
 """
 
+from typing import Dict, Tuple
+
 import torch
 import torch.nn as nn
-from typing import Dict, Tuple
 from monai.metrics.regression import SSIMMetric as MonaiSSIMMetric
 
 
@@ -120,20 +121,30 @@ class LPIPSMetric(nn.Module):
         spatial_dims: Number of spatial dimensions (3 for 3D volumes)
         network_type: Pretrained network for feature extraction
             (default: medicalnet_resnet10_23datasets for 3D medical images)
+        is_fake_3d: Whether to use 2.5D perceptual loss for 3D volumes
+        fake_3d_ratio: Fraction of slices used when is_fake_3d=True
     """
 
     def __init__(
         self,
         spatial_dims: int = 3,
         network_type: str = "medicalnet_resnet10_23datasets",
+        is_fake_3d: bool = False,
+        fake_3d_ratio: float = 0.5,
     ):
         super().__init__()
+        if not 0.0 <= fake_3d_ratio <= 1.0:
+            raise ValueError(
+                "fake_3d_ratio must be between 0.0 and 1.0, "
+                f"got {fake_3d_ratio}"
+            )
         from monai.losses.perceptual import PerceptualLoss
 
         self.lpips_network = PerceptualLoss(
             spatial_dims=spatial_dims,
             network_type=network_type,
-            is_fake_3d=False,
+            is_fake_3d=is_fake_3d,
+            fake_3d_ratio=fake_3d_ratio,
         )
 
     def forward(
@@ -177,8 +188,8 @@ class FIDMetric3D(nn.Module):
         model_name: str = "resnet10",
     ):
         super().__init__()
-        from monai.networks.nets.resnet import ResNetFeatures
         from monai.metrics.fid import FIDMetric
+        from monai.networks.nets.resnet import ResNetFeatures
 
         # Feature extractor using MedicalNet pretrained weights
         self.feature_extractor = ResNetFeatures(
@@ -324,7 +335,8 @@ class InceptionScore3D(nn.Module):
     def _load_medicalnet_weights(self) -> None:
         """Load MedicalNet pretrained weights if available."""
         try:
-            from monai.networks.nets.resnet import get_pretrained_resnet_medicalnet
+            from monai.networks.nets.resnet import \
+                get_pretrained_resnet_medicalnet
 
             # Map model_name to resnet_depth
             depth_map = {"resnet10": 10, "resnet18": 18, "resnet34": 34, "resnet50": 50}

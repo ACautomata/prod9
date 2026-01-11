@@ -481,12 +481,15 @@ class TransformerLightning(pl.LightningModule):
 
         # Configure scheduler with warmup if enabled
         if self.warmup_enabled:
-            # Estimate total training steps
             total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
             if total_steps is None:
-                # Fallback estimate: 100 epochs * estimated batches per epoch
-                num_epochs = getattr(self.trainer, "max_epochs", 100)
-                total_steps = num_epochs * 1000  # Conservative estimate
+                raise RuntimeError(
+                    "Trainer does not provide estimated_stepping_batches; "
+                    "ensure the trainer is initialized via fit before configuring warmup."
+                )
+            total_steps = int(total_steps)
+            if total_steps <= 0:
+                raise ValueError("Estimated total_steps must be positive for warmup scheduling.")
 
             # Calculate warmup steps
             warmup_steps = self.warmup_steps

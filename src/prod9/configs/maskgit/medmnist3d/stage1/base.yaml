@@ -90,9 +90,10 @@ data:
   download: true
 
   # Data loader settings
-  batch_size: 4
-  num_workers: 4
-  cache_num_workers: 0
+  batch_size: 2
+  num_workers: 2
+  cache_num_workers: 2
+  persistent_workers: false
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)

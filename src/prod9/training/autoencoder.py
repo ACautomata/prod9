@@ -10,16 +10,18 @@ This module implements VQGAN-style training with:
 
 from typing import Dict, Optional, Union, cast
 
-import torch
 import pytorch_lightning as pl
+import torch
+from monai.networks.nets.patchgan_discriminator import \
+    MultiScalePatchDiscriminator
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
+                                         SlidingWindowConfig)
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
+from prod9.training.metrics import LPIPSMetric, PSNRMetric, SSIMMetric
 from prod9.training.schedulers import create_warmup_scheduler
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 
 def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
@@ -69,6 +71,8 @@ class AutoencoderLightning(pl.LightningModule):
         loss_type: Type of perceptual loss - "lpips" or "ffl" (default: "lpips")
         ffl_config: Configuration for Focal Frequency Loss (required if loss_type="ffl")
         perceptual_network_type: Pretrained network for perceptual loss (used if loss_type="lpips")
+        is_fake_3d: Whether to use 2.5D perceptual loss for 3D volumes
+        fake_3d_ratio: Fraction of slices used when is_fake_3d=True
         adv_weight: Base weight for adversarial loss (default: 0.1)
         commitment_weight: Weight for commitment loss (default: 0.25)
         sample_every_n_steps: Log samples every N steps (default: 100)
@@ -97,6 +101,8 @@ class AutoencoderLightning(pl.LightningModule):
         loss_type: str = "lpips",
         ffl_config: Optional[Dict[str, Union[float, int, bool]]] = None,
         perceptual_network_type: str = "medicalnet_resnet10_23datasets",
+        is_fake_3d: bool = False,
+        fake_3d_ratio: float = 0.5,
         adv_weight: float = 0.1,
         adv_criterion: str = "least_squares",
         commitment_weight: float = 0.25,
@@ -133,6 +139,8 @@ class AutoencoderLightning(pl.LightningModule):
             loss_type=loss_type,
             ffl_config=ffl_config,
             perceptual_network_type=perceptual_network_type,
+            is_fake_3d=is_fake_3d,
+            fake_3d_ratio=fake_3d_ratio,
             adv_weight=adv_weight,
             adv_criterion=adv_criterion,
             commitment_weight=commitment_weight,
@@ -142,7 +150,10 @@ class AutoencoderLightning(pl.LightningModule):
 
         self.psnr = PSNRMetric()
         self.ssim = SSIMMetric()
-        self.lpips = LPIPSMetric()
+        self.lpips = LPIPSMetric(
+            is_fake_3d=is_fake_3d,
+            fake_3d_ratio=fake_3d_ratio,
+        )
 
         # Sliding window config (for validation only)
         self.use_sliding_window = use_sliding_window
@@ -398,11 +409,9 @@ class AutoencoderLightning(pl.LightningModule):
         # Reconstruct - use SW if enabled
         wrapper = self._get_inference_wrapper()
         if wrapper is not None:
-            from prod9.autoencoder.padding import (
-                compute_scale_factor,
-                pad_for_sliding_window,
-                unpad_from_sliding_window,
-            )
+            from prod9.autoencoder.padding import (compute_scale_factor,
+                                                   pad_for_sliding_window,
+                                                   unpad_from_sliding_window)
 
             scale_factor = compute_scale_factor(self.autoencoder)
 
@@ -492,14 +501,15 @@ class AutoencoderLightning(pl.LightningModule):
 
         # Configure schedulers with warmup if enabled
         if self.warmup_enabled:
-            # Estimate total training steps
-            # This will be updated by the trainer if known, otherwise use a reasonable estimate
             total_steps = getattr(self.trainer, "estimated_stepping_batches", None)
             if total_steps is None:
-                # Fallback estimate: 100 epochs * estimated batches per epoch
-                num_epochs = getattr(self.trainer, "max_epochs", 100)
-                # We don't know the dataset size yet, use a reasonable default
-                total_steps = num_epochs * 1000  # Will be conservative
+                raise RuntimeError(
+                    "Trainer does not provide estimated_stepping_batches; "
+                    "ensure the trainer is initialized via fit before configuring warmup."
+                )
+            total_steps = int(total_steps)
+            if total_steps <= 0:
+                raise ValueError("Estimated total_steps must be positive for warmup scheduling.")
 
             # Calculate warmup steps
             warmup_steps = self.warmup_steps
