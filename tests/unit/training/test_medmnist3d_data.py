@@ -8,8 +8,8 @@ This module provides comprehensive tests for:
 """
 
 import os
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -18,12 +18,10 @@ import numpy as np
 import pytest
 import torch
 
-from prod9.training.medmnist3d_data import (
-    _MedMNIST3DStage1Dataset,
-    _MedMNIST3DStage2Dataset,
-    MedMNIST3DDataModuleStage1,
-    MedMNIST3DDataModuleStage2,
-)
+from prod9.training.medmnist3d_data import (MedMNIST3DDataModuleStage1,
+                                            MedMNIST3DDataModuleStage2,
+                                            _MedMNIST3DStage1Dataset,
+                                            _MedMNIST3DStage2Dataset)
 
 
 class TestMedMNIST3DStage1Dataset:
@@ -504,6 +502,30 @@ class TestMedMNIST3DDataModuleStage1:
         assert dm.batch_size == 8  # Default
         assert dm.num_workers == 4  # Default
         assert dm.train_val_split == 0.9  # Default
+        assert dm.intensity_a_min == 0.0
+        assert dm.intensity_a_max == 1.0
+        assert dm.intensity_b_min == -1.0
+        assert dm.intensity_b_max == 1.0
+        assert dm.intensity_clip is True
+
+    def test_from_config_with_custom_intensity(self) -> None:
+        """Test from_config applies custom intensity normalization values."""
+        config = {
+            "data": {
+                "dataset_name": "organmnist3d",
+                "intensity_a_min": -5.0,
+                "intensity_a_max": 5.0,
+                "intensity_b_min": 0.0,
+                "intensity_b_max": 2.0,
+                "intensity_clip": False,
+            }
+        }
+        dm = MedMNIST3DDataModuleStage1.from_config(config)
+        assert dm.intensity_a_min == -5.0
+        assert dm.intensity_a_max == 5.0
+        assert dm.intensity_b_min == 0.0
+        assert dm.intensity_b_max == 2.0
+        assert dm.intensity_clip is False
 
     @patch("medmnist.OrganMNIST3D")
     def test_train_dataloader(self, mock_dataset_class: MagicMock) -> None:

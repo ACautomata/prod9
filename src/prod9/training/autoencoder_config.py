@@ -4,7 +4,7 @@ Configuration class for AutoencoderLightning.
 Helper class to create LightningModule from config dictionary.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import torch
 from monai.networks.nets.patchgan_discriminator import \
@@ -12,6 +12,36 @@ from monai.networks.nets.patchgan_discriminator import \
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning
+
+
+def _get_metric_ranges_from_data(data_config: Any) -> Tuple[float, float]:
+    """Derive PSNR/SSIM ranges from data preprocessing config.
+
+    Falls back to (1.0, 1.0) when ranges are not provided. MedMNIST3D
+    normalization is fixed to [-1, 1], so use a data range of 2.0.
+    """
+    default_range = (1.0, 1.0)
+    if data_config is None:
+        return default_range
+
+    data_dict = data_config.model_dump() if hasattr(data_config, "model_dump") else data_config
+    preprocessing = data_dict.get("preprocessing") if isinstance(data_dict, dict) else None
+
+    if isinstance(preprocessing, dict):
+        b_min = preprocessing.get("intensity_b_min")
+        b_max = preprocessing.get("intensity_b_max")
+        if b_min is not None and b_max is not None:
+            data_range = float(b_max) - float(b_min)
+            if data_range > 0:
+                return (data_range, data_range)
+
+    # MedMNIST3D pipeline normalizes [0, 1] to [-1, 1]
+    if isinstance(data_dict, dict) and (
+        data_dict.get("dataset_name") is not None or data_dict.get("dataset_names") is not None
+    ):
+        return (2.0, 2.0)
+
+    return default_range
 
 
 class AutoencoderLightningConfig:
@@ -84,6 +114,8 @@ class AutoencoderLightningConfig:
         # Get sliding window config
         sw_config = config.get("sliding_window", {})
 
+        psnr_max_val, ssim_data_range = _get_metric_ranges_from_data(config.get("data"))
+
         # Create Lightning module
         module = AutoencoderLightning(
             autoencoder=autoencoder,
@@ -110,6 +142,8 @@ class AutoencoderLightningConfig:
             sw_overlap=sw_config.get("overlap", 0.5),
             sw_batch_size=sw_config.get("sw_batch_size", 1),
             sw_mode=sw_config.get("mode", "gaussian"),
+            metric_max_val=psnr_max_val,
+            metric_data_range=ssim_data_range,
         )
 
         return module

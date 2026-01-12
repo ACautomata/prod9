@@ -7,17 +7,18 @@ This module implements Rectified Flow diffusion training.
 import os
 from typing import Dict, Optional, cast
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
+from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
+                                         SlidingWindowConfig)
 from prod9.diffusion.diffusion_model import DiffusionModelRF
-from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
 from prod9.diffusion.sampling import RectifiedFlowSampler
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
-from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
+from prod9.training.metrics import LPIPSMetric, PSNRMetric, SSIMMetric
 
 
 class MAISIDiffusionLightning(pl.LightningModule):
@@ -54,10 +55,12 @@ class MAISIDiffusionLightning(pl.LightningModule):
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
         sw_batch_size: int = 1,
+        # Metric ranges
+        metric_max_val: float = 1.0,
+        metric_data_range: float = 1.0,
     ):
         super().__init__()
 
-        self.automatic_optimization = True
         self.save_hyperparameters(ignore=["diffusion_model"])
 
         self.vae_path = vae_path
@@ -78,9 +81,10 @@ class MAISIDiffusionLightning(pl.LightningModule):
         self.scheduler: Optional[RectifiedFlowSchedulerRF] = None
 
         # Metrics
-        self.psnr = PSNRMetric()
-        self.ssim = SSIMMetric()
+        self.psnr = PSNRMetric(max_val=metric_max_val)
+        self.ssim = SSIMMetric(data_range=metric_data_range)
         self.lpips = LPIPSMetric()
+
 
     def setup(self, stage: str) -> None:
         """Load VAE from checkpoint and create scheduler."""

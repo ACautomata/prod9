@@ -88,12 +88,15 @@ data:
   size: 64  # Image size: 28 or 64
   root: "./.medmnist"
   download: true
+  intensity_a_min: 0.0
+  intensity_a_max: 1.0
+  intensity_b_min: -1.0
+  intensity_b_max: 1.0
+  intensity_clip: true
 
   # Data loader settings
   batch_size: 2
   num_workers: 2
-  cache_num_workers: 2
-  persistent_workers: false
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)

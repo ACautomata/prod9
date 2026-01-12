@@ -88,6 +88,11 @@ data:
   size: 64  # Image size: 28 or 64
   root: "./.medmnist"
   download: true
+  intensity_a_min: 0.0
+  intensity_a_max: 1.0
+  intensity_b_min: -1.0
+  intensity_b_max: 1.0
+  intensity_clip: true
 
   # Data loader settings
   batch_size: 2
@@ -111,7 +116,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 500  # Discriminator warmup (reduced from 3000)
+  discriminator_iter_start: 1500  # Discriminator warmup (reduced from 3000)
 
   # Reconstruction loss (L1)
   reconstruction:

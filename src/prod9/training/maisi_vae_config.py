@@ -5,7 +5,7 @@ This module provides configuration classes for creating MAISI VAELightning
 from YAML configuration files.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from monai.networks.nets.patchgan_discriminator import \
     MultiScalePatchDiscriminator
@@ -16,6 +16,32 @@ from prod9.training.config_schema import (DiscriminatorConfig,
                                           MAISIVAEFullConfig,
                                           MAISIVAELossConfig, TrainingConfig)
 from prod9.training.maisi_vae import MAISIVAELightning
+
+
+def _get_metric_ranges_from_data(data_config: Any) -> Tuple[float, float]:
+    """Derive PSNR/SSIM ranges from preprocessing configuration."""
+    default_range = (1.0, 1.0)
+    if data_config is None:
+        return default_range
+
+    data_dict = data_config.model_dump() if hasattr(data_config, "model_dump") else data_config
+    preprocessing = data_dict.get("preprocessing") if isinstance(data_dict, dict) else None
+
+    if isinstance(preprocessing, dict):
+        b_min = preprocessing.get("intensity_b_min")
+        b_max = preprocessing.get("intensity_b_max")
+        if b_min is not None and b_max is not None:
+            data_range = float(b_max) - float(b_min)
+            if data_range > 0:
+                return (data_range, data_range)
+
+    # MedMNIST3D pipeline normalizes [0, 1] to [-1, 1]
+    if isinstance(data_dict, dict) and (
+        data_dict.get("dataset_name") is not None or data_dict.get("dataset_names") is not None
+    ):
+        return (2.0, 2.0)
+
+    return default_range
 
 
 class MAISIVAELightningConfig:
@@ -75,6 +101,8 @@ class MAISIVAELightningConfig:
             out_channels=discriminator_config.out_channels,
         )
 
+        psnr_max_val, ssim_data_range = _get_metric_ranges_from_data(validated_config.data)
+
         # Create Lightning module
         lightning_module = MAISIVAELightning(
             vae=vae,
@@ -96,6 +124,8 @@ class MAISIVAELightningConfig:
             warmup_steps=stability_config.warmup_steps,
             warmup_ratio=stability_config.warmup_ratio,
             warmup_eta_min=stability_config.warmup_eta_min,
+            metric_max_val=psnr_max_val,
+            metric_data_range=ssim_data_range,
         )
 
         return lightning_module

@@ -88,17 +88,17 @@ class MAISIVAELightning(pl.LightningModule):
         adv_criterion: str = "least_squares",
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
-        # Training stability parameters
         warmup_enabled: bool = True,
         warmup_steps: Optional[int] = None,
         warmup_ratio: float = 0.02,
         warmup_eta_min: float = 0.0,
+        # Metric ranges
+        metric_max_val: float = 1.0,
+        metric_data_range: float = 1.0,
     ):
         super().__init__()
 
-        # Enable manual optimization for GAN training
         self.automatic_optimization = False
-
         self.save_hyperparameters(ignore=["vae", "discriminator"])
 
         self.vae = vae
@@ -123,8 +123,8 @@ class MAISIVAELightning(pl.LightningModule):
         )
 
         # Metrics
-        self.psnr = PSNRMetric()
-        self.ssim = SSIMMetric()
+        self.psnr = PSNRMetric(max_val=metric_max_val)
+        self.ssim = SSIMMetric(data_range=metric_data_range)
         self.lpips = LPIPSMetric(
             network_type=perceptual_network_type,
             is_fake_3d=is_fake_3d,
@@ -142,6 +142,7 @@ class MAISIVAELightning(pl.LightningModule):
 
         # Marker for gradient norm logging callback
         self._current_backward_branch: Optional[str] = None
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

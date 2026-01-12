@@ -50,6 +50,11 @@ data:
   size: 64
   root: "./.medmnist"
   download: true
+  intensity_a_min: 0.0
+  intensity_a_max: 1.0
+  intensity_b_min: -1.0
+  intensity_b_max: 1.0
+  intensity_clip: true
   batch_size: 4
   num_workers: 4
   cache_num_workers: 0

@@ -611,6 +611,13 @@ class MedMNIST3DDataConfig(BaseModel):
         description="Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)",
     )
 
+    # Intensity normalization (optional override, defaults to [0,1] -> [-1,1])
+    intensity_a_min: float = Field(default=0.0)
+    intensity_a_max: float = Field(default=1.0)
+    intensity_b_min: float = Field(default=-1.0)
+    intensity_b_max: float = Field(default=1.0)
+    intensity_clip: bool = Field(default=True)
+
     # Optional augmentation
     augmentation: Optional[MedMNIST3DDataAugmentation] = Field(default=None)
 

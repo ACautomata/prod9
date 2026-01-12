@@ -22,7 +22,7 @@ model:
     attention_levels: [False, False, False, True]  # Attention only in deepest layer
     num_res_blocks: [2, 2, 2, 2]  # Residual blocks per layer (4 layers)
     norm_num_groups: 32  # Group normalization groups
-    num_splits: 4  # No splitting for small 64^3 inputs (default is 16)
+    num_splits: 2  # No splitting for small 64^3 inputs (default is 16)
 
   # MultiScalePatchDiscriminator configuration
   discriminator:
@@ -87,6 +87,11 @@ data:
   size: 64  # Image size: 28 or 64
   root: "./.medmnist"
   download: true
+  intensity_a_min: 0.0
+  intensity_a_max: 1.0
+  intensity_b_min: -1.0
+  intensity_b_max: 1.0
+  intensity_clip: true
 
   # Data loader settings
   batch_size: 2

@@ -118,6 +118,9 @@ class AutoencoderLightning(pl.LightningModule):
         warmup_steps: Optional[int] = None,
         warmup_ratio: float = 0.02,
         warmup_eta_min: float = 0.0,
+        # Metric ranges
+        metric_max_val: float = 1.0,
+        metric_data_range: float = 1.0,
     ):
         super().__init__()
 
@@ -148,8 +151,8 @@ class AutoencoderLightning(pl.LightningModule):
             discriminator_iter_start=discriminator_iter_start,
         )
 
-        self.psnr = PSNRMetric()
-        self.ssim = SSIMMetric()
+        self.psnr = PSNRMetric(max_val=metric_max_val)
+        self.ssim = SSIMMetric(data_range=metric_data_range)
         self.lpips = LPIPSMetric(
             network_type=perceptual_network_type,
             is_fake_3d=is_fake_3d,
@@ -350,14 +353,13 @@ class AutoencoderLightning(pl.LightningModule):
         """
         # Clip gradients manually (required for manual optimization)
         # PyTorch Lightning doesn't support automatic gradient clipping with manual optimization
-        clip_val = self.trainer.gradient_clip_val
-        if clip_val is not None and clip_val > 0:
-            clip_alg = self.trainer.gradient_clip_algorithm
-            # Gather all parameters from all parameter groups
+        clip_val = getattr(self.trainer, "gradient_clip_val", None)
+        if isinstance(clip_val, (int, float)) and clip_val > 0:
+            clip_alg = getattr(self.trainer, "gradient_clip_algorithm", "norm")
             params = [p for group in optimizer.param_groups for p in group["params"]]
             if clip_alg == "norm":
                 torch.nn.utils.clip_grad_norm_(params, clip_val)
-            else:  # clip_alg == "value"
+            else:
                 torch.nn.utils.clip_grad_value_(params, clip_val)
 
         # Step the optimizer
@@ -367,12 +369,8 @@ class AutoencoderLightning(pl.LightningModule):
         # In manual optimization, Lightning doesn't auto-step schedulers
         if self.warmup_enabled:
             schedulers = self.lr_schedulers()
-            # lr_schedulers() can return a single scheduler, a list, or a dict
-            # We expect a list when warmup is enabled (one per optimizer)
             if isinstance(schedulers, list) and schedulers and optimizer_idx < len(schedulers):
                 scheduler = schedulers[optimizer_idx]
-                # Warmup scheduler is LambdaLR (from create_warmup_scheduler)
-                # which doesn't require metrics parameter
                 cast(torch.optim.lr_scheduler.LambdaLR, scheduler).step()
 
         # Manually increment global_step since we're using manual optimization

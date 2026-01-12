@@ -12,16 +12,17 @@ Key features:
 """
 
 import os
-from typing import Literal, cast, Optional, Any, Union, Sequence, Sized
+from typing import Any, Literal, Optional, Sequence, Sized, Union, cast
 
 import medmnist
 import numpy as np
-import torch
 import pytorch_lightning as pl
+import torch
 from medmnist import INFO
-from torch.utils.data import ConcatDataset, DataLoader, Dataset as TorchDataset
-from monai.transforms.compose import Compose
 from monai.data.dataset import CacheDataset
+from monai.transforms.compose import Compose
+from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import Dataset as TorchDataset
 
 import prod9.training.brats_data as brats_data
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
@@ -284,6 +285,11 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         pin_memory: bool = True,
         augmentation=None,
         cache_num_workers: int = 0,
+        intensity_a_min: float = 0.0,
+        intensity_a_max: float = 1.0,
+        intensity_b_min: float = -1.0,
+        intensity_b_max: float = 1.0,
+        intensity_clip: bool = True,
     ) -> None:
         super().__init__()  # Required by LightningDataModule
 
@@ -300,6 +306,12 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         self.device = self._resolve_device(device)
         self.pin_memory = pin_memory
         self.augmentation = augmentation
+
+        self.intensity_a_min = intensity_a_min
+        self.intensity_a_max = intensity_a_max
+        self.intensity_b_min = intensity_b_min
+        self.intensity_b_max = intensity_b_max
+        self.intensity_clip = intensity_clip
 
         # Handle "all" shortcut for combining all datasets
         if dataset_name == "all":
@@ -438,14 +450,14 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             # EnsureTyped - convert numpy array to tensor
             EnsureTyped(keys=["image"]),
 
-            # Normalize from [0, 1] to [-1, 1]
+            # Normalize intensity with configurable output range
             ScaleIntensityRanged(
                 keys=["image"],
-                a_min=0.0,
-                a_max=1.0,
-                b_min=-1.0,
-                b_max=1.0,
-                clip=True,
+                a_min=self.intensity_a_min,
+                a_max=self.intensity_a_max,
+                b_min=self.intensity_b_min,
+                b_max=self.intensity_b_max,
+                clip=self.intensity_clip,
             ),
         ])
 
@@ -465,8 +477,10 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
         Returns:
             Compose or None: Augmentation transform pipeline (None for validation)
         """
-        from monai.transforms.spatial.dictionary import RandFlipd, RandRotated, RandZoomd
         from monai.transforms.intensity.dictionary import RandShiftIntensityd
+        from monai.transforms.spatial.dictionary import (RandFlipd,
+                                                         RandRotated,
+                                                         RandZoomd)
 
         # No augmentation for validation
         if not train or self.augmentation is None or not self.augmentation.get("enabled", False):
@@ -583,6 +597,11 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             pin_memory=data_config.get("pin_memory", True),
             augmentation=augmentation,
             cache_num_workers=data_config.get("cache_num_workers", 0),
+            intensity_a_min=data_config.get("intensity_a_min", 0.0),
+            intensity_a_max=data_config.get("intensity_a_max", 1.0),
+            intensity_b_min=data_config.get("intensity_b_min", -1.0),
+            intensity_b_max=data_config.get("intensity_b_max", 1.0),
+            intensity_clip=data_config.get("intensity_clip", True),
         )
 
 
