@@ -11,8 +11,9 @@ import pytest
 import pytorch_lightning as pl
 import torch
 
-from prod9.cli.shared import (create_trainer, get_device, resolve_config_path,
-                              resolve_last_checkpoint, setup_environment)
+from prod9.cli.shared import (create_trainer, fit_with_resume, get_device,
+                              resolve_config_path, resolve_last_checkpoint,
+                              setup_environment)
 
 
 class TestSetupEnvironment:
@@ -237,6 +238,35 @@ class TestResolveLastCheckpoint:
         """Raise TypeError for invalid output_dir type."""
         with pytest.raises(TypeError, match="output_dir must be a string or Path"):
             resolve_last_checkpoint({}, cast(Any, 123))
+
+
+class TestFitWithResume:
+    """Test fit_with_resume helper."""
+
+    def test_fit_without_checkpoint(self) -> None:
+        trainer = MagicMock()
+        model = MagicMock()
+        datamodule = MagicMock()
+
+        fit_with_resume(trainer, model, datamodule, None)
+
+        trainer.fit.assert_called_once_with(model, datamodule=datamodule)
+
+    def test_fit_with_checkpoint_incompatible(self) -> None:
+        trainer = MagicMock()
+        model = MagicMock()
+        datamodule = MagicMock()
+
+        trainer.fit.side_effect = [
+            RuntimeError("Error(s) in loading state_dict"),
+            None,
+        ]
+
+        fit_with_resume(trainer, model, datamodule, "/tmp/last.ckpt")
+
+        assert trainer.fit.call_count == 2
+        trainer.fit.assert_any_call(model, datamodule=datamodule, ckpt_path="/tmp/last.ckpt")
+        trainer.fit.assert_any_call(model, datamodule=datamodule)
 
 
 class TestCreateTrainer:

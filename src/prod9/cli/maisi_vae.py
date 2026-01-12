@@ -6,8 +6,9 @@ from typing import Mapping
 
 import torch
 
-from prod9.cli.shared import (create_trainer, resolve_config_path,
-                              resolve_last_checkpoint, setup_environment)
+from prod9.cli.shared import (create_trainer, fit_with_resume,
+                              resolve_config_path, resolve_last_checkpoint,
+                              setup_environment)
 from prod9.training.maisi_vae import MAISIVAELightning
 from prod9.training.maisi_vae_config import MAISIVAELightningConfig
 
@@ -54,9 +55,7 @@ def train_maisi_vae(config: str) -> None:
     resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
     if resume_checkpoint:
         print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
-        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
-    else:
-        trainer.fit(model, datamodule=data_module)
+    fit_with_resume(trainer, model, data_module, resume_checkpoint)
 
     # Load best checkpoint before export (if available)
     best_model_path = getattr(trainer.checkpoint_callback, 'best_model_path', '')

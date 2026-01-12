@@ -17,7 +17,7 @@ model:
     in_channels: 1
     out_channels: 1
     levels: [8, 8, 8, 6, 5]  # 8^3 = 512 codebook size
-    num_channels: [64, 128, 128, 256]  # Reduced channel sizes for memory efficiency (4 layers for 64^3 input)
+    num_channels: [64, 128, 256, 256]  # Reduced channel sizes for memory efficiency (4 layers for 64^3 input)
     attention_levels: [False, False, False, True]  # Attention only in deepest layer
     num_res_blocks: [2, 2, 2, 2]  # Residual blocks per layer (4 layers)
     norm_num_groups: 32  # Group normalization groups

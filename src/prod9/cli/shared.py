@@ -185,6 +185,42 @@ def resolve_last_checkpoint(config: Dict[str, Any], output_dir: str | Path) -> s
     return None
 
 
+def _is_incompatible_state_dict_error(message: str) -> bool:
+    markers = (
+        "Error(s) in loading state_dict",
+        "Missing key(s) in state_dict",
+        "Unexpected key(s) in state_dict",
+    )
+    return any(marker in message for marker in markers)
+
+
+def fit_with_resume(
+    trainer: pl.Trainer,
+    model: pl.LightningModule,
+    datamodule: pl.LightningDataModule | None,
+    resume_checkpoint: str | None,
+) -> None:
+    if resume_checkpoint is None:
+        trainer.fit(model, datamodule=datamodule)
+        return
+
+    if not isinstance(resume_checkpoint, str):
+        raise TypeError("resume_checkpoint must be a string or None")
+
+    try:
+        trainer.fit(model, datamodule=datamodule, ckpt_path=resume_checkpoint)
+    except RuntimeError as error:
+        message = str(error)
+        if _is_incompatible_state_dict_error(message):
+            print(
+                "Warning: checkpoint is incompatible with current model. "
+                "Starting a fresh training run."
+            )
+            trainer.fit(model, datamodule=datamodule)
+        else:
+            raise
+
+
 def create_trainer(
     config: Dict[str, Any],
     output_dir: str,

@@ -23,6 +23,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @patch('prod9.cli.autoencoder.fit_with_resume')
     @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
     @patch('prod9.cli.autoencoder.create_trainer')
     @patch('prod9.cli.autoencoder.BraTSDataModuleStage1.from_config')
@@ -39,6 +40,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_data,
         mock_trainer,
         mock_resolve_last,
+        mock_fit_with_resume,
     ):
         """Test train_autoencoder with BraTS dataset."""
         config = {"output_dir": "/tmp/output", "autoencoder_export_path": "/tmp/model.pt"}
@@ -61,9 +63,15 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_model_cfg.assert_called_once_with(config)
         mock_data.assert_called_once_with(config)
         mock_trainer.assert_called_once()
-        mock_trainer_instance.fit.assert_called_once()
+        mock_fit_with_resume.assert_called_once_with(
+            mock_trainer_instance,
+            mock_model_instance,
+            mock_data.return_value,
+            None,
+        )
         mock_model_instance.export_autoencoder.assert_called_once()
 
+    @patch('prod9.cli.autoencoder.fit_with_resume')
     @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
     @patch('prod9.cli.autoencoder.create_trainer')
     @patch('prod9.cli.autoencoder.BraTSDataModuleStage1.from_config')
@@ -80,6 +88,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_data,
         mock_trainer,
         mock_resolve_last,
+        mock_fit_with_resume,
     ):
         """Test auto-resume uses ckpt_path when last checkpoint exists."""
         config = {"output_dir": "/tmp/output", "autoencoder_export_path": "/tmp/model.pt"}
@@ -96,12 +105,14 @@ class TestAutoencoderTrain(unittest.TestCase):
 
         train_autoencoder("test.yaml")
 
-        mock_trainer_instance.fit.assert_called_once_with(
+        mock_fit_with_resume.assert_called_once_with(
+            mock_trainer_instance,
             mock_model_instance,
-            datamodule=mock_data.return_value,
-            ckpt_path="/tmp/output/custom_last.ckpt",
+            mock_data.return_value,
+            "/tmp/output/custom_last.ckpt",
         )
 
+    @patch('prod9.cli.autoencoder.fit_with_resume')
     @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
     @patch('prod9.cli.autoencoder.create_trainer')
     @patch('prod9.training.medmnist3d_data.MedMNIST3DDataModuleStage1.from_config')
@@ -120,6 +131,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_medmnist,
         mock_trainer,
         mock_resolve_last,
+        mock_fit_with_resume,
     ):
         """Test train_autoencoder with MedMNIST 3D dataset."""
         config = {
@@ -142,6 +154,12 @@ class TestAutoencoderTrain(unittest.TestCase):
         # Verify MedMNIST datamodule used
         mock_medmnist.assert_called_once_with(config)
         mock_brats.assert_not_called()
+        mock_fit_with_resume.assert_called_once_with(
+            mock_trainer_instance,
+            mock_model_instance,
+            mock_medmnist.return_value,
+            None,
+        )
 
 
 class TestAutoencoderValidate(unittest.TestCase):

@@ -6,8 +6,9 @@ from typing import Mapping, cast
 
 import torch
 
-from prod9.cli.shared import (create_trainer, resolve_config_path,
-                              resolve_last_checkpoint, setup_environment)
+from prod9.cli.shared import (create_trainer, fit_with_resume,
+                              resolve_config_path, resolve_last_checkpoint,
+                              setup_environment)
 from prod9.training.controlnet_lightning import ControlNetLightning
 from prod9.training.maisi_controlnet_config import \
     MAISIControlNetLightningConfig
@@ -52,9 +53,7 @@ def train_maisi_controlnet(config: str) -> None:
     resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
     if resume_checkpoint:
         print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
-        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
-    else:
-        trainer.fit(model, datamodule=data_module)
+    fit_with_resume(trainer, model, data_module, resume_checkpoint)
 
     print(f"Training complete. Model saved in {output_dir}")
 

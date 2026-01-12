@@ -7,8 +7,9 @@ from typing import Any, Dict, Mapping, cast
 import torch
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.cli.shared import (create_trainer, get_device, resolve_config_path,
-                              resolve_last_checkpoint, setup_environment)
+from prod9.cli.shared import (create_trainer, fit_with_resume, get_device,
+                              resolve_config_path, resolve_last_checkpoint,
+                              setup_environment)
 from prod9.generator.maskgit import MaskGiTSampler
 from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.training.config import load_config
@@ -131,9 +132,7 @@ def train_transformer(config: str) -> None:
     resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
     if resume_checkpoint:
         print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
-        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
-    else:
-        trainer.fit(model, datamodule=data_module)
+    fit_with_resume(trainer, model, data_module, resume_checkpoint)
 
 
 def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
