@@ -8,13 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from prod9.cli.autoencoder import (
-    train_autoencoder,
-    validate_autoencoder,
-    test_autoencoder as infer_autoencoder_test,
-    infer_autoencoder,
-    main,
-)
+from prod9.cli.autoencoder import infer_autoencoder, main
+from prod9.cli.autoencoder import test_autoencoder as infer_autoencoder_test
+from prod9.cli.autoencoder import train_autoencoder, validate_autoencoder
 
 
 class TestAutoencoderTrain(unittest.TestCase):
@@ -27,6 +23,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
     @patch('prod9.cli.autoencoder.create_trainer')
     @patch('prod9.cli.autoencoder.BraTSDataModuleStage1.from_config')
     @patch('prod9.cli.autoencoder.AutoencoderLightningConfig.from_config')
@@ -34,7 +31,14 @@ class TestAutoencoderTrain(unittest.TestCase):
     @patch('prod9.cli.autoencoder.setup_environment')
     @patch('prod9.cli.autoencoder.resolve_config_path')
     def test_train_autoencoder_with_brats_dataset(
-        self, mock_resolve, mock_setup_env, mock_load_vcfg, mock_model_cfg, mock_data, mock_trainer
+        self,
+        mock_resolve,
+        mock_setup_env,
+        mock_load_vcfg,
+        mock_model_cfg,
+        mock_data,
+        mock_trainer,
+        mock_resolve_last,
     ):
         """Test train_autoencoder with BraTS dataset."""
         config = {"output_dir": "/tmp/output", "autoencoder_export_path": "/tmp/model.pt"}
@@ -44,6 +48,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         # Mock best_model_path to return empty string (no checkpoint to load)
         mock_trainer_instance.checkpoint_callback.best_model_path = ""
         mock_trainer.return_value = mock_trainer_instance
+        mock_resolve_last.return_value = None
 
         mock_model_instance = MagicMock()
         mock_model_cfg.return_value = mock_model_instance
@@ -59,6 +64,45 @@ class TestAutoencoderTrain(unittest.TestCase):
         mock_trainer_instance.fit.assert_called_once()
         mock_model_instance.export_autoencoder.assert_called_once()
 
+    @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
+    @patch('prod9.cli.autoencoder.create_trainer')
+    @patch('prod9.cli.autoencoder.BraTSDataModuleStage1.from_config')
+    @patch('prod9.cli.autoencoder.AutoencoderLightningConfig.from_config')
+    @patch('prod9.training.config.load_validated_config')
+    @patch('prod9.cli.autoencoder.setup_environment')
+    @patch('prod9.cli.autoencoder.resolve_config_path')
+    def test_train_autoencoder_resumes_when_checkpoint_exists(
+        self,
+        mock_resolve,
+        mock_setup_env,
+        mock_load_vcfg,
+        mock_model_cfg,
+        mock_data,
+        mock_trainer,
+        mock_resolve_last,
+    ):
+        """Test auto-resume uses ckpt_path when last checkpoint exists."""
+        config = {"output_dir": "/tmp/output", "autoencoder_export_path": "/tmp/model.pt"}
+        mock_resolve.return_value = "test.yaml"
+        mock_load_vcfg.return_value = config
+        mock_resolve_last.return_value = "/tmp/output/custom_last.ckpt"
+
+        mock_trainer_instance = MagicMock()
+        mock_trainer_instance.checkpoint_callback.best_model_path = ""
+        mock_trainer.return_value = mock_trainer_instance
+
+        mock_model_instance = MagicMock()
+        mock_model_cfg.return_value = mock_model_instance
+
+        train_autoencoder("test.yaml")
+
+        mock_trainer_instance.fit.assert_called_once_with(
+            mock_model_instance,
+            datamodule=mock_data.return_value,
+            ckpt_path="/tmp/output/custom_last.ckpt",
+        )
+
+    @patch('prod9.cli.autoencoder.resolve_last_checkpoint')
     @patch('prod9.cli.autoencoder.create_trainer')
     @patch('prod9.training.medmnist3d_data.MedMNIST3DDataModuleStage1.from_config')
     @patch('prod9.cli.autoencoder.BraTSDataModuleStage1.from_config')
@@ -67,8 +111,15 @@ class TestAutoencoderTrain(unittest.TestCase):
     @patch('prod9.cli.autoencoder.setup_environment')
     @patch('prod9.cli.autoencoder.resolve_config_path')
     def test_train_autoencoder_with_medmnist_dataset(
-        self, mock_resolve, mock_setup_env, mock_load_vcfg, mock_model_cfg, mock_brats, mock_medmnist,
-        mock_trainer
+        self,
+        mock_resolve,
+        mock_setup_env,
+        mock_load_vcfg,
+        mock_model_cfg,
+        mock_brats,
+        mock_medmnist,
+        mock_trainer,
+        mock_resolve_last,
     ):
         """Test train_autoencoder with MedMNIST 3D dataset."""
         config = {
@@ -82,6 +133,7 @@ class TestAutoencoderTrain(unittest.TestCase):
         # Mock best_model_path to return empty string (no checkpoint to load)
         mock_trainer_instance.checkpoint_callback.best_model_path = ""
         mock_trainer.return_value = mock_trainer_instance
+        mock_resolve_last.return_value = None
         mock_model_instance = MagicMock()
         mock_model_cfg.return_value = mock_model_instance
 

@@ -2,18 +2,18 @@
 
 import argparse
 import os
-from typing import Dict, Any, Mapping
+from typing import Any, Dict, Mapping
 
 import torch
 
-from prod9.training.config import load_config
-from prod9.training.lightning_module import (
-    AutoencoderLightning,
-    AutoencoderLightningConfig,
-)
+from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
+                                         SlidingWindowConfig)
+from prod9.cli.shared import (create_trainer, get_device, resolve_config_path,
+                              resolve_last_checkpoint, setup_environment)
 from prod9.training.brats_data import BraTSDataModuleStage1
-from prod9.cli.shared import setup_environment, get_device, create_trainer, resolve_config_path
-from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.training.config import load_config
+from prod9.training.lightning_module import (AutoencoderLightning,
+                                             AutoencoderLightningConfig)
 
 
 def train_autoencoder(config: str) -> None:
@@ -55,8 +55,13 @@ def train_autoencoder(config: str) -> None:
     output_dir = cfg.get("output_dir", "outputs/stage1")
     trainer = create_trainer(cfg, output_dir, "autoencoder")
 
-    # Train
-    trainer.fit(model, datamodule=data_module)
+    # Train (auto-resume from last checkpoint if available)
+    resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
+    if resume_checkpoint:
+        print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
+        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
+    else:
+        trainer.fit(model, datamodule=data_module)
 
     # Load best checkpoint before export (if available)
     best_model_path = getattr(trainer.checkpoint_callback, 'best_model_path', '')
@@ -240,11 +245,9 @@ def infer_autoencoder(
     image = image.unsqueeze(0).to(device)  # Add batch dimension
 
     # Get scale_factor and apply padding
-    from prod9.autoencoder.padding import (
-        compute_scale_factor,
-        pad_for_sliding_window,
-        unpad_from_sliding_window,
-    )
+    from prod9.autoencoder.padding import (compute_scale_factor,
+                                           pad_for_sliding_window,
+                                           unpad_from_sliding_window)
 
     scale_factor = compute_scale_factor(model.autoencoder)
 
@@ -277,6 +280,7 @@ def infer_autoencoder(
     # SaveImage returns a list of saved paths
     if saved_paths and saved_paths[0] != output:
         import shutil
+
         # Convert to string to handle Union[Tensor, str] return type
         temp_path = str(saved_paths[0])
         shutil.move(temp_path, output)

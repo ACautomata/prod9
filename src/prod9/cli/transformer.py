@@ -2,19 +2,18 @@
 
 import argparse
 import os
-from typing import Dict, Any, Mapping, cast
+from typing import Any, Dict, Mapping, cast
 
 import torch
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.cli.shared import create_trainer, get_device, resolve_config_path, setup_environment
+from prod9.cli.shared import (create_trainer, get_device, resolve_config_path,
+                              resolve_last_checkpoint, setup_environment)
 from prod9.generator.maskgit import MaskGiTSampler
 from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.training.config import load_config
-from prod9.training.lightning_module import (
-    TransformerLightning,
-    TransformerLightningConfig,
-)
+from prod9.training.lightning_module import (TransformerLightning,
+                                             TransformerLightningConfig)
 
 
 def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None) -> AutoencoderFSQ:
@@ -128,8 +127,13 @@ def train_transformer(config: str) -> None:
     output_dir = cfg.get("output_dir", "outputs/stage2")
     trainer = create_trainer(cfg, output_dir, "transformer")
 
-    # Train
-    trainer.fit(model, datamodule=data_module)
+    # Train (auto-resume from last checkpoint if available)
+    resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
+    if resume_checkpoint:
+        print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
+        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
+    else:
+        trainer.fit(model, datamodule=data_module)
 
 
 def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:

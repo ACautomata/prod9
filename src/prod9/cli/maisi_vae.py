@@ -6,7 +6,8 @@ from typing import Mapping
 
 import torch
 
-from prod9.cli.shared import setup_environment, create_trainer, resolve_config_path
+from prod9.cli.shared import (create_trainer, resolve_config_path,
+                              resolve_last_checkpoint, setup_environment)
 from prod9.training.maisi_vae import MAISIVAELightning
 from prod9.training.maisi_vae_config import MAISIVAELightningConfig
 
@@ -49,8 +50,13 @@ def train_maisi_vae(config: str) -> None:
     output_dir = cfg.get("output_dir", "outputs/maisi_stage1")
     trainer = create_trainer(cfg, output_dir, "maisi_vae")
 
-    # Train
-    trainer.fit(model, datamodule=data_module)
+    # Train (auto-resume from last checkpoint if available)
+    resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
+    if resume_checkpoint:
+        print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
+        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
+    else:
+        trainer.fit(model, datamodule=data_module)
 
     # Load best checkpoint before export (if available)
     best_model_path = getattr(trainer.checkpoint_callback, 'best_model_path', '')
@@ -176,13 +182,12 @@ def infer_maisi_vae(
     """
     setup_environment()
 
+    from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
+                                             SlidingWindowConfig)
+    from prod9.autoencoder.padding import (compute_scale_factor,
+                                           pad_for_sliding_window,
+                                           unpad_from_sliding_window)
     from prod9.training.config import load_validated_config
-    from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
-    from prod9.autoencoder.padding import (
-        compute_scale_factor,
-        pad_for_sliding_window,
-        unpad_from_sliding_window,
-    )
 
     config_path = resolve_config_path(config)
     cfg = load_validated_config(config_path, stage="maisi_vae")

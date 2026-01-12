@@ -1,22 +1,18 @@
 """Unit tests for CLI shared utilities."""
 
-import tempfile
 import os
 import shutil
+import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 import pytorch_lightning as pl
+import torch
 
-from prod9.cli.shared import (
-    resolve_config_path,
-    setup_environment,
-    get_device,
-    create_trainer,
-)
+from prod9.cli.shared import (create_trainer, get_device, resolve_config_path,
+                              resolve_last_checkpoint, setup_environment)
 
 
 class TestSetupEnvironment:
@@ -196,6 +192,51 @@ class TestResolveConfigPath:
                 assert Path(result).resolve() == config_file.resolve()
             finally:
                 os.chdir(original_cwd)
+
+
+class TestResolveLastCheckpoint:
+    """Test resolve_last_checkpoint function."""
+
+    def test_returns_none_when_missing(self) -> None:
+        """Return None when last checkpoint is missing."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            assert resolve_last_checkpoint({}, temp_dir) is None
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_returns_path_when_present(self) -> None:
+        """Return checkpoint path when last.ckpt exists."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkpoint_path = Path(temp_dir) / "last.ckpt"
+            checkpoint_path.write_text("checkpoint")
+            assert resolve_last_checkpoint({}, temp_dir) == str(checkpoint_path)
+
+    def test_returns_custom_name_when_configured(self) -> None:
+        """Return configured checkpoint name when save_last is a string."""
+        config = {"callbacks": {"checkpoint": {"save_last": "custom_last.ckpt"}}}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkpoint_path = Path(temp_dir) / "custom_last.ckpt"
+            checkpoint_path.write_text("checkpoint")
+            assert resolve_last_checkpoint(config, temp_dir) == str(checkpoint_path)
+
+    def test_respects_save_last_disabled(self) -> None:
+        """Return None when save_last is disabled."""
+        config = {"callbacks": {"checkpoint": {"save_last": False}}}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkpoint_path = Path(temp_dir) / "last.ckpt"
+            checkpoint_path.write_text("checkpoint")
+            assert resolve_last_checkpoint(config, temp_dir) is None
+
+    def test_raises_on_empty_string(self) -> None:
+        """Raise ValueError for empty output_dir."""
+        with pytest.raises(ValueError, match="output_dir must be a non-empty string"):
+            resolve_last_checkpoint({}, "")
+
+    def test_raises_on_invalid_type(self) -> None:
+        """Raise TypeError for invalid output_dir type."""
+        with pytest.raises(TypeError, match="output_dir must be a string or Path"):
+            resolve_last_checkpoint({}, cast(Any, 123))
 
 
 class TestCreateTrainer:

@@ -4,16 +4,18 @@ import multiprocessing
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
-import torch
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, Callback, EarlyStopping
-from pytorch_lightning.profilers import PyTorchProfiler
-from pytorch_lightning.loggers import TensorBoardLogger
+import torch
 from dotenv import load_dotenv
+from pytorch_lightning.callbacks import (Callback, EarlyStopping,
+                                         LearningRateMonitor, ModelCheckpoint)
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.profilers import PyTorchProfiler
 
-from prod9.training.callbacks import GradientNormLogging, PerLayerGradientMonitor
+from prod9.training.callbacks import (GradientNormLogging,
+                                      PerLayerGradientMonitor)
 
 
 def configure_multiprocessing() -> None:
@@ -131,6 +133,56 @@ def resolve_config_path(config_path: str) -> str:
         f"Searched in the following locations:\n" +
         "\n".join(f"  - {p}" for p in unique_searched)
     )
+
+
+def resolve_last_checkpoint(config: Dict[str, Any], output_dir: str | Path) -> str | None:
+    """
+    Resolve last checkpoint path for auto-resume.
+
+    Args:
+        config: Configuration dictionary with callbacks/checkpoint settings
+        output_dir: Directory to search for the last checkpoint
+
+    Returns:
+        Path to last checkpoint if it exists, otherwise None.
+    """
+    if not isinstance(config, dict):
+        raise TypeError("config must be a dictionary")
+
+    callback_config = config.get("callbacks", {})
+    if not isinstance(callback_config, dict):
+        raise TypeError("callbacks config must be a dictionary")
+
+    checkpoint_config = callback_config.get("checkpoint", {})
+    if not isinstance(checkpoint_config, dict):
+        raise TypeError("checkpoint config must be a dictionary")
+
+    save_last = checkpoint_config.get("save_last", True)
+    if isinstance(save_last, bool):
+        if not save_last:
+            return None
+        last_name = f"{ModelCheckpoint.CHECKPOINT_NAME_LAST}.ckpt"
+    elif isinstance(save_last, str):
+        if not save_last.strip():
+            raise ValueError("checkpoint save_last name must be non-empty")
+        last_name = save_last
+    else:
+        raise TypeError("checkpoint save_last must be a bool or string")
+
+    if isinstance(output_dir, Path):
+        output_path = output_dir
+    elif isinstance(output_dir, str):
+        if not output_dir.strip():
+            raise ValueError("output_dir must be a non-empty string")
+        output_path = Path(output_dir)
+    else:
+        raise TypeError("output_dir must be a string or Path")
+
+    last_checkpoint = output_path / last_name
+    if last_checkpoint.is_file():
+        return str(last_checkpoint)
+
+    return None
 
 
 def create_trainer(

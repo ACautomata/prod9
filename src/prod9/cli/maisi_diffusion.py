@@ -5,7 +5,8 @@ from typing import Mapping
 
 import torch
 
-from prod9.cli.shared import setup_environment, create_trainer, resolve_config_path
+from prod9.cli.shared import (create_trainer, resolve_config_path,
+                              resolve_last_checkpoint, setup_environment)
 from prod9.training.maisi_diffusion import MAISIDiffusionLightning
 from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
 
@@ -49,8 +50,13 @@ def train_maisi_diffusion(config: str) -> None:
     output_dir = cfg.get("output_dir", "outputs/maisi_stage2")
     trainer = create_trainer(cfg, output_dir, "maisi_diffusion")
 
-    # Train
-    trainer.fit(model, datamodule=data_module)
+    # Train (auto-resume from last checkpoint if available)
+    resume_checkpoint = resolve_last_checkpoint(cfg, output_dir)
+    if resume_checkpoint:
+        print(f"Found last checkpoint at {resume_checkpoint}. Resuming training.")
+        trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint)
+    else:
+        trainer.fit(model, datamodule=data_module)
 
     print(f"Training complete. Model saved in {output_dir}")
 
