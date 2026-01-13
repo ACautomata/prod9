@@ -15,13 +15,13 @@ output_dir: "outputs/medmnist3d_stage2"
 model:
   # Transformer decoder configuration
   transformer:
-    latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
+    latent_dim: 5  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
     hidden_dim: 512  # Reduced from 512 for smaller dataset
     cond_dim: 512  # Reduced from 512 for smaller dataset
     num_heads: 8  # Reduced from 8 for smaller dataset
     num_blocks: 12  # Reduced from 12 for smaller dataset
-    codebook_size: 15360  # FSQ codebook size (8*8*8 for levels=[8,8,8])
+    codebook_size: 15360
     mlp_ratio: 4.0
     dropout: 0.1
 
@@ -137,7 +137,7 @@ callbacks:
 # Trainer Configuration
 # =============================================================================
 trainer:
-  max_epochs: 50
+  max_epochs: 100
 
   hardware:
     accelerator: "auto"  # auto, gpu, cpu, mps

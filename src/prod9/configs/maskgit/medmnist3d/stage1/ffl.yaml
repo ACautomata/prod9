@@ -49,8 +49,8 @@ training:
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
     lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
-    b1: 0.9  # Adam beta1
-    b2: 0.95  # Adam beta2
+    b1: 0.5
+    b2: 0.95
     weight_decay: 1e-2
 
   # Learning rate scheduler (optional, currently constant)
@@ -94,8 +94,8 @@ data:
   intensity_clip: true
 
   # Data loader settings
-  batch_size: 2
-  num_workers: 2
+  batch_size: 4
+  num_workers: 4
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)
@@ -118,7 +118,7 @@ loss:
   # Loss type selector: "lpips" or "ffl"
   loss_type: "ffl"
 
-  discriminator_iter_start: 1500  # Discriminator warmup (reduced from 3000)
+  discriminator_iter_start: 3000
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -127,7 +127,7 @@ loss:
   # Perceptual Loss using Focal Frequency Loss (FFL)
   # FFL computes frequency-domain distance with adaptive weighting
   focal_frequency:
-    weight: 1.0  # Loss weight multiplier (reduced for MedMNIST stability)
+    weight: 1.0
     alpha: 1.0  # Focusing exponent (higher = more focus on large errors)
     patch_factor: 1  # Split image into patches before FFT (1 = no patching)
     ave_spectrum: false  # Use minibatch-average spectrum
@@ -147,12 +147,12 @@ loss:
 
   # Adversarial loss
   adversarial:
-    weight: 0.05  # Reduced from 1.0 for training stability
+    weight: 0.1
     criterion: "hinge"  # hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:
-    weight: 0.25  # Beta in VQ terminology
+    weight: 0.0
 
   # Adaptive weight calculation
   adaptive:

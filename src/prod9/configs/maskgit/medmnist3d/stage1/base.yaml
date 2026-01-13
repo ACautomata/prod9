@@ -48,9 +48,9 @@ training:
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
     lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
-    b1: 0.9  # Adam beta1
+    b1: 0.5  # Adam beta1
     b2: 0.95  # Adam beta2
-    weight_decay: 1e-2
+    weight_decay: 1e-5
 
   # Learning rate scheduler (optional, currently constant)
   scheduler:
@@ -95,8 +95,8 @@ data:
   intensity_clip: true
 
   # Data loader settings
-  batch_size: 2
-  num_workers: 2
+  batch_size: 4
+  num_workers: 4
   train_val_split: 0.9
 
   # Data augmentation (recommended for MedMNIST 3D due to small sample size)
@@ -116,7 +116,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 1500  # Discriminator warmup (reduced from 3000)
+  discriminator_iter_start: 3000
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -124,19 +124,19 @@ loss:
 
   # Perceptual Loss (LPIPS-based using pretrained network)
   perceptual:
-    weight: 0.1  # Reduced from 1.0 for training stability
+    weight: 0.5
     network_type: "alex"
     is_fake_3d: true
     fake_3d_ratio: 0.5
 
   # Adversarial loss
   adversarial:
-    weight: 0.05  # Reduced from 1.0 for training stability
+    weight: 0.1
     criterion: "hinge"  # hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:
-    weight: 0.25  # Beta in VQ terminology
+    weight: 0.0
 
   # Adaptive weight calculation
   adaptive:

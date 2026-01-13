@@ -142,7 +142,7 @@ loss:
 
   # Commitment loss (FSQ)
   commitment:
-    weight: 0.25  # Beta in VQ terminology
+    weight: 0.0
 
   # Adaptive weight calculation
   adaptive:
