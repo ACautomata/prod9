@@ -206,7 +206,7 @@ trainer:
   hardware:
     accelerator: "auto"  # Auto-detect: gpu/mps/cpu
     devices: "auto"       # Use all available devices
-    precision: "bf16-mixed"  # 32, 16, bf16
+    precision: "16-mixed"  # bf16 not supported on MPS
 
   # Logging
   logging:

@@ -102,7 +102,7 @@ trainer:
   hardware:
     accelerator: "auto"
     devices: "auto"
-    precision: "bf16-mixed"
+    precision: "16-mixed"  # bf16 not supported on MPS
 
   logging:
     log_every_n_steps: 10

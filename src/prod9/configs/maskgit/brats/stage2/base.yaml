@@ -163,7 +163,7 @@ trainer:
     # Override in config for specific needs, e.g., devices: 1 for single GPU
     accelerator: "auto"  # Options: "auto", "cpu", "gpu", "mps", "cuda", "tpu"
     devices: "auto"       # Options: "auto", 1, 2, 4, [0, 1], etc.
-    precision: "bf16-mixed"
+    precision: "16-mixed"  # bf16 not supported on MPS
 
   logging:
     log_every_n_steps: 10
