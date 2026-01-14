@@ -75,6 +75,7 @@ class MAISIVAELightningConfig:
             num_res_blocks=autoencoder_config.num_res_blocks,
             norm_num_groups=autoencoder_config.norm_num_groups,
             num_splits=autoencoder_config.num_splits,
+            save_mem=autoencoder_config.save_mem,
         )
 
         # Get training configuration

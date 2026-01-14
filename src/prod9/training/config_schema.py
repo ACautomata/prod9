@@ -782,6 +782,9 @@ class MAISIAutoencoderModelConfig(BaseModel):
     # Number of splits for latent space
     num_splits: int = Field(default=2, ge=1, description="Number of splits for latent space")
 
+    # Memory optimization
+    save_mem: bool = Field(default=False, description="Enable memory-saving checkpointing in encoder/decoder")
+
 
 class MAISIModelConfig(BaseModel):
     """Model configuration for MAISI VAE training.

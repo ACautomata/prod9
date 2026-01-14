@@ -19,6 +19,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
 from prod9.training.losses import VAEGANLoss
 from prod9.training.maisi_vae import MAISIVAELightning
+from prod9.training.maisi_vae_config import MAISIVAELightningConfig
 
 
 class TestMAISIVAEGANLoss(unittest.TestCase):

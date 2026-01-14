@@ -20,14 +20,15 @@ model:
     num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32
     num_splits: 2
+    save_mem: false
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 training:
   optimizer:
-    lr_g: 5e-5
-    lr_d: 1e-4
+    lr_g: 1e-4
+    lr_d: 2e-4
     b1: 0.5
     b2: 0.9
     weight_decay: 1e-5
@@ -46,7 +47,7 @@ training:
 # Data Configuration (MedMNIST 3D)
 # =============================================================================
 data:
-  dataset_name: "organmnist3d"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d
+  dataset_name: "all"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d
   size: 64
   root: "./.medmnist"
   download: true

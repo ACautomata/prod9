@@ -20,6 +20,7 @@ model:
     num_res_blocks: [2, 2, 2, 2]
     norm_num_groups: 32
     num_splits: 4
+    save_mem: false
 
 # =============================================================================
 # Training Configuration

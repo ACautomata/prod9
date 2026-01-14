@@ -140,8 +140,10 @@ class LPIPSMetric(nn.Module):
             )
         from monai.losses.perceptual import PerceptualLoss
 
+        use_spatial_dims = spatial_dims if network_type.startswith("medicalnet") else 2
+
         self.lpips_network = PerceptualLoss(
-            spatial_dims=spatial_dims,
+            spatial_dims=use_spatial_dims,
             network_type=network_type,
             is_fake_3d=is_fake_3d,
             fake_3d_ratio=fake_3d_ratio,

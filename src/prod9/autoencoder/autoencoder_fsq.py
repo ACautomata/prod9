@@ -1,4 +1,4 @@
-from typing import override, Sequence, cast
+from typing import Sequence, cast
 from sympy import false
 import torch
 import torch.nn as nn
@@ -131,11 +131,9 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
 
 
     
-    @override
     def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:
         return self.quantizer(z_mu)
     
-    @override
     def encode(self, x: torch.Tensor):
         """
         Forwards an image through the spatial encoder and applies FSQ quantization.
@@ -156,7 +154,6 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         z_q = self.sampling(z_mu, torch.zeros_like(z_mu))
         return z_q, z_mu
 
-    @override
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass: encode -> quantize -> decode.

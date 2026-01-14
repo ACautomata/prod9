@@ -57,6 +57,10 @@ The `maisi/` directory contains configs for the MAISI (Rectified Flow) pipeline.
 | `diffusion/medmnist3d_diffusion.yaml` | MedMNIST 3D | 2 | Rectified Flow diffusion for MedMNIST 3D |
 | `diffusion/brats_controlnet.yaml` | BraTS | 3 | ControlNet for conditional generation |
 
+MAISI autoencoder configs support `save_mem` (default: `false`) to enable
+memory-saving checkpointing during training and validation, mirroring the FSQ
+pipeline. Set this to `true` when GPU memory is constrained.
+
 ## Perceptual Loss Options
 
 The autoencoder configs support two perceptual loss types:

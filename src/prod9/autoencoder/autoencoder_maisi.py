@@ -49,6 +49,7 @@ class AutoencoderMAISI(AutoencoderKlMaisi):
         attention_levels: Sequence[bool] = (False, False, True, True),
         num_res_blocks: Sequence[int] = (1, 1, 1, 1),
         norm_num_groups: int = 32,
+        save_mem: bool = False,
         **kwargs: Any,
     ):
         # Save all init parameters for export
@@ -61,6 +62,7 @@ class AutoencoderMAISI(AutoencoderKlMaisi):
             "attention_levels": attention_levels,
             "num_res_blocks": num_res_blocks,
             "norm_num_groups": norm_num_groups,
+            "save_mem": save_mem,
             **kwargs,
         }
 
@@ -73,6 +75,7 @@ class AutoencoderMAISI(AutoencoderKlMaisi):
             attention_levels=attention_levels,
             num_res_blocks=num_res_blocks,
             norm_num_groups=norm_num_groups,
+            save_mem=save_mem,
             **kwargs,
         )
 
