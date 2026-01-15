@@ -61,6 +61,13 @@ MAISI autoencoder configs support `save_mem` (default: `false`) to enable
 memory-saving checkpointing during training and validation, mirroring the FSQ
 pipeline. Set this to `true` when GPU memory is constrained.
 
+## Callbacks
+
+Training callbacks live under the `callbacks` section.
+
+- `callbacks.early_stop.check_finite`: stop training if the monitored metric becomes NaN or Inf.
+- `trainer.detect_anomaly`: enable PyTorch autograd anomaly detection for NaN/Inf debugging.
+
 ## Perceptual Loss Options
 
 The autoencoder configs support two perceptual loss types:

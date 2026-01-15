@@ -429,6 +429,7 @@ class EarlyStopConfig(BaseModel):
     patience: int = Field(default=10, ge=0)
     mode: str = Field(default="max")
     min_delta: float = Field(default=0.0)
+    check_finite: bool = Field(default=True, description="Stop when metric is NaN/Inf")
 
 
 class ProfilerConfig(BaseModel):

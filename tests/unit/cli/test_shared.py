@@ -11,9 +11,14 @@ import pytest
 import pytorch_lightning as pl
 import torch
 
-from prod9.cli.shared import (create_trainer, fit_with_resume, get_device,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    get_device,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 
 
 class TestSetupEnvironment:
@@ -377,6 +382,30 @@ class TestCreateTrainer:
                 assert mock_es.call_count == 0
                 # But ModelCheckpoint should still be called
                 assert ModelCheckpoint is not None
+        finally:
+            os.rmdir(output_dir)
+
+    def test_early_stopping_check_finite_configured(self):
+        """Test NaN/Inf detection via EarlyStopping check_finite."""
+        from pytorch_lightning.callbacks import EarlyStopping
+
+        config = {
+            "trainer": {},
+            "callbacks": {
+                "early_stop": {
+                    "check_finite": False,
+                },
+            },
+        }
+        output_dir = tempfile.mkdtemp()
+
+        try:
+            with patch("prod9.cli.shared.EarlyStopping", wraps=EarlyStopping) as mock_es:
+                create_trainer(config, output_dir, "test")
+
+                assert mock_es.call_count == 1
+                call_kwargs = mock_es.call_args.kwargs
+                assert call_kwargs["check_finite"] is False
         finally:
             os.rmdir(output_dir)
 

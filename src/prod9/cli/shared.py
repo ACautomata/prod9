@@ -9,13 +9,16 @@ from typing import Any, Dict
 import pytorch_lightning as pl
 import torch
 from dotenv import load_dotenv
-from pytorch_lightning.callbacks import (Callback, EarlyStopping,
-                                         LearningRateMonitor, ModelCheckpoint)
+from pytorch_lightning.callbacks import (
+    Callback,
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.profilers import PyTorchProfiler
 
-from prod9.training.callbacks import (GradientNormLogging,
-                                      PerLayerGradientMonitor)
+from prod9.training.callbacks import GradientNormLogging, PerLayerGradientMonitor
 
 
 def configure_multiprocessing() -> None:
@@ -272,6 +275,7 @@ def create_trainer(
             patience=early_stop_config.get("patience", 10),
             mode=early_stop_config.get("mode", "min"),
             min_delta=early_stop_config.get("min_delta", 0.0),
+            check_finite=early_stop_config.get("check_finite", True),
         )
         callbacks.append(early_stop)
 
