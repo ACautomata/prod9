@@ -187,19 +187,24 @@ class TestMAISIVAELightningInitialization(unittest.TestCase):
         )
 
         # Create Lightning module
-        lightning_module = MAISIVAELightning(
-            vae=vae,
-            discriminator=discriminator,
-            lr_g=1e-4,
-            lr_d=4e-4,
-            b1=0.5,
-            b2=0.999,
-            recon_weight=1.0,
-            perceptual_weight=0.5,
-            kl_weight=1e-6,
-            adv_weight=0.1,
-            perceptual_network_type="alex",
-        )
+        with patch("prod9.training.losses.PerceptualLoss") as mock_loss, patch(
+            "monai.losses.perceptual.PerceptualLoss"
+        ) as mock_metric_loss:
+            mock_loss.return_value = MagicMock()
+            mock_metric_loss.return_value = MagicMock()
+            lightning_module = MAISIVAELightning(
+                vae=vae,
+                discriminator=discriminator,
+                lr_g=1e-4,
+                lr_d=4e-4,
+                b1=0.5,
+                b2=0.999,
+                recon_weight=1.0,
+                perceptual_weight=0.5,
+                kl_weight=1e-6,
+                adv_weight=0.1,
+                perceptual_network_type="alex",
+            )
 
         self.assertIsNotNone(lightning_module)
         self.assertIsInstance(lightning_module.vae, AutoencoderMAISI)
