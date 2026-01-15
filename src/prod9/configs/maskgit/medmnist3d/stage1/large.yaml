@@ -116,7 +116,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 3000
+  discriminator_iter_start: 500
 
   # Reconstruction loss (L1)
   reconstruction:

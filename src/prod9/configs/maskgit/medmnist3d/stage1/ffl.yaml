@@ -118,7 +118,7 @@ loss:
   # Loss type selector: "lpips" or "ffl"
   loss_type: "ffl"
 
-  discriminator_iter_start: 3000
+  discriminator_iter_start: 500
 
   # Reconstruction loss (L1)
   reconstruction:
