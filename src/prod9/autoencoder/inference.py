@@ -255,21 +255,26 @@ class AutoencoderInferenceWrapper:
 
     def encode_stage_2_inputs(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Encode image and return token indices for Stage 2 transformer training.
+        Encode input for Stage 2 training.
 
-        Uses the autoencoder's quantize_stage_2_inputs() method which handles
-        the new encode() signature correctly.
+        For FSQ autoencoders, this returns quantized token indices via
+        quantize_stage_2_inputs(). For MAISI VAE autoencoders, this returns
+        the continuous latent via encode_stage_2_inputs().
 
         Args:
             x: Input image [B, C, H, W, D]
 
         Returns:
-            Token indices [B, H, W, D] (flat scalar indices for FSQ)
+            Stage 2 inputs (token indices for FSQ or latent for MAISI).
         """
-        # Delegate to autoencoder's quantize_stage_2_inputs() which handles
-        # the new (z_q, z_mu) signature correctly
-        ae = cast(AutoencoderFSQ, self.autoencoder)
-        return ae.quantize_stage_2_inputs(x)
+        ae = self.autoencoder
+        if hasattr(ae, "quantize_stage_2_inputs"):
+            return cast(AutoencoderFSQ, ae).quantize_stage_2_inputs(x)
+        if hasattr(ae, "encode_stage_2_inputs"):
+            return cast(Any, ae).encode_stage_2_inputs(x)
+        raise AttributeError(
+            "Autoencoder does not support Stage 2 input encoding."
+        )
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """

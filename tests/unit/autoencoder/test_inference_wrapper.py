@@ -280,6 +280,23 @@ class TestStage2Methods(unittest.TestCase):
         self.assertEqual(indices.ndim, 4)
         self.assertTrue(torch.all(indices >= 0))
 
+    def test_encode_stage_2_inputs_maisi(self) -> None:
+        """Test MAISI encode_stage_2_inputs returns latent tensor."""
+        autoencoder = MagicMock(spec=["encode_stage_2_inputs", "parameters", "device"])
+        autoencoder.device = self.device
+        autoencoder.parameters.return_value = iter([])
+        autoencoder.encode_stage_2_inputs.return_value = torch.randn(
+            1, 4, 4, 4, 4, device=self.device
+        )
+        wrapper = AutoencoderInferenceWrapper(autoencoder, self.sw_config)
+        x = torch.randn(1, 1, 32, 32, 32).to(self.device)
+
+        latent = wrapper.encode_stage_2_inputs(x)
+
+        self.assertEqual(latent.ndim, 5)
+        self.assertEqual(latent.shape[0], 1)
+        self.assertEqual(latent.shape[1], 4)
+
     def test_decode_stage_2_outputs(self) -> None:
         """Test decode_stage_2_outputs decodes latent to image."""
         # Create latent tensor
