@@ -11,8 +11,7 @@ from urllib.error import HTTPError
 
 import torch
 
-from prod9.training.losses import (FocalFrequencyLoss, SliceWiseFake3DLoss,
-                                   VAEGANLoss)
+from prod9.training.losses import FocalFrequencyLoss, SliceWiseFake3DLoss, VAEGANLoss
 from prod9.training.metrics import LPIPSMetric
 
 
@@ -66,6 +65,33 @@ class TestVAEGANLoss(unittest.TestCase):
                 is_fake_3d=True,
                 fake_3d_ratio=0.25,
             )
+
+    def test_lpips_expands_single_channel_for_2d_network(self):
+        """Single-channel inputs should expand for LPIPS 2D networks."""
+        loss = VAEGANLoss(
+            perceptual_network_type="alex",
+            is_fake_3d=True,
+        ).to(self.device)
+        loss.perceptual_network = MagicMock()
+        loss.perceptual_network.return_value = torch.tensor(0.0, device=self.device)
+
+        fake_images = torch.randn(
+            self.batch_size, self.channels,
+            self.spatial_size, self.spatial_size, self.spatial_size,
+            device=self.device
+        )
+        real_images = torch.randn(
+            self.batch_size, self.channels,
+            self.spatial_size, self.spatial_size, self.spatial_size,
+            device=self.device
+        )
+
+        loss_value = loss._compute_lpips_loss(fake_images, real_images)
+
+        self.assertIsInstance(loss_value, torch.Tensor)
+        args, _ = loss.perceptual_network.call_args
+        self.assertEqual(args[0].shape[1], 3)
+        self.assertEqual(args[1].shape[1], 3)
 
     def test_vaegan_loss_forward(self):
         """Smoke test: basic forward pass."""
@@ -474,8 +500,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
 
         # Create a real autoencoder and discriminator to establish proper computational graph
         # Use configuration where num_channels matches len(levels)
-        from monai.networks.nets.patchgan_discriminator import \
-            MultiScalePatchDiscriminator
+        from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
@@ -576,8 +601,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         assert self.vaegan_loss is not None  # Type guard for pyright
 
         # Create a real autoencoder and discriminator to establish proper computational graph
-        from monai.networks.nets.patchgan_discriminator import \
-            MultiScalePatchDiscriminator
+        from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 

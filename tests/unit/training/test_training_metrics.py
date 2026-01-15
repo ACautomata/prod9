@@ -4,14 +4,16 @@ Tests for training metrics module.
 Tests PSNR, SSIM, LPIPS, FID, and IS calculations.
 """
 import unittest
-import torch
+
 import numpy as np
+import torch
+
 from prod9.training.metrics import (
-    PSNRMetric,
-    SSIMMetric,
-    LPIPSMetric,
     FIDMetric3D,
     InceptionScore3D,
+    LPIPSMetric,
+    PSNRMetric,
+    SSIMMetric,
 )
 
 
@@ -230,6 +232,22 @@ class TestLPIPSMetric(unittest.TestCase):
         lpips = self.lpips_metric(pred, target)
 
         # LPIPS should return a scalar
+        self.assertIsInstance(lpips, torch.Tensor)
+        self.assertEqual(lpips.dim(), 0)
+
+    def test_lpips_fake3d_single_channel(self):
+        """LPIPS 2D networks should handle single-channel 3D inputs."""
+        lpips_metric = LPIPSMetric(
+            spatial_dims=3,
+            network_type="alex",
+            is_fake_3d=True,
+            fake_3d_ratio=0.25,
+        )
+        pred = torch.randn(1, 1, 64, 64, 64)
+        target = torch.randn(1, 1, 64, 64, 64)
+
+        lpips = lpips_metric(pred, target)
+
         self.assertIsInstance(lpips, torch.Tensor)
         self.assertEqual(lpips.dim(), 0)
 

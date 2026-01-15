@@ -17,8 +17,7 @@ Reference for Focal Frequency Loss:
 """
 
 import math
-from typing import (Callable, Dict, List, Literal, Optional, Sequence, Tuple,
-                    Union, cast)
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 import torch
 import torch.nn as nn
@@ -577,6 +576,36 @@ class VAEGANLoss(nn.Module):
         else:
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
 
+    def _prepare_lpips_inputs(
+        self, fake_images: torch.Tensor, real_images: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if fake_images.shape != real_images.shape:
+            raise ValueError(
+                f"LPIPS input shape mismatch: {fake_images.shape} vs {real_images.shape}"
+            )
+        if fake_images.dim() not in (4, 5):
+            raise ValueError(
+                "LPIPS expects 4D (B, C, H, W) or 5D (B, C, H, W, D) inputs, "
+                f"got {fake_images.dim()}D"
+            )
+        if self.perceptual_network_type.startswith("medicalnet"):
+            return fake_images, real_images
+
+        channels = fake_images.shape[1]
+        if channels == 1:
+            repeat_factors = [1] * fake_images.dim()
+            repeat_factors[1] = 3
+            return (
+                fake_images.repeat(*repeat_factors),
+                real_images.repeat(*repeat_factors),
+            )
+        if channels == 3:
+            return fake_images, real_images
+        raise ValueError(
+            "LPIPS with non-medicalnet networks expects 1 or 3 channels, "
+            f"got {channels}"
+        )
+
     def _compute_lpips_loss(
         self, fake_images: torch.Tensor, real_images: torch.Tensor
     ) -> torch.Tensor:
@@ -599,7 +628,8 @@ class VAEGANLoss(nn.Module):
         # Type narrowing: perceptual_network is now guaranteed to be non-None
         network = self.perceptual_network
         assert network is not None
-        return network(fake_images, real_images)
+        prepared_fake, prepared_real = self._prepare_lpips_inputs(fake_images, real_images)
+        return network(prepared_fake, prepared_real)
 
     def _compute_ffl_loss(
         self, fake_images: torch.Tensor, real_images: torch.Tensor

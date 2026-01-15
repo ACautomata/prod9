@@ -140,13 +140,38 @@ class LPIPSMetric(nn.Module):
             )
         from monai.losses.perceptual import PerceptualLoss
 
-        use_spatial_dims = spatial_dims if network_type.startswith("medicalnet") else 2
+        self.network_type = network_type
 
         self.lpips_network = PerceptualLoss(
-            spatial_dims=use_spatial_dims,
+            spatial_dims=spatial_dims,
             network_type=network_type,
             is_fake_3d=is_fake_3d,
             fake_3d_ratio=fake_3d_ratio,
+        )
+
+    def _prepare_lpips_inputs(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if pred.shape != target.shape:
+            raise ValueError(f"LPIPS input shape mismatch: {pred.shape} vs {target.shape}")
+        if pred.dim() not in (4, 5):
+            raise ValueError(
+                "LPIPS expects 4D (B, C, H, W) or 5D (B, C, H, W, D) inputs, "
+                f"got {pred.dim()}D"
+            )
+        if self.network_type.startswith("medicalnet"):
+            return pred, target
+
+        channels = pred.shape[1]
+        if channels == 1:
+            repeat_factors = [1] * pred.dim()
+            repeat_factors[1] = 3
+            return pred.repeat(*repeat_factors), target.repeat(*repeat_factors)
+        if channels == 3:
+            return pred, target
+        raise ValueError(
+            "LPIPS with non-medicalnet networks expects 1 or 3 channels, "
+            f"got {channels}"
         )
 
     def forward(
@@ -162,8 +187,9 @@ class LPIPSMetric(nn.Module):
         Returns:
             LPIPS distance (lower is better, typically [0, 1])
         """
+        prepared_pred, prepared_target = self._prepare_lpips_inputs(pred, target)
         with torch.no_grad():
-            lpips_value = self.lpips_network(pred, target)
+            lpips_value = self.lpips_network(prepared_pred, prepared_target)
         return lpips_value
 
 
@@ -337,8 +363,7 @@ class InceptionScore3D(nn.Module):
     def _load_medicalnet_weights(self) -> None:
         """Load MedicalNet pretrained weights if available."""
         try:
-            from monai.networks.nets.resnet import \
-                get_pretrained_resnet_medicalnet
+            from monai.networks.nets.resnet import get_pretrained_resnet_medicalnet
 
             # Map model_name to resnet_depth
             depth_map = {"resnet10": 10, "resnet18": 18, "resnet34": 34, "resnet50": 50}
