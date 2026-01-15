@@ -70,6 +70,7 @@ training:
     warmup_enabled: true  # Enable learning rate warmup
     warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
     warmup_ratio: 0.02  # 2% of total training steps for warmup
+    warmup_eta_min: 0.0
 
 # =============================================================================
 # Data Configuration
