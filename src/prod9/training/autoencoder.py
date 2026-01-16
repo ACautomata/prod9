@@ -76,7 +76,7 @@ class AutoencoderLightning(pl.LightningModule):
         adv_weight: Base weight for adversarial loss (default: 0.1)
         commitment_weight: Weight for commitment loss (default: 0.25)
         sample_every_n_steps: Log samples every N steps (default: 100)
-        discriminator_iter_start: Step to start generator adversarial weight (default: 0)
+        discriminator_iter_start: Step to start discriminator training (default: 0)
         use_sliding_window: Use sliding window for validation (default: False)
         sw_roi_size: Sliding window ROI size (default: (64, 64, 64))
         sw_overlap: Sliding window overlap (default: 0.5)
@@ -289,8 +289,9 @@ class AutoencoderLightning(pl.LightningModule):
         # Compute discriminator loss
         disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
 
-        # Discriminator training always runs; warmup only gates generator adversarial term.
-        # Generator adversarial weight is handled in VAEGANLoss.
+        # Apply warmup
+        if self.global_step < self.vaegan_loss.discriminator_iter_start:
+            disc_loss = disc_loss * 0.0
 
         # Set marker for gradient norm logging callback
         self._current_backward_branch = "disc"

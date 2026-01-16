@@ -121,7 +121,7 @@ loss:
   # Loss type selector: "lpips" or "ffl"
   loss_type: "ffl"
 
-  discriminator_iter_start: 15000  # Discriminator warmup
+  discriminator_iter_start: 500  # Discriminator warmup
 
   # Reconstruction loss (L1)
   reconstruction:

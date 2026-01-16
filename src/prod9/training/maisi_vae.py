@@ -63,7 +63,7 @@ class MAISIVAELightning(pl.LightningModule):
         fake_3d_ratio: Fraction of slices used when is_fake_3d=True
         adv_criterion: Adversarial loss criterion (default: "least_squares")
         sample_every_n_steps: Log samples every N steps (default: 100)
-        discriminator_iter_start: Step to start generator adversarial weight (default: 0)
+        discriminator_iter_start: Step to start discriminator training (default: 0)
         warmup_enabled: Enable learning rate warmup (default: True)
         warmup_steps: Explicit warmup steps, or None to auto-calculate (default: None)
         warmup_ratio: Ratio of total steps for warmup (default: 0.02)
@@ -230,8 +230,9 @@ class MAISIVAELightning(pl.LightningModule):
         # Compute discriminator loss
         disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
 
-        # Discriminator training always runs; warmup only gates generator adversarial term.
-        # Generator adversarial weight is handled in VAEGANLoss.
+        # Apply warmup
+        if self.global_step < self.vaegan_loss.discriminator_iter_start:
+            disc_loss = disc_loss * 0.0
 
         # Set marker for gradient norm logging callback
         self._current_backward_branch = "disc"
