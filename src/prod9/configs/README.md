@@ -7,6 +7,12 @@ This directory contains configuration files for training different models in the
 ```
 src/prod9/configs/
 ├── README.md          # This file
+├── templates/         # Template configuration files
+│   ├── autoencoder_template.yaml       # MaskGiT Stage 1 template
+│   ├── transformer_template.yaml       # MaskGiT Stage 2 template
+│   ├── maisi_vae_template.yaml         # MAISI Stage 1 template
+│   ├── maisi_diffusion_template.yaml   # MAISI Stage 2 template
+│   └── maisi_controlnet_template.yaml  # MAISI Stage 3 template
 ├── maskgit/           # MaskGiT-based models (FSQ autoencoder + transformer)
 │   ├── medmnist3d/    # MedMNIST 3D dataset configs
 │   │   ├── stage1/    # Autoencoder with FSQ
@@ -94,4 +100,77 @@ loss:
     patch_factor: 1     # Patch size for FFT
     axes: [2, 3, 4]     # Slicing axes for 3D
     ratio: 1.0          # Fraction of slices to use
+```
+
+## Configuration Templates
+
+For easy starting, template configuration files are available in the `templates/` directory:
+
+### Available Templates
+
+| Template File | CLI Command | Architecture | Stage | Description |
+|---------------|-------------|--------------|-------|-------------|
+| `autoencoder_template.yaml` | `prod9-train-autoencoder` | MaskGiT | Stage 1 | FSQ autoencoder configuration template |
+| `transformer_template.yaml` | `prod9-train-transformer` | MaskGiT | Stage 2 | Transformer configuration template |
+| `maisi_vae_template.yaml` | `prod9-train-maisi-vae` | MAISI | Stage 1 | VAE configuration template |
+| `maisi_diffusion_template.yaml` | `prod9-train-maisi-diffusion` | MAISI | Stage 2 | Rectified Flow diffusion template |
+| `maisi_controlnet_template.yaml` | `prod9-train-maisi-controlnet` | MAISI | Stage 3 | ControlNet configuration template |
+
+### Using Templates
+
+1. **Copy a template** to create a new configuration:
+   ```bash
+   cp src/prod9/configs/templates/autoencoder_template.yaml my_autoencoder_config.yaml
+   ```
+
+2. **Set required environment variables**:
+   ```bash
+   export BRATS_DATA_DIR=/path/to/BraTS
+   export MEDMNIST_DATA_DIR=/path/to/MedMNIST3D
+   ```
+
+3. **Edit the configuration**:
+   - Update dataset paths
+   - Adjust model architecture parameters
+   - Modify training hyperparameters
+   - Set output directories
+
+4. **Use the configuration**:
+   ```bash
+   prod9-train-autoencoder train --config my_autoencoder_config.yaml
+   ```
+
+### Template Features
+
+Each template includes:
+- **All configurable options** with default values
+- **Detailed Chinese comments** explaining each parameter
+- **Required vs optional fields** clearly marked
+- **Dataset configuration examples** for both BraTS and MedMNIST3D
+- **Architecture-specific notes** and recommendations
+
+### Environment Variable Syntax
+
+Configuration files use environment variable substitution:
+- **Required**: `${VAR_NAME}` - will raise error if not set
+- **With default**: `${VAR_NAME:default_value}` - uses default if not set
+
+Examples:
+```yaml
+data:
+  data_dir: "${BRATS_DATA_DIR}"           # Required
+  cache_dir: "${CACHE_DIR:/tmp/cache}"    # With default
+```
+
+### Quick Start Example
+
+```bash
+# 1. Copy template
+cp src/prod9/configs/templates/autoencoder_template.yaml my_config.yaml
+
+# 2. Set environment variable
+export BRATS_DATA_DIR=/path/to/BraTS
+
+# 3. Train
+prod9-train-autoencoder train --config my_config.yaml
 ```
