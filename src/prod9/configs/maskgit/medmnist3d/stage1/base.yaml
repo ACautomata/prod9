@@ -117,7 +117,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 500
+  discriminator_iter_start: 1500
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -141,7 +141,7 @@ loss:
 
   # Adaptive weight calculation
   adaptive:
-    max_weight: 100.0  # Clamp adaptive weight
+    max_weight: 10000.0  # Clamp adaptive weight
     grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
 
 # =============================================================================
@@ -188,7 +188,7 @@ trainer:
   hardware:
     accelerator: "auto"  # auto, gpu, cpu, mps (Apple Silicon)
     devices: "auto"  # auto, 1, 2, 4, etc.
-    precision: "16-mixed"  # 32, 16, bf16
+    precision: "bf16-mixed"  # 32, 16, bf16
 
   # Logging
   logging:
