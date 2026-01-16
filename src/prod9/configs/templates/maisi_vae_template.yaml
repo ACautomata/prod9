@@ -1,0 +1,319 @@
+# =============================================================================
+# prod9 MAISI Stage 1 VAE Template Configuration
+# MAISI: KL-divergence VAE training
+# CLI: prod9-train-maisi-vae train --config <this_file>
+# =============================================================================
+
+# =============================================================================
+# Output Paths (REQUIRED)
+# =============================================================================
+output_dir: "outputs/maisi_stage1"  # Directory for checkpoints and logs
+vae_export_path: "outputs/maisi_vae_final.pt"  # Path to export trained VAE
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  # ----------------------------------------------------------------------
+  # MAISI VAE configuration (KL divergence, no FSQ levels)
+  # REQUIRED fields: latent_channels, num_channels, attention_levels, num_res_blocks
+  # ----------------------------------------------------------------------
+  autoencoder:
+    spatial_dims: 3  # Spatial dimensions (1-3), default: 3
+    in_channels: 1  # Input channels, default: 1
+    out_channels: 1  # Output channels, default: 1
+
+    # REQUIRED: Latent channels for MAISI VAE
+    latent_channels: 16  # REQUIRED - Number of latent channels (typically 4-16)
+
+    # REQUIRED: Channel sizes per layer
+    # Length determines network depth
+    num_channels: [32, 64, 64, 64]  # REQUIRED (as tuple)
+
+    # REQUIRED: Which layers have attention mechanisms
+    # Must match length of num_channels
+    attention_levels: [False, False, True, True]  # REQUIRED (as tuple)
+
+    # REQUIRED: Number of residual blocks per layer
+    # Must match length of num_channels
+    num_res_blocks: [1, 1, 1, 1]  # REQUIRED (as tuple)
+
+    norm_num_groups: 32  # Group normalization groups, default: 32
+    num_splits: 2  # Number of splits for latent space, default: 2
+    save_mem: false  # Enable memory-saving checkpointing, default: false
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  # ----------------------------------------------------------------------
+  # Optimizer settings
+  # ----------------------------------------------------------------------
+  optimizer:
+    lr_g: 1e-4  # Generator (VAE) learning rate, default: 1e-4
+    lr_d: 4e-4  # Discriminator learning rate, default: 4e-4
+    b1: 0.5  # Adam beta1, default: 0.5
+    b2: 0.999  # Adam beta2, default: 0.999
+    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
+
+  # ----------------------------------------------------------------------
+  # Learning rate scheduler
+  # ----------------------------------------------------------------------
+  scheduler:
+    type: "constant"  # Options: constant, cosine, step
+      # constant: no scheduling
+      # cosine: cosine annealing (requires T_max, eta_min)
+      # step: step decay (requires step_size, gamma)
+
+    # Cosine scheduler parameters (if type: "cosine")
+    # T_max: 100  # Maximum number of iterations
+    # eta_min: 0  # Minimum learning rate
+
+    # Step scheduler parameters (if type: "step")
+    # step_size: 30  # Decay every N epochs
+    # gamma: 0.1  # Multiplicative decay factor
+
+    # Warmup configuration (applies to all schedulers)
+    warmup:
+      enabled: true  # Enable learning rate warmup, default: true
+      warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
+      warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
+      eta_min: 0.0  # Minimum learning rate after cosine decay, default: 0.0
+
+  # ----------------------------------------------------------------------
+  # Training loop settings
+  # ----------------------------------------------------------------------
+  loop:
+    sample_every_n_steps: 100  # How often to generate samples during training, default: 100
+
+  # ----------------------------------------------------------------------
+  # Training stability settings
+  # ----------------------------------------------------------------------
+  stability:
+    grad_norm_logging: true  # Log gradient norms for monitoring, default: true
+    warmup_enabled: true  # Enable learning rate warmup, default: true
+    warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
+    warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
+    warmup_eta_min: 0.1  # Minimum learning rate ratio after decay (0.0-1.0), default: 0.1
+
+# =============================================================================
+# Data Configuration (BraTS Dataset)
+# =============================================================================
+data:
+  # ----------------------------------------------------------------------
+  # Data paths
+  # ----------------------------------------------------------------------
+  data_dir: "${BRATS_DATA_DIR:data/BraTS}"  # Path to dataset (env var or default)
+
+  # ----------------------------------------------------------------------
+  # Modalities to use (BraTS-specific)
+  # ----------------------------------------------------------------------
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]  # BraTS modalities, default: 4 modalities
+
+  # ----------------------------------------------------------------------
+  # Data loader settings
+  # ----------------------------------------------------------------------
+  batch_size: 2  # Training batch size, default: 2
+  num_workers: 4  # Number of data loading workers, default: 4
+  cache_num_workers: 0  # CacheDataset worker count, default: 0
+  cache_rate: 0.5  # Cache 0-100% of data (1.0 = all in RAM), default: 1.0
+  pin_memory: true  # Pin memory for faster GPU transfer, default: true
+  train_val_split: 0.8  # Training/validation split ratio, default: 0.8
+
+  # ----------------------------------------------------------------------
+  # Training crop size
+  # ----------------------------------------------------------------------
+  roi_size: [64, 64, 64]  # Training crop size [D, H, W], default: [64, 64, 64]
+
+  # ----------------------------------------------------------------------
+  # Preprocessing transforms
+  # ----------------------------------------------------------------------
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions [D, H, W], default: [1.0, 1.0, 1.0]
+    spacing_mode: "bilinear"  # Resampling mode, default: "bilinear"
+    orientation: "RAS"  # NIfTI orientation, default: "RAS"
+    intensity_a_min: 0.0  # ScaleIntensityRanged lower bound, default: 0.0
+    intensity_a_max: 500.0  # ScaleIntensityRanged upper bound, default: 500.0
+    intensity_b_min: -1.0  # Output lower bound after normalization, default: -1.0
+    intensity_b_max: 1.0  # Output upper bound after normalization, default: 1.0
+    clip: true  # Clip intensities to [a_min, a_max], default: true
+
+  # ----------------------------------------------------------------------
+  # Data augmentation
+  # ----------------------------------------------------------------------
+  augmentation:
+    flip_prob: 0.5  # Random flip probability (0-1), default: 0.5
+    flip_axes: [0, 1, 2]  # Flip axes [D, H, W], default: null (all axes)
+
+    rotate_prob: 0.5  # Random rotation probability (0-1), default: 0.5
+    rotate_max_k: 3  # Max 90-degree rotations (0-3), default: 3
+    rotate_axes: [0, 1]  # Rotate in plane [D, H], default: [0, 1]
+
+    shift_intensity_prob: 0.5  # Random intensity shift probability, default: 0.5
+    shift_intensity_offset: 0.1  # Intensity shift offset (+/- 10%), default: 0.1
+
+# =============================================================================
+# Loss Configuration (MAISI VAE-specific)
+# =============================================================================
+loss:
+  # ----------------------------------------------------------------------
+  # Reconstruction loss
+  # ----------------------------------------------------------------------
+  recon_weight: 1.0  # L1/L2 reconstruction loss weight, default: 1.0
+
+  # ----------------------------------------------------------------------
+  # KL divergence loss (VAE-specific)
+  # ----------------------------------------------------------------------
+  kl_weight: 1.0e-6  # KL divergence loss weight (typically 1e-6), default: 1e-6
+
+  # ----------------------------------------------------------------------
+  # Perceptual loss (LPIPS-based using pretrained network)
+  # ----------------------------------------------------------------------
+  perceptual_weight: 0.5  # LPIPS perceptual loss weight, default: 0.5
+  lpips_network: "medicalnet_resnet10_23datasets"  # Pretrained network
+    # Options: "alex", "vgg", "medicalnet_resnet10_23datasets", etc.
+  is_fake_3d: false  # Use 2.5D perceptual loss for 3D volumes, default: false
+  fake_3d_ratio: 0.5  # Fraction of slices used when is_fake_3d=True, default: 0.5
+
+  # ----------------------------------------------------------------------
+  # Adversarial loss
+  # ----------------------------------------------------------------------
+  adv_weight: 0.1  # Adversarial loss base weight, default: 0.1
+
+  # ----------------------------------------------------------------------
+  # Discriminator warmup
+  # ----------------------------------------------------------------------
+  discriminator_iter_start: 0  # Discriminator warmup steps, default: 0
+
+# =============================================================================
+# Discriminator Configuration
+# =============================================================================
+discriminator:
+  # ----------------------------------------------------------------------
+  # MultiScalePatchDiscriminator for MAISI VAE
+  # ----------------------------------------------------------------------
+  num_d: 1  # Number of discriminators (multi-scale), default: 1
+  num_layers_d: 3  # Layers per discriminator, default: 3
+  channels: 64  # Base channel count, default: 64
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
+callbacks:
+  # ----------------------------------------------------------------------
+  # Model checkpointing
+  # ----------------------------------------------------------------------
+  checkpoint:
+    monitor: "val/lpips"  # Metric to monitor for best model, default: val/combined_metric
+    mode: "min"  # Mode for monitoring (min=maximize, min=minimize), default: max
+    save_top_k: 3  # Number of best models to save, default: 3
+    save_last: true  # Always save last checkpoint, default: true
+    every_n_epochs: null  # Checkpoint every N epochs (null = disabled)
+
+  # ----------------------------------------------------------------------
+  # Early stopping
+  # ----------------------------------------------------------------------
+  early_stop:
+    enabled: true  # Enable early stopping, default: true
+    monitor: "val/lpips"  # Metric to monitor, default: val/combined_metric
+    patience: 10  # Epochs to wait before stopping, default: 10
+    mode: "min"  # Mode for monitoring, default: max
+    min_delta: 0.0  # Minimum change to qualify as improvement, default: 0.0
+    check_finite: true  # Stop when metric is NaN/Inf, default: true
+
+  # ----------------------------------------------------------------------
+  # Learning rate monitoring
+  # ----------------------------------------------------------------------
+  lr_monitor: true  # Log learning rate, default: true
+
+  # ----------------------------------------------------------------------
+  # PyTorch Profiler
+  # ----------------------------------------------------------------------
+  profiler:
+    enabled: false  # Enable PyTorch profiler, default: false
+    profile_cpu: true  # Profile CPU activities
+    profile_cuda: true  # Profile CUDA activities
+    record_shapes: true  # Record tensor shapes
+    with_stack: true  # Record stack traces
+    profile_memory: true  # Profile memory usage
+    trace_dir: "profiler"  # Subdirectory within output_dir for trace files
+
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
+trainer:
+  # ----------------------------------------------------------------------
+  # Training settings
+  # ----------------------------------------------------------------------
+  max_epochs: 100  # Maximum number of training epochs, default: 100
+
+  # ----------------------------------------------------------------------
+  # Hardware configuration
+  # ----------------------------------------------------------------------
+  hardware:
+    accelerator: "auto"  # Options: auto, cpu, gpu, mps, cuda, tpu, default: auto
+    devices: "auto"  # Options: auto, 1, 2, 4, [0, 1], etc., default: auto
+    precision: "16-mixed"  # Options: 32, 16-mixed, bf16-mixed (bf16 not on MPS), default: 32
+
+  # ----------------------------------------------------------------------
+  # Logging configuration
+  # ----------------------------------------------------------------------
+  logging:
+    log_every_n_steps: 10  # Log every N steps, default: 10
+    val_check_interval: 1.0  # Validate every N epochs, default: 1.0
+    limit_train_batches: null  # Limit training batches (null = all), default: null
+    limit_val_batches: 5.0  # Limit validation batches, default: 5.0
+    logger_version: null  # Logger version (null = auto-increment), default: null
+
+  # ----------------------------------------------------------------------
+  # Gradient handling
+  # ----------------------------------------------------------------------
+  gradient_clip_val: null  # Gradient clipping value (null = disabled), default: 1.0
+  gradient_clip_algorithm: "norm"  # Options: norm, value, default: norm
+  accumulate_grad_batches: 1  # Accumulate gradients over N batches, default: 1
+
+  # ----------------------------------------------------------------------
+  # Debugging/profiling
+  # ----------------------------------------------------------------------
+  profiler: null  # PyTorch profiler (null, simple, advanced, pytorch), default: null
+  detect_anomaly: false  # Enable autograd anomaly detection for NaN/Inf, default: false
+  benchmark: false  # Enable cudnn benchmarking, default: false
+
+# =============================================================================
+# Sliding Window Inference
+# =============================================================================
+sliding_window:
+  enabled: false  # Enable sliding window for validation/inference, default: false
+    # Training always uses direct calls (no SW needed)
+    # Enable for validation on large volumes
+
+  roi_size: [64, 64, 64]  # Sliding window size [D, H, W], default: [64, 64, 64]
+  overlap: 0.5  # Window overlap 0-1 (higher = smoother but slower), default: 0.5
+  sw_batch_size: 1  # Sliding window batch size (increase if GPU memory allows), default: 1
+  mode: "gaussian"  # Blending mode: gaussian, constant, mean, default: gaussian
+
+# =============================================================================
+# Notes
+# =============================================================================
+# 1. MAISI VAE vs MaskGiT FSQ:
+#    - Uses KL divergence instead of FSQ quantization
+#    - No 'levels' field (uses 'latent_channels' instead)
+#    - Continuous latent space with reparameterization trick
+#
+# 2. KL Divergence Weight:
+#    - Typically very small (1e-6) to balance reconstruction and KL terms
+#    - Too high causes blurry outputs, too low causes posterior collapse
+#
+# 3. Memory Optimization:
+#    - Set model.autoencoder.save_mem: true for GPU-constrained training
+#    - Enables gradient checkpointing in encoder/decoder
+#
+# 4. Environment Variables:
+#    - ${BRATS_DATA_DIR:data/BraTS} - Dataset path with default fallback
+#
+# 5. For MedMNIST3D datasets, replace data section with dataset-specific config:
+#    - Add: dataset_name: "organmnist3d" (or other MedMNIST3D datasets)
+#    - Add: size: 64 (or 28)
+#    - Add: root: "./.medmnist"
+#    - Add: download: true
+#    - Remove modalities (not used)
