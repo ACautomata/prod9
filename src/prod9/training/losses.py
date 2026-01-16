@@ -333,7 +333,7 @@ class VAEGANLoss(nn.Module):
         adv_weight: Weight for adversarial loss (base weight, scaled adaptively)
         commitment_weight: Weight for commitment loss (used in fsq mode)
         adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
-        discriminator_iter_start: Step number to start discriminator training (warmup)
+        discriminator_iter_start: Step number to start generator adversarial weight
     """
 
     # Class constants for magic numbers
