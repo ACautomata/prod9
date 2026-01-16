@@ -370,8 +370,12 @@ class AutoencoderLightning(pl.LightningModule):
         if self.warmup_enabled:
             schedulers = self.lr_schedulers()
             if isinstance(schedulers, list) and schedulers and optimizer_idx < len(schedulers):
-                scheduler = schedulers[optimizer_idx]
-                cast(torch.optim.lr_scheduler.LambdaLR, scheduler).step()
+                # For discriminator (optimizer_idx=1), only step scheduler after warmup period
+                if optimizer_idx == 1 and self.global_step < self.vaegan_loss.discriminator_iter_start:
+                    pass
+                else:
+                    scheduler = schedulers[optimizer_idx]
+                    cast(torch.optim.lr_scheduler.LambdaLR, scheduler).step()
 
         # Manually increment global_step since we're using manual optimization
         # Only increment once per training step (after generator optimizer)
