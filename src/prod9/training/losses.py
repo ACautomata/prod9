@@ -334,6 +334,8 @@ class VAEGANLoss(nn.Module):
         commitment_weight: Weight for commitment loss (used in fsq mode)
         adv_criterion: Adversarial loss criterion ('hinge', 'least_squares', or 'bce')
         discriminator_iter_start: Step number to start discriminator training (warmup)
+        max_adaptive_weight: Upper bound for adaptive adversarial weight
+        gradient_norm_eps: Epsilon to avoid division by zero in gradient ratio
     """
 
     # Class constants for magic numbers
@@ -356,6 +358,8 @@ class VAEGANLoss(nn.Module):
         commitment_weight: float = 0.25,
         adv_criterion: str = "least_squares",
         discriminator_iter_start: int = 0,
+        max_adaptive_weight: float = 1e4,
+        gradient_norm_eps: float = 1e-4,
     ):
         super().__init__()
 
@@ -374,6 +378,8 @@ class VAEGANLoss(nn.Module):
         self.disc_factor = adv_weight  # Base discriminator weight
         self.commitment_weight = commitment_weight
         self.discriminator_iter_start = discriminator_iter_start
+        self.max_adaptive_weight = max_adaptive_weight
+        self.gradient_norm_eps = gradient_norm_eps
         if not 0.0 <= fake_3d_ratio <= 1.0:
             raise ValueError(
                 "fake_3d_ratio must be between 0.0 and 1.0, "
@@ -427,10 +433,10 @@ class VAEGANLoss(nn.Module):
         g_grads = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
 
         # Ratio of gradient norms
-        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + self.GRADIENT_NORM_EPS)
+        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + self.gradient_norm_eps)
 
         # Clamp to prevent extreme values
-        d_weight = torch.clamp(d_weight, 0.0, self.MAX_ADAPTIVE_WEIGHT).detach()
+        d_weight = torch.clamp(d_weight, 0.0, self.max_adaptive_weight).detach()
 
         # Scale by base discriminator weight
         d_weight = d_weight * self.disc_factor

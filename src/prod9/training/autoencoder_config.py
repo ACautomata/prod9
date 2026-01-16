@@ -90,6 +90,7 @@ class AutoencoderLightningConfig:
         perceptual_config = loss_config.get("perceptual", {})
         adv_config = loss_config.get("adversarial", {})
         commitment_config = loss_config.get("commitment", {})
+        adaptive_config = loss_config.get("adaptive", {})
         discriminator_iter_start = loss_config.get("discriminator_iter_start", 0)
         adv_criterion = adv_config.get("criterion", "least_squares")
 
@@ -136,6 +137,8 @@ class AutoencoderLightningConfig:
             commitment_weight=commitment_config.get("weight", 0.25),
             sample_every_n_steps=loop_config.get("sample_every_n_steps", 100),
             discriminator_iter_start=discriminator_iter_start,
+            max_adaptive_weight=adaptive_config.get("max_weight", 1e4),
+            gradient_norm_eps=adaptive_config.get("grad_norm_eps", 1e-4),
             # Sliding window config
             use_sliding_window=sw_config.get("enabled", False),
             sw_roi_size=tuple(sw_config.get("roi_size", (64, 64, 64))),

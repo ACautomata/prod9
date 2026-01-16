@@ -128,7 +128,8 @@ class TestMAISIVAEGANLoss(unittest.TestCase):
         # Verify properties
         self.assertIsInstance(adv_weight, torch.Tensor)
         self.assertTrue(adv_weight >= 0)
-        self.assertTrue(adv_weight <= self.loss.MAX_ADAPTIVE_WEIGHT)
+        expected_max = self.loss.max_adaptive_weight * self.loss.disc_factor
+        self.assertTrue(adv_weight <= expected_max)
         self.assertFalse(adv_weight.requires_grad, "Adaptive weight should be detached")
 
     def test_adopt_weight_warmup(self):
@@ -149,8 +150,8 @@ class TestMAISIVAEGANLoss(unittest.TestCase):
 
     def test_loss_constants(self):
         """Test that class constants are properly defined."""
-        self.assertEqual(self.loss.MAX_ADAPTIVE_WEIGHT, 1e4)
-        self.assertEqual(self.loss.GRADIENT_NORM_EPS, 1e-4)
+        self.assertEqual(self.loss.max_adaptive_weight, 1e4)
+        self.assertEqual(self.loss.gradient_norm_eps, 1e-4)
 
 
 class TestMAISIVAELightningInitialization(unittest.TestCase):

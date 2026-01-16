@@ -108,6 +108,8 @@ class AutoencoderLightning(pl.LightningModule):
         commitment_weight: float = 0.25,
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
+        max_adaptive_weight: float = 1e4,
+        gradient_norm_eps: float = 1e-4,
         use_sliding_window: bool = False,
         sw_roi_size: tuple[int, int, int] = (64, 64, 64),
         sw_overlap: float = 0.5,
@@ -149,6 +151,8 @@ class AutoencoderLightning(pl.LightningModule):
             commitment_weight=commitment_weight,
             spatial_dims=3,
             discriminator_iter_start=discriminator_iter_start,
+            max_adaptive_weight=max_adaptive_weight,
+            gradient_norm_eps=gradient_norm_eps,
         )
 
         self.psnr = PSNRMetric(max_val=metric_max_val)

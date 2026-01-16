@@ -88,6 +88,8 @@ class MAISIVAELightning(pl.LightningModule):
         adv_criterion: str = "least_squares",
         sample_every_n_steps: int = 100,
         discriminator_iter_start: int = 0,
+        max_adaptive_weight: float = 1e4,
+        gradient_norm_eps: float = 1e-4,
         warmup_enabled: bool = True,
         warmup_steps: Optional[int] = None,
         warmup_ratio: float = 0.02,
@@ -120,6 +122,8 @@ class MAISIVAELightning(pl.LightningModule):
             fake_3d_ratio=fake_3d_ratio,
             adv_criterion=adv_criterion,
             discriminator_iter_start=discriminator_iter_start,
+            max_adaptive_weight=max_adaptive_weight,
+            gradient_norm_eps=gradient_norm_eps,
         )
 
         # Metrics

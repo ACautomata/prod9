@@ -363,9 +363,10 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             adv_weight >= 0,
             f"Adaptive weight should be non-negative, got {adv_weight}"
         )
+        expected_max = self.vaegan_loss.max_adaptive_weight * self.vaegan_loss.disc_factor
         self.assertTrue(
-            adv_weight <= self.vaegan_loss.MAX_ADAPTIVE_WEIGHT,
-            f"Adaptive weight {adv_weight} exceeds max {self.vaegan_loss.MAX_ADAPTIVE_WEIGHT}"
+            adv_weight <= expected_max,
+            f"Adaptive weight {adv_weight} exceeds max {expected_max}"
         )
         self.assertFalse(
             adv_weight.requires_grad,
@@ -378,24 +379,22 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
             self.skipTest("Real VAEGANLoss not available")
         assert self.vaegan_loss is not None  # Type guard for pyright
 
-        # Verify MAX_ADAPTIVE_WEIGHT constant
         self.assertTrue(
-            hasattr(self.vaegan_loss, 'MAX_ADAPTIVE_WEIGHT'),
-            "VAEGANLoss should have MAX_ADAPTIVE_WEIGHT constant"
+            hasattr(self.vaegan_loss, "max_adaptive_weight"),
+            "VAEGANLoss should have max_adaptive_weight attribute"
         )
         self.assertEqual(
-            self.vaegan_loss.MAX_ADAPTIVE_WEIGHT, 1e4,
-            "MAX_ADAPTIVE_WEIGHT should be 1e4"
+            self.vaegan_loss.max_adaptive_weight, 1e4,
+            "max_adaptive_weight should default to 1e4"
         )
 
-        # Verify GRADIENT_NORM_EPS constant
         self.assertTrue(
-            hasattr(self.vaegan_loss, 'GRADIENT_NORM_EPS'),
-            "VAEGANLoss should have GRADIENT_NORM_EPS constant"
+            hasattr(self.vaegan_loss, "gradient_norm_eps"),
+            "VAEGANLoss should have gradient_norm_eps attribute"
         )
         self.assertEqual(
-            self.vaegan_loss.GRADIENT_NORM_EPS, 1e-4,
-            "GRADIENT_NORM_EPS should be 1e-4"
+            self.vaegan_loss.gradient_norm_eps, 1e-4,
+            "gradient_norm_eps should default to 1e-4"
         )
 
     def test_discriminator_warmup_schedule(self):
@@ -488,8 +487,7 @@ class TestVAEGANLossAdaptiveWeight(unittest.TestCase):
         self.assertTrue(torch.isfinite(adv_weight))
         self.assertTrue(adv_weight > 0)
 
-        # Verify weight scales with disc_factor
-        expected_max = self.vaegan_loss.disc_factor * self.vaegan_loss.MAX_ADAPTIVE_WEIGHT
+        expected_max = self.vaegan_loss.disc_factor * self.vaegan_loss.max_adaptive_weight
         self.assertTrue(adv_weight <= expected_max)
 
     def test_forward_with_adaptive_weight(self):

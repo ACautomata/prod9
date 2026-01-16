@@ -181,6 +181,11 @@ loss:
   adv_weight: 0.1  # Adversarial loss base weight, default: 0.1
 
   # ----------------------------------------------------------------------
+  adaptive:
+    max_weight: 10000.0
+    grad_norm_eps: 0.0001
+
+  # ----------------------------------------------------------------------
   # Discriminator warmup
   # ----------------------------------------------------------------------
   discriminator_iter_start: 0  # Discriminator warmup steps, default: 0

@@ -81,6 +81,7 @@ class MAISIVAELightningConfig:
         # Get training configuration
         training_config: TrainingConfig = validated_config.training
         loss_config: MAISIVAELossConfig = validated_config.loss
+        adaptive_config = loss_config.adaptive
 
         # Get optimizer settings
         optimizer_config = training_config.optimizer
@@ -120,6 +121,8 @@ class MAISIVAELightningConfig:
             is_fake_3d=loss_config.is_fake_3d,
             fake_3d_ratio=loss_config.fake_3d_ratio,
             sample_every_n_steps=loop_config.sample_every_n_steps,
+            max_adaptive_weight=adaptive_config.max_weight,
+            gradient_norm_eps=adaptive_config.grad_norm_eps,
             # Warmup settings from stability config
             warmup_enabled=stability_config.warmup_enabled,
             warmup_steps=stability_config.warmup_steps,

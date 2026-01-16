@@ -692,6 +692,7 @@ class MAISIVAELossConfig(BaseModel):
     kl_weight: float = Field(default=1e-6, ge=0, description="KL divergence loss weight")
     perceptual_weight: float = Field(default=0.5, ge=0, description="LPIPS perceptual loss weight")
     adv_weight: float = Field(default=0.1, ge=0, description="Adversarial loss base weight")
+    adaptive: AdaptiveWeightConfig = Field(default_factory=AdaptiveWeightConfig)
     lpips_network: str = Field(
         default="medicalnet_resnet10_23datasets",
         description="Pretrained network for perceptual loss (MedicalNet)",
