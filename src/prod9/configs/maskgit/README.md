@@ -8,18 +8,19 @@ This directory contains configuration files for the MaskGiT-based two-stage trai
 maskgit/
 ├── medmnist3d/
 │   ├── stage1/          # Autoencoder with FSQ
-│   │   ├── base.yaml    # Standard FSQ configuration (levels=[8,8,8])
-│   │   ├── large.yaml # Large FSQ configuration (levels=[8,8,6,5])
+│   │   ├── base.yaml    # Standard FSQ configuration (levels=[8,8,8,6,5])
+│   │   ├── large.yaml # Large FSQ configuration (levels=[8,8,8,6,5])
 │   │   └── ffl.yaml     # With Focal Frequency Loss (instead of LPIPS)
 │   └── stage2/          # Transformer for token generation
 │       ├── base.yaml    # Standard transformer (matches stage1/base.yaml)
-│       └── ffl.yaml     # Transformer for FFL autoencoder
+│       ├── ffl.yaml     # Transformer for FFL autoencoder
+│       └── large.yaml   # Transformer for large autoencoder
 └── brats/
     ├── stage1/          # Autoencoder with FSQ
-    │   ├── base.yaml    # Standard FSQ configuration (levels=[6,6,6,5])
+    │   ├── base.yaml    # Large FSQ configuration (levels=[8,8,8,6,5])
     │   └── ffl.yaml     # With Focal Frequency Loss
     └── stage2/          # Transformer for token generation
-        └── base.yaml    # Standard transformer (matches stage1/base.yaml)
+        └── base.yaml    # Large transformer (matches stage1/base.yaml)
 ```
 
 ## Configuration Overview
@@ -30,10 +31,10 @@ Stage 1 trains an autoencoder with Finite Scalar Quantization (FSQ) to compress 
 
 | Config | Dataset | FSQ Levels | Loss Type | Description |
 |--------|---------|------------|-----------|-------------|
-| `medmnist3d/stage1/base.yaml` | OrganMNIST3D | [8,8,8] (512) | LPIPS | Standard configuration |
-| `medmnist3d/stage1/large.yaml` | All MedMNIST3D | [8,8,6,5] (2400) | LPIPS | Large codebook for all datasets |
-| `medmnist3d/stage1/ffl.yaml` | OrganMNIST3D | [8,8,8] (512) | FFL | Focal Frequency Loss |
-| `brats/stage1/base.yaml` | BraTS | [6,6,6,5] (1080) | LPIPS | 4-modality configuration |
+| `medmnist3d/stage1/base.yaml` | OrganMNIST3D | [8,8,8,6,5] (15360) | LPIPS | Standard configuration |
+| `medmnist3d/stage1/large.yaml` | All MedMNIST3D | [8,8,8,6,5] (15360) | LPIPS | Large codebook for all datasets |
+| `medmnist3d/stage1/ffl.yaml` | OrganMNIST3D | [8,8,8,6,5] (15360) | FFL | Focal Frequency Loss |
+| `brats/stage1/base.yaml` | BraTS | [8,8,8,6,5] (15360) | LPIPS | 4-modality configuration |
 | `brats/stage1/ffl.yaml` | BraTS | [6,6,6,5] (1080) | FFL | Focal Frequency Loss |
 
 ### Stage 2: Transformer
@@ -44,7 +45,8 @@ Stage 2 trains a transformer to generate latent tokens autoregressively using ma
 |--------|----------------|-------------|
 | `medmnist3d/stage2/base.yaml` | `medmnist3d/stage1/base.yaml` | Standard transformer |
 | `medmnist3d/stage2/ffl.yaml` | `medmnist3d/stage1/ffl.yaml` | For FFL-trained autoencoder |
-| `brats/stage2/base.yaml` | `brats/stage1/base.yaml` | Standard transformer |
+| `medmnist3d/stage2/large.yaml` | `medmnist3d/stage1/large.yaml` | Transformer for large autoencoder |
+| `brats/stage2/base.yaml` | `brats/stage1/base.yaml` | Large transformer (MedMNIST3D large aligned) |
 
 ## Usage
 
@@ -76,7 +78,10 @@ prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stag
 # MedMNIST 3D - FFL
 prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stage2/ffl.yaml
 
-# BraTS
+# MedMNIST 3D - Large
+prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stage2/large.yaml
+
+# BraTS (large transformer)
 prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 ```
 
@@ -89,7 +94,7 @@ Uses MONAI's PerceptualLoss with MedicalNet ResNet10 pre-trained on 23 medical d
 ```yaml
 loss:
   perceptual:
-    weight: 0.1
+    weight: 1.0
     network_type: "alex"
     is_fake_3d: true
 ```
@@ -106,7 +111,7 @@ loss:
     alpha: 1.0          # Focusing exponent
     patch_factor: 1     # Patch size for FFT
     axes: [2, 3, 4]     # Slicing axes for 3D
-    ratio: 0.5          # Fraction of slices to use
+    ratio: 1.0          # Fraction of slices to use
 ```
 
 ## Configuration Details
@@ -142,6 +147,6 @@ Each config file specifies its own output directory. Stage 2 configs reference t
 | Stage 1 Config | Autoencoder Export | Stage 2 Config |
 |----------------|-------------------|----------------|
 | `medmnist3d/stage1/base.yaml` | `outputs/medmnist3d_autoencoder.pt` | `medmnist3d/stage2/base.yaml` |
-| `medmnist3d/stage1/large.yaml` | `outputs/medmnist3d_autoencoder-large.pt` | - |
+| `medmnist3d/stage1/large.yaml` | `outputs/medmnist3d_autoencoder-large.pt` | `medmnist3d/stage2/large.yaml` |
 | `medmnist3d/stage1/ffl.yaml` | `outputs/medmnist3d_autoencoder_ffl.pt` | `medmnist3d/stage2/ffl.yaml` |
-| `brats/stage1/base.yaml` | `outputs/autoencoder_final.pt` | `brats/stage2/base.yaml` |
+| `brats/stage1/base.yaml` | `outputs/brats_autoencoder-large.pt` | `brats/stage2/base.yaml` |

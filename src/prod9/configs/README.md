@@ -42,10 +42,13 @@ prod9-train-autoencoder train --config src/prod9/configs/maskgit/medmnist3d/stag
 # MedMNIST 3D - Stage 2: Train transformer
 prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stage2/base.yaml
 
-# BraTS - Stage 1: Train autoencoder
+# MedMNIST 3D - Stage 2 (Large): Train transformer
+prod9-train-transformer train --config src/prod9/configs/maskgit/medmnist3d/stage2/large.yaml
+
+# BraTS - Stage 1 (Large): Train autoencoder
 prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/base.yaml
 
-# BraTS - Stage 2: Train transformer
+# BraTS - Stage 2 (Large): Train transformer
 prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 ```
 

@@ -176,12 +176,12 @@ prod9/
 
 ### MaskGiT Quick Start
 
-**Stage 1: Train Autoencoder**
+**Stage 1: Train Autoencoder (large)**
 ```bash
 prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/base.yaml
 ```
 
-**Stage 2: Train Transformer**
+**Stage 2: Train Transformer (large)**
 ```bash
 prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/base.yaml
 ```
@@ -190,8 +190,8 @@ prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/ba
 ```bash
 prod9-train-transformer generate \
     --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
-    --checkpoint outputs/stage2/best.ckpt \
-    --output outputs/generated \
+    --checkpoint outputs/brats_stage2-large/best.ckpt \
+    --output outputs/brats_generated \
     --num-samples 10
 ```
 
@@ -212,7 +212,7 @@ prod9-train-maisi-diffusion train --config src/prod9/configs/maisi/diffusion/bra
 prod9-train-maisi-diffusion generate \
     --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt \
-    --output outputs/generated \
+    --output outputs/maisi_generated \
     --num-samples 10 \
     --num-inference-steps 10
 ```
@@ -237,22 +237,25 @@ prod9-train-autoencoder train --config src/prod9/configs/maskgit/brats/stage1/ba
 # Validate
 prod9-train-autoencoder validate \
     --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
-    --checkpoint outputs/stage1/best.ckpt
+    --checkpoint outputs/brats_stage1-large/best.ckpt
 
 # Test
 prod9-train-autoencoder test \
     --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
-    --checkpoint outputs/stage1/best.ckpt
+    --checkpoint outputs/brats_stage1-large/best.ckpt
 
 # Inference with sliding window
 prod9-train-autoencoder infer \
     --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
-    --checkpoint outputs/stage1/best.ckpt \
+    --checkpoint outputs/brats_stage1-large/best.ckpt \
     --input volume.nii.gz \
     --output reconstructed.nii.gz \
     --roi-size 64 64 64 \
     --overlap 0.5 \
     --sw-batch-size 1
+
+# Export autoencoder (for Stage 2)
+ls outputs/brats_autoencoder-large.pt
 ```
 
 **Transformer CLI** (`prod9-train-transformer`):
@@ -264,18 +267,18 @@ prod9-train-transformer train --config src/prod9/configs/maskgit/brats/stage2/ba
 # Validate
 prod9-train-transformer validate \
     --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
-    --checkpoint outputs/stage2/best.ckpt
+    --checkpoint outputs/brats_stage2-large/best.ckpt
 
 # Test
 prod9-train-transformer test \
     --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
-    --checkpoint outputs/stage2/best.ckpt
+    --checkpoint outputs/brats_stage2-large/best.ckpt
 
 # Generate samples
 prod9-train-transformer generate \
     --config src/prod9/configs/maskgit/brats/stage2/base.yaml \
-    --checkpoint outputs/stage2/best.ckpt \
-    --output outputs/generated \
+    --checkpoint outputs/brats_stage2-large/best.ckpt \
+    --output outputs/brats_generated \
     --num-samples 10 \
     --modality T1
 ```
@@ -326,7 +329,7 @@ prod9-train-maisi-diffusion test \
 prod9-train-maisi-diffusion generate \
     --config src/prod9/configs/maisi/diffusion/brats_diffusion.yaml \
     --checkpoint outputs/maisi_diffusion/best.ckpt \
-    --output outputs/generated \
+    --output outputs/maisi_generated \
     --num-samples 10 \
     --num-inference-steps 10
 ```
@@ -356,9 +359,9 @@ prod9-train-maisi-controlnet test \
 
 | Dataset | Stage | Config File |
 |---------|-------|-------------|
-| BraTS | Stage 1 (Autoencoder) | `src/prod9/configs/maskgit/brats/stage1/base.yaml` |
+| BraTS | Stage 1 (Autoencoder, large) | `src/prod9/configs/maskgit/brats/stage1/base.yaml` |
 | BraTS | Stage 1 (with FFL) | `src/prod9/configs/maskgit/brats/stage1/ffl.yaml` |
-| BraTS | Stage 2 (Transformer) | `src/prod9/configs/maskgit/brats/stage2/base.yaml` |
+| BraTS | Stage 2 (Transformer, large) | `src/prod9/configs/maskgit/brats/stage2/base.yaml` |
 | MedMNIST 3D | Stage 1 (Base) | `src/prod9/configs/maskgit/medmnist3d/stage1/base.yaml` |
 | MedMNIST 3D | Stage 1 (FFL) | `src/prod9/configs/maskgit/medmnist3d/stage1/ffl.yaml` |
 | MedMNIST 3D | Stage 1 (Large) | `src/prod9/configs/maskgit/medmnist3d/stage1/large.yaml` |
@@ -388,7 +391,7 @@ prod9-train-maisi-controlnet test \
 - `trainer`: Accelerator (gpu/cpu/mps), precision, devices
 
 **Stage 2 (Transformer)** - `src/prod9/configs/maskgit/brats/stage2/base.yaml`:
-- `model`: Transformer architecture (hidden_dim, num_heads, num_layers)
+- `model`: Transformer architecture (large model aligned with MedMNIST3D large)
 - `training`: Learning rate, epochs, optimizer settings
 - `sampler`: MaskGiT sampling (num_steps, scheduler_type)
 - `data`: Dataset paths, batch_size, roi_size
@@ -442,7 +445,7 @@ sliding_window:
 ```bash
 prod9-train-autoencoder infer \
     --config src/prod9/configs/maskgit/brats/stage1/base.yaml \
-    --checkpoint outputs/stage1/best.ckpt \
+    --checkpoint outputs/brats_stage1-large/best.ckpt \
     --input large_volume.nii.gz \
     --output reconstructed.nii.gz \
     --roi-size 32 32 32 \
@@ -506,7 +509,7 @@ autoencoder = AutoencoderFSQ(
     in_channels=1,
     out_channels=1,
     latent_channels=64,
-    fsq_levels=[8, 8, 8],
+    fsq_levels=[8, 8, 8, 6, 5],
     fmaps=[32, 64, 128, 256, 512],
     fmaps_depth=5,
 )
@@ -624,6 +627,7 @@ latent = scheduler.denoise(model, num_inference_steps=10)
   - `quantize()`: Latent → discrete codes
   - `embed()`: Discrete codes → token indices
   - `decode()`: Latent → image
+  - Default BraTS config uses 5D codebook levels `[8, 8, 8, 6, 5]`
 - `FiniteScalarQuantizer`: Product quantization
 - `AutoencoderInferenceWrapper`: Sliding window inference
 
