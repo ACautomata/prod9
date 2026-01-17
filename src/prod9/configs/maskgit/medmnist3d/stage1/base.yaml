@@ -56,9 +56,9 @@ training:
   # ----------------------------------------------------------------------
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate
-    lr_d: 4e-4  # Discriminator learning rate
+    lr_d: 1e-4  # Discriminator learning rate (same as lr_g)
     b1: 0.5  # Adam beta1
-    b2: 0.95  # Adam beta2
+    b2: 0.9  # Adam beta2
     weight_decay: 1e-5
     
   # ----------------------------------------------------------------------
@@ -94,8 +94,9 @@ data:
   # ----------------------------------------------------------------------
   # MedMNIST 3D dataset configuration
   # ----------------------------------------------------------------------
-  dataset_name: "all"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
-  # Use "all" to combine all 6 MedMNIST3D datasets (~6200 training samples)
+  dataset_name: "organmnist3d"  # Base config: use small dataset (11 classes, ~700 samples)
+  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
+  # Large config uses "all" to combine all 6 datasets (~6200 training samples)
   
   size: 64  # Image size: 28 or 64
   root: "./.medmnist"

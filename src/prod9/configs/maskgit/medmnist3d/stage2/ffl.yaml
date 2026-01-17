@@ -15,7 +15,7 @@ output_dir: "outputs/medmnist3d_stage2_ffl"
 model:
   # Transformer decoder configuration
   transformer:
-    latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
+    latent_dim: 5  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
     hidden_dim: 512  # Reduced from 512 for smaller dataset
     cond_dim: 512  # Reduced from 512 for smaller dataset

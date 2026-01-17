@@ -1,13 +1,14 @@
 # =============================================================================
 # prod9 BraTS Stage 2 Configuration
 # Complete configuration for MaskGiT transformer training
+# Using MedMNIST3D large architecture parameters
 # =============================================================================
-# 
+#
 # =============================================================================
 # Paths (must match) output from stage1/base.yaml)
 # =============================================================================
-autoencoder_path: "outputs/autoencoder_final.pt"
-output_dir: "outputs/stage2"
+autoencoder_path: "outputs/brats_autoencoder-large.pt"
+output_dir: "outputs/brats_stage2-large"
 
 # =============================================================================
 # Model Architecture
@@ -17,21 +18,21 @@ model:
   # Transformer decoder configuration
   # ----------------------------------------------------------------------
   transformer:
-    latent_dim: 4  # Latent channels (must equal len(levels) for FSQ)
+    latent_dim: 5  # Latent channels (must equal len(levels) for FSQ) - aligned with medmnist3d/large stage1
     patch_size: 2  # 3D patch size
-    hidden_dim: 512
-    cond_dim: 512
-    num_heads: 8
-    num_blocks: 12
-    codebook_size: 1080  # FSQ codebook size (6*6*6*5 for levels=[6,6,6,5])
+    hidden_dim: 512  # Aligned with medmnist3d stage2 base (large model)
+    cond_dim: 512  # Aligned with medmnist3d stage2 base (large model)
+    num_heads: 8  # Aligned with medmnist3d stage2 base (large model)
+    num_blocks: 12  # Aligned with medmnist3d stage2 base (large model)
+    codebook_size: 15360  # Aligned with medmnist3d/large (8*8*6*5 for levels=[8,8,8,6,5])
     mlp_ratio: 4.0
     dropout: 0.1
-  
+
   # ----------------------------------------------------------------------
   # Class/condition embeddings for BraTS modalities
   # ----------------------------------------------------------------------
   num_classes: 4  # 4 BraTS modalities: T1, T1ce, T2, FLAIR
-  contrast_embed_dim: 64
+  contrast_embed_dim: 64  # Keep BraTS base value (4 modalities)
 
 # =============================================================================
 # Training Configuration
@@ -43,8 +44,8 @@ training:
   optimizer:
     learning_rate: 1e-4  # Learning rate
     beta1: 0.9  # Adam beta1, default: 0.9
-    beta2: 0.999  # Adam beta2, default: 0.999
-    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
+    beta2: 0.96  # Adam beta2
+    weight_decay: 0.045  # Weight decay (MaskGIT default)
   
   # ----------------------------------------------------------------------
   # Learning rate scheduler
@@ -68,23 +69,21 @@ training:
       enabled: true  # Enable learning rate warmup, default: true
       warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
       warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
-      eta_min: 0.1  # Minimum learning rate after decay (0.0-1.0), default: 0.1
   
   # ----------------------------------------------------------------------
   # Training loop settings
   # ----------------------------------------------------------------------
   loop:
     sample_every_n_steps: 100  # How often to generate samples during training, default: 100
-  
+
   # ----------------------------------------------------------------------
   # Training stability settings
   # ----------------------------------------------------------------------
   stability:
-    grad_norm_logging: true  # Log gradient norms for monitoring, default: true
+    grad_norm_logging: true  # Log gradient norms for monitoring training health - aligned with medmnist3d/large
     warmup_enabled: true  # Enable learning rate warmup, default: true
-    warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
-    warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
-    warmup_eta_min: 0.0  # Minimum learning rate after decay (0.0-1.0), default: 0.0
+    warmup_steps: null  # Auto-calculate based on warmup_ratio - aligned with medmnist3d/large
+    warmup_ratio: 0.02  # 2% of total training steps for warmup - aligned with medmnist3d/large
 
 # =============================================================================
 # MaskGiT Sampler Configuration
@@ -112,12 +111,12 @@ data:
   # ----------------------------------------------------------------------
   # Data loader
   # ----------------------------------------------------------------------
-  batch_size: 2
+  batch_size: 2  # Keep as BraTS requires smaller batch size
   num_workers: 4
   cache_num_workers: 0
-  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
+  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM - keep BraTS value
   pin_memory: true
-  train_val_split: 0.8
+  train_val_split: 0.8  # BraTS split
   
   # ----------------------------------------------------------------------
   # Training crop size
@@ -181,8 +180,7 @@ callbacks:
     monitor: "val/fid"  # Metric to monitor, default: val/combined_metric
     patience: 10  # Epochs to wait before stopping, default: 10
     mode: "min"  # Mode for monitoring (min=maximize, min=minimize), default: max
-    min_delta: 0.0  # Minimum change to qualify as improvement, default: 0.0
-    check_finite: true  # Stop when metric is NaN/Inf, default: true
+    min_delta: 0.001  # Aligned with medmnist3d/large
   
   # ----------------------------------------------------------------------
   # Learning rate monitoring

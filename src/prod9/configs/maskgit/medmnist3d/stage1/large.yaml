@@ -48,9 +48,9 @@ training:
   # ----------------------------------------------------------------------
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate, default: 1e-4
-    lr_d: 4e-4  # Discriminator learning rate, default: 4e-4
+    lr_d: 1e-4  # Discriminator learning rate (same as lr_g)
     b1: 0.5  # Adam beta1, default: 0.5
-    b2: 0.999  # Adam beta2, default: 0.999
+    b2: 0.9  # Adam beta2, default: 0.999
     weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
 
   # Learning rate scheduler (cosine annealing)
@@ -72,20 +72,21 @@ training:
     warmup_enabled: true  # Enable learning rate warmup
     warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
     warmup_ratio: 0.02  # 2% of total training steps for warmup
+    warmup_eta_min: 0.0  # Aligned with base.yaml
 
 # =============================================================================
 # Data Configuration
 # =============================================================================
 data:
+  # ----------------------------------------------------------------------
   # MedMNIST 3D dataset configuration
   # Option 1: Single dataset (backward compatible)
-  dataset_name: "all"  # Options: organmnist3d, nodulemnist3d, adrenalmnist3d, fracturemnist3d, vesselmnist3d, synapsemnist3d, "all"
+  dataset_name: "all"  # Large config: use all 6 datasets (~6200 training samples)
   # Option 2: Multiple datasets (combines all specified datasets)
   dataset_names: null  # null = use dataset_name, or specify list: ["organmnist3d", "nodulemnist3d", ...]
 
-  # Use "all" to combine all 6 MedMNIST 3D datasets (~6200 training samples)
-  # Uncomment the line below to enable:
-  # dataset_name: "all"
+  # Base config uses "organmnist3d" (small dataset, 11 classes)
+  # Large config uses "all" (large dataset, all 6 datasets, ~6200 samples)
 
   size: 64  # Image size: 28 or 64
   root: "./.medmnist"
@@ -118,7 +119,7 @@ data:
 # Loss Configuration
 # =============================================================================
 loss:
-  discriminator_iter_start: 500
+  discriminator_iter_start: 10000  # Aligned with base.yaml
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -126,15 +127,15 @@ loss:
 
   # Perceptual Loss (LPIPS-based using pretrained network)
   perceptual:
-    weight: 0.5
+    weight: 1.0  # Aligned with base.yaml
     network_type: "alex"
     is_fake_3d: true
     fake_3d_ratio: 0.5
 
   # Adversarial loss
   adversarial:
-    weight: 0.1
-    criterion: "least_squares"  # hinge, least_squares, bce
+    weight: 0.8  # Aligned with base.yaml
+    criterion: "hinge"  # Aligned with base.yaml: hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:
@@ -142,7 +143,7 @@ loss:
 
   # Adaptive weight calculation
   adaptive:
-    max_weight: 100.0  # Clamp adaptive weight
+    max_weight: 10000.0  # Aligned with base.yaml
     grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
 
 # =============================================================================
@@ -164,6 +165,7 @@ callbacks:
     patience: 10
     mode: "min"
     min_delta: 0.0  # Minimum change to qualify as improvement
+    check_finite: true  # Aligned with base.yaml
 
   # Learning rate monitoring
   lr_monitor: true
@@ -189,7 +191,7 @@ trainer:
   hardware:
     accelerator: "auto"  # auto, gpu, cpu, mps (Apple Silicon)
     devices: "auto"  # auto, 1, 2, 4, etc.
-    precision: "16-mixed"  # 32, 16, bf16
+    precision: "bf16-mixed"  # Aligned with base.yaml: 32, 16, bf16
 
   # Logging
   logging:

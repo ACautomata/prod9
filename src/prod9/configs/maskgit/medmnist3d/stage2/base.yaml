@@ -40,8 +40,8 @@ training:
   optimizer:
     learning_rate: 1e-4  # Learning rate
     beta1: 0.9  # Adam beta1, default: 0.9
-    beta2: 0.999  # Adam beta2, default: 0.999
-    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
+    beta2: 0.96  # Adam beta2
+    weight_decay: 0.045  # Weight decay (MaskGIT default)
 
   # Learning rate scheduler
   scheduler:
@@ -80,7 +80,7 @@ sampler:
 # =============================================================================
 data:
   # MedMNIST 3D dataset configuration (must match Stage 1)
-  dataset_name: "organmnist3d"  # Same dataset as Stage 1
+  dataset_name: "organmnist3d"  # Base config: use small dataset (11 classes, ~700 samples)
   size: 64  # Same size as Stage 1
   root: "./.medmnist"
   download: false  # Already downloaded in Stage 1

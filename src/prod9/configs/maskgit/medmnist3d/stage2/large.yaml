@@ -15,7 +15,7 @@ output_dir: "outputs/medmnist3d_stage2-large"
 model:
   # Transformer decoder configuration
   transformer:
-    latent_dim: 3  # Latent channels (must equal len(levels) for FSQ)
+    latent_dim: 5  # Latent channels (must equal len(levels) for FSQ)
     patch_size: 2  # 3D patch size
     hidden_dim: 256  # Reduced from 512 for smaller dataset
     cond_dim: 256  # Reduced from 512 for smaller dataset
@@ -40,8 +40,8 @@ training:
   optimizer:
     learning_rate: 1e-4  # Learning rate
     beta1: 0.9  # Adam beta1, default: 0.9
-    beta2: 0.999  # Adam beta2, default: 0.999
-    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
+    beta2: 0.96  # Adam beta2
+    weight_decay: 0.045  # Weight decay (MaskGIT default)
 
   # Learning rate scheduler
   scheduler:
@@ -79,8 +79,10 @@ sampler:
 # Data Configuration
 # =============================================================================
 data:
+  # ----------------------------------------------------------------------
   # MedMNIST 3D dataset configuration (must match Stage 1)
-  dataset_name: "organmnist3d"  # Same dataset as Stage 1
+  # ----------------------------------------------------------------------
+  dataset_name: "all"  # Large config: use all 6 datasets (~6200 training samples)
   size: 64  # Same size as Stage 1
   root: "./.medmnist"
   download: false  # Already downloaded in Stage 1

@@ -48,9 +48,9 @@ training:
   # Optimizer settings
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
-    lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
+    lr_d: 1e-4  # Discriminator learning rate (same as lr_g)
     b1: 0.5
-    b2: 0.95
+    b2: 0.9
     weight_decay: 1e-2
 
   # Learning rate scheduler (optional, currently constant)
@@ -69,6 +69,7 @@ training:
     warmup_enabled: true  # Enable learning rate warmup
     warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
     warmup_ratio: 0.02  # 2% of total training steps for warmup
+    warmup_eta_min: 0.0  # Aligned with base.yaml
 
 # =============================================================================
 # Data Configuration
@@ -118,7 +119,7 @@ loss:
   # Loss type selector: "lpips" or "ffl"
   loss_type: "ffl"
 
-  discriminator_iter_start: 500
+  discriminator_iter_start: 10000  # Aligned with base.yaml
 
   # Reconstruction loss (L1)
   reconstruction:
@@ -127,7 +128,7 @@ loss:
   # Perceptual Loss using Focal Frequency Loss (FFL)
   # FFL computes frequency-domain distance with adaptive weighting
   focal_frequency:
-    weight: 1.0
+    weight: 1.0  # Aligned with base.yaml perceptual.weight
     alpha: 1.0  # Focusing exponent (higher = more focus on large errors)
     patch_factor: 1  # Split image into patches before FFT (1 = no patching)
     ave_spectrum: false  # Use minibatch-average spectrum
@@ -136,18 +137,18 @@ loss:
     eps: 1e-8  # Numerical stability constant
     # SliceWiseFake3DLoss parameters for 3D volumes
     axes: [2, 3, 4]  # Slicing axes: 2=D (axial), 3=H (coronal), 4=W (sagittal)
-    ratio: 0.5  # Fraction of slices to use (1.0 = all slices)
+    ratio: 1.0  # Aligned with base.yaml: Fraction of slices to use (1.0 = all slices)
 
   # Fallback LPIPS config (kept for reference, not used when loss_type="ffl")
   perceptual:
-    weight: 0.1  # Reduced from 1.0 for training stability
+    weight: 1.0  # Aligned with base.yaml (NOT used in FFL mode)
     network_type: "alex"
     is_fake_3d: true
     fake_3d_ratio: 0.5
 
   # Adversarial loss
   adversarial:
-    weight: 0.1
+    weight: 0.8  # Aligned with base.yaml
     criterion: "hinge"  # hinge, least_squares, bce
 
   # Commitment loss (FSQ)
@@ -156,7 +157,7 @@ loss:
 
   # Adaptive weight calculation
   adaptive:
-    max_weight: 100.0  # Clamp adaptive weight
+    max_weight: 10000.0  # Aligned with base.yaml
     grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
 
 # =============================================================================
@@ -178,6 +179,7 @@ callbacks:
     patience: 10
     mode: "min"
     min_delta: 0.0  # Minimum change to qualify as improvement
+    check_finite: true  # Aligned with base.yaml
 
   # Learning rate monitoring
   lr_monitor: true
@@ -203,7 +205,7 @@ trainer:
   hardware:
     accelerator: "auto"  # auto, gpu, cpu, mps (Apple Silicon)
     devices: "auto"  # auto, 1, 2, 4, etc.
-    precision: "16-mixed"  # 32, 16, bf16
+    precision: "bf16-mixed"  # Aligned with base.yaml: 32, 16, bf16
 
   # Logging
   logging:

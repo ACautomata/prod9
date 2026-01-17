@@ -28,9 +28,9 @@ model:
 training:
   optimizer:
     lr_g: 1e-4
-    lr_d: 8e-4
+    lr_d: 1e-4  # Same as lr_g
     b1: 0.5
-    b2: 0.999
+    b2: 0.9
     weight_decay: 1e-5
 
   loop:
@@ -81,15 +81,15 @@ data:
 loss:
   recon_weight: 1.0
   kl_weight: 1.0e-6
-  perceptual_weight: 0.5
-  adv_weight: 0.1
+  perceptual_weight: 1.0  # Aligned with base (MedMNIST3D stage1/base)
+  adv_weight: 0.8  # Aligned with base (MedMNIST3D stage1/base)
   adaptive:
     max_weight: 10000.0
     grad_norm_eps: 0.0001
   lpips_network: "alex"
   is_fake_3d: true
   fake_3d_ratio: 0.5
-  discriminator_iter_start: 500
+  discriminator_iter_start: 10000  # Aligned with base (MedMNIST3D stage1/base)
 
 # =============================================================================
 # Discriminator Configuration
@@ -108,12 +108,15 @@ callbacks:
     mode: "min"
     save_top_k: 3
     save_last: true
+    every_n_epochs: null  # Aligned with base (MedMNIST3D stage1/base)
 
   early_stop:
     enabled: true
     monitor: "val/lpips"
     patience: 10
     mode: "min"
+    min_delta: 0.0  # Aligned with base (MedMNIST3D stage1/base)
+    check_finite: true  # Aligned with base (MedMNIST3D stage1/base)
 
   lr_monitor: true
 
