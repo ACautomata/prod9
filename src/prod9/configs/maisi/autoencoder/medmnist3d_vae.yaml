@@ -28,7 +28,7 @@ model:
 training:
   optimizer:
     lr_g: 1e-4
-    lr_d: 2e-4
+    lr_d: 4e-4
     b1: 0.5
     b2: 0.9
     weight_decay: 1e-5

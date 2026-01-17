@@ -47,7 +47,7 @@ training:
   # Optimizer settings
   optimizer:
     lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
-    lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
+    lr_d: 4e-4  # Discriminator learning rate (reduced for stability)
     b1: 0.5  # Adam beta1
     b2: 0.95  # Adam beta2
     weight_decay: 1e-5

@@ -51,7 +51,7 @@ training:
   # ----------------------------------------------------------------------
   optimizer:
     lr_g: 1e-4  # Generator (VAE) learning rate, default: 1e-4
-    lr_d: 4e-4  # Discriminator learning rate, default: 4e-4
+    lr_d: 8e-4  # Discriminator learning rate, default: 4e-4
     b1: 0.5  # Adam beta1, default: 0.5
     b2: 0.999  # Adam beta2, default: 0.999
     weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
