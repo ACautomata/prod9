@@ -2,14 +2,14 @@
 
 import os
 import tempfile
-from typing import Dict, Any
+from typing import Any, Dict
 
 import pytest
 import torch
 
-from prod9.training.lightning_module import TransformerLightning, TransformerLightningConfig
-from prod9.generator.transformer import TransformerDecoder
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.generator.transformer import TransformerDecoder
+from prod9.training.lightning_module import TransformerLightning, TransformerLightningConfig
 
 
 class TestTransformerTraining:

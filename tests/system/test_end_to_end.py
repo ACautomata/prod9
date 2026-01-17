@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from typing import Dict, Any
+from typing import Any, Dict
 
 import pytest
 import torch

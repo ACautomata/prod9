@@ -8,12 +8,13 @@ from typing import Any, Dict, cast
 import pytest
 import torch
 import torch.nn as nn
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 from pytorch_lightning.trainer import Trainer
 
-from prod9.training.lightning_module import AutoencoderLightning, AutoencoderLightningConfig
-from prod9.training.brats_data import BraTSDataModuleStage1
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
+from prod9.training.brats_data import BraTSDataModuleStage1
+from prod9.training.lightning_module import AutoencoderLightning, AutoencoderLightningConfig
+
 from ..test_helpers import SystemTestConfig, get_minimal_system_config
 
 
@@ -114,7 +115,7 @@ class TestAutoencoderTraining:
         monkeypatch.setenv("BRATS_DATA_DIR", temp_output_dir)
 
         # Create minimal synthetic data
-        from torch.utils.data import Dataset, DataLoader
+        from torch.utils.data import DataLoader, Dataset
 
         class SyntheticData(Dataset):
             def __len__(self):
@@ -208,6 +209,7 @@ class TestAutoencoderTraining:
     def test_model_export(self, minimal_config: Dict[str, Any], temp_output_dir: str):
         """Test that model export works correctly."""
         import torch  # Ensure torch is available in function scope
+
         # Create model
         model = AutoencoderLightningConfig.from_config(minimal_config)
 
