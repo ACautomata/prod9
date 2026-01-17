@@ -1,232 +1,370 @@
 # =============================================================================
 # prod9 Autoencoder Stage 1 Configuration
-# Complete configuration for VQGAN-style autoencoder training with FSQ
+# MaskGiT: FSQ-based VQGAN-style autoencoder training
+# CLI: prod9-train-autoencoder train --config <this_file>
 # =============================================================================
-
+# 
+# =============================================================================
 # Output paths
+# =============================================================================
 output_dir: "outputs/stage1"
 autoencoder_export_path: "outputs/autoencoder_final.pt"
-
+# 
 # =============================================================================
 # Model Architecture
 # =============================================================================
 model:
-  # AutoencoderFSQ configuration
+  # ----------------------------------------------------------------------
+  # AutoencoderFSQ configuration (REQUIRED fields: levels, num_channels, attention_levels, num_res_blocks)
+  # ----------------------------------------------------------------------
   autoencoder:
-    spatial_dims: 3
-    in_channels: 1
-    out_channels: 1
-    levels: [6, 6, 6, 5]  # 6^3*5 = 1080 codebook size
-    num_channels: [64, 128, 256, 512]  # Encoder/decoder channel sizes per layer
-    attention_levels: [False, True, True, True]
-    num_res_blocks: [2, 2, 2, 2]
-    norm_num_groups: 32  # Group normalization groups
-    num_splits: 2  # No splitting for small 64^3 inputs (default is 16)
-
+    spatial_dims: 3  # Spatial dimensions (1-3), default: 3
+    in_channels: 1  # Input channels, default: 1
+    out_channels: 1  # Output channels, default: 1
+    
+    # REQUIRED: FSQ quantization levels
+    # The codebook size = product of all levels
+    # Examples: [8,8,8] = 512, [6,6,6,5] = 1080, [8,8,6,5] = 2400
+    levels: [6, 6, 6, 5]  # REQUIRED - FSQ levels list
+    
+    # REQUIRED: Encoder/decoder channel sizes per layer
+    # Length determines network depth
+    num_channels: [64, 128, 256, 512]  # REQUIRED
+    
+    # REQUIRED: Which layers have attention mechanisms
+    # Must match length of num_channels
+    attention_levels: [False, True, True, True]  # REQUIRED
+    
+    # REQUIRED: Number of residual blocks per layer
+    # Must match length of num_channels
+    num_res_blocks: [2, 2, 2, 2]  # REQUIRED
+    
+    norm_num_groups: 32  # Group normalization groups, default: 32
+    num_splits: 16  # Number of splits for attention heads, default: 16
+    save_mem: false  # Memory-saving checkpointing (not used in FSQ training)
+    
+  # ----------------------------------------------------------------------
   # MultiScalePatchDiscriminator configuration
+  # ----------------------------------------------------------------------
   discriminator:
-    spatial_dims: 3
-    in_channels: 1
-    out_channels: 1
-    num_d: 3  # Number of discriminators (multi-scale) - reduced to avoid error
-    channels: 64  # Base channel count
-    num_layers_d: 3  # Layers per discriminator
-    kernel_size: 4
-    activation: ["LEAKYRELU", {"negative_slope": 0.2}]
-    norm: "BATCH"
-    minimum_size_im: 64
-
-  # Modality configuration
-  num_classes: 4  # T1, T1ce, T2, FLAIR
-  contrast_embed_dim: 64
-
+    spatial_dims: 3  # Spatial dimensions (1-3), default: 3
+    in_channels: 1  # Input channels, default: 1
+    out_channels: 1  # Output channels, default: 1
+    
+    num_d: 2  # Number of discriminators (multi-scale), default: 2
+      # Use num_d: 2 for small images (e.g., MedMNIST3D 64³)
+      # Use num_d: 3 for larger images (e.g., BraTS 128³)
+    
+    channels: 32  # Base channel count, default: 32
+    num_layers_d: 2  # Layers per discriminator, default: 2
+      # Use num_layers_d: 2 for small images
+      # Use num_layers_d: 3 for larger images
+    
+    kernel_size: 4  # Convolution kernel size, default: 4
+    activation: ["LEAKYRELU", {"negative_slope": 0.2}]  # Activation function
+    norm: "BATCH"  # Normalization type, default: "BATCH"
+    minimum_size_im: 64  # Minimum image size for discriminator, default: 64
+    
+  # ----------------------------------------------------------------------
+  # Modality/Condition configuration
+  # ----------------------------------------------------------------------
+  num_classes: 4  # Number of classes (4 for BraTS modalities), default: 4
+  contrast_embed_dim: 64  # Contrast embedding dimension, default: 64 (optional for Stage 1)
+    
 # =============================================================================
 # Training Configuration
 # =============================================================================
 training:
+  # ----------------------------------------------------------------------
   # Optimizer settings
+  # ----------------------------------------------------------------------
   optimizer:
-    lr_g: 1e-4  # Generator (autoencoder) learning rate
-    lr_d: 8e-4  # Discriminator learning rate
-    b1: 0.5  # Adam beta1
-    b2: 0.999  # Adam beta2
-    weight_decay: 1e-5
-
-  # Learning rate scheduler (optional, currently constant)
+    lr_g: 1e-4  # Generator (autoencoder) learning rate, default: 1e-4
+    lr_d: 4e-4  # Discriminator learning rate, default: 4e-4
+    b1: 0.5  # Adam beta1, default: 0.5
+    b2: 0.999  # Adam beta2, default: 0.999
+    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
+    
+  # ----------------------------------------------------------------------
+  # Learning rate scheduler
+  # ----------------------------------------------------------------------
   scheduler:
-    type: "constant"  # Options: constant, cosine, step
-    # T_max: 100  # For cosine
-    # step_size: 30  # For step
-    # gamma: 0.1  # For step
-    # eta_min: 0  # For cosine
-
+    type: "cosine"  # Options: constant, cosine, step
+      # constant: no scheduling
+      # cosine: cosine annealing (requires T_max, eta_min)
+      # step: step decay (requires step_size, gamma)
+    
+    # Cosine scheduler parameters (if type: "cosine")
+    T_max: 100  # Maximum number of iterations
+    eta_min: 0  # Minimum learning rate
+    
+    # Step scheduler parameters (if type: "step")
+    step_size: 30  # Decay every N epochs
+    gamma: 0.1  # Multiplicative decay factor
+    
+    # Warmup configuration (applies to all schedulers)
+    warmup:
+      enabled: true  # Enable learning rate warmup, default: true
+      warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
+      warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
+      eta_min: 0.0  # Minimum learning rate after cosine decay, default: 0.0
+    
+  # ----------------------------------------------------------------------
   # Training loop settings
+  # ----------------------------------------------------------------------
   loop:
-    sample_every_n_steps: 100  # How often to generate samples during training
-
+    sample_every_n_steps: 100  # How often to generate samples during training, default: 100
+    
+  # ----------------------------------------------------------------------
   # Training stability settings
+  # ----------------------------------------------------------------------
   stability:
-    grad_norm_logging: true  # Log gradient norms for monitoring training health
-    warmup_enabled: true  # Enable learning rate warmup
-    warmup_steps: null  # Auto-calculate based on warmup_ratio (set explicitly to override)
-    warmup_ratio: 0.02  # 2% of total training steps for warmup
-
+    grad_norm_logging: true  # Log gradient norms for monitoring, default: true
+    warmup_enabled: true  # Enable learning rate warmup, default: true
+    warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
+    warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
+    warmup_eta_min: 0.1  # Minimum learning rate ratio after decay (0.0-1.0), default: 0.1
+    
 # =============================================================================
-# Data Configuration
+# Data Configuration (BraTS Dataset)
 # =============================================================================
 data:
+  # ----------------------------------------------------------------------
   # Data paths
-  data_dir: "${BRATS_DATA_DIR:data/BraTS}"
-
-  # Modalities to use
-  modalities: ["T1", "T1ce", "T2", "FLAIR"]
-
+  # ----------------------------------------------------------------------
+  data_dir: "${BRATS_DATA_DIR:data/BraTS}"  # Path to dataset (env var or default)
+  
+  # ----------------------------------------------------------------------
+  # Modalities to use (BraTS-specific)
+  # ----------------------------------------------------------------------
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]  # BraTS modalities, default: 4 modalities
+  
+  # ----------------------------------------------------------------------
   # Data loader settings
-  batch_size: 2
-  num_workers: 4
-  cache_num_workers: 0
-  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM
-  pin_memory: true
-  train_val_split: 0.8
-
+  # ----------------------------------------------------------------------
+  batch_size: 2  # Training batch size, default: 2
+  num_workers: 4  # Number of data loading workers, default: 4
+  cache_num_workers: 0  # CacheDataset worker count, default: 0
+  cache_rate: 0.5  # Cache 0-100% of data (1.0 = all in RAM), default: 1.0
+  pin_memory: true  # Pin memory for faster GPU transfer, default: true
+  train_val_split: 0.8  # Training/validation split ratio, default: 0.8
+  
+  # ----------------------------------------------------------------------
   # Training crop size
-  roi_size: [128, 128, 128]
-
+  # ----------------------------------------------------------------------
+  roi_size: [128, 128, 128]  # Training crop size [D, H, W], default: [64, 64, 64]
+  
+  # ----------------------------------------------------------------------
   # Preprocessing transforms
+  # ----------------------------------------------------------------------
   preprocessing:
-    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions
-    spacing_mode: "bilinear"
-    orientation: "RAS"  # NIfTI orientation
-    intensity_a_min: 0.0  # ScaleIntensityRanged
-    intensity_a_max: 500.0
-    intensity_b_min: -1.0
-    intensity_b_max: 1.0
-    clip: true
-
+    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions [D, H, W], default: [1.0, 1.0, 1.0]
+    spacing_mode: "bilinear"  # Resampling mode, default: bilinear
+    orientation: "RAS"  # NIfTI orientation, default: RAS
+    intensity_a_min: 0.0  # ScaleIntensityRanged lower bound, default: 0.0
+    intensity_a_max: 500.0  # ScaleIntensityRanged upper bound, default: 500.0
+    intensity_b_min: 0.0  # Output lower bound after normalization, default: 0.0
+    intensity_b_max: 1.0  # Output upper bound after normalization, default: 1.0
+    clip: true  # Clip intensities to [a_min, a_max], default: true
+    device: null  # Device for EnsureTyped (null=auto-detect: cuda/mps/cpu)
+  
+  # ----------------------------------------------------------------------
   # Data augmentation
+  # ----------------------------------------------------------------------
   augmentation:
-    # Random flip
-    flip_prob: 0.5
-    flip_axes: [0, 1, 2]  # Axial, coronal, sagittal
-
-    # Random rotation
-    rotate_prob: 0.5
-    rotate_max_k: 3  # 0-3 (90-degree multiples)
-    rotate_axes: [0, 1]  # Rotate in axial plane
-
-    # Random intensity shift
-    shift_intensity_prob: 0.5
-    shift_intensity_offset: 0.1  # +/- 10% shift
-
+    flip_prob: 0.5  # Random flip probability (0-1), default: 0.5
+    flip_axes: [0, 1, 2]  # Flip axes [D, H, W], default: null (all axes)
+    
+    rotate_prob: 0.5  # Random rotation probability (0-1), default: 0.5
+    rotate_max_k: 3  # Max 90-degree rotations (0-3), default: 3
+    rotate_axes: [0, 1]  # Rotate in plane [D, H], default: [0, 1]
+    
+    shift_intensity_prob: 0.5  # Random intensity shift probability, default: 0.5
+    shift_intensity_offset: 0.1  # Intensity shift offset (+/- 10%), default: 0.1
+    
 # =============================================================================
-# Loss Configuration
+# Loss Configuration (aligned with Taming Transformers VQGAN best practices)
 # =============================================================================
 loss:
-  discriminator_iter_start: 500  # Discriminator warmup
-
+  # Loss type selector
+  # ----------------------------------------------------------------------
+  loss_type: "lpips"  # Options: "lpips" (default), "ffl"
+    # lpips: MONAI PerceptualLoss with pretrained network
+    # ffl: Focal Frequency Loss (requires focal_frequency section)
+  
+  discriminator_iter_start: 10000  # Discriminator warmup: 10K steps (VQGAN best practice)
+  
+  # ----------------------------------------------------------------------
   # Reconstruction loss (L1)
+  # ----------------------------------------------------------------------
   reconstruction:
-    weight: 1.0
-
+    weight: 1.0  # L1 loss weight (aligned with VQGAN default)
+  
+  # ----------------------------------------------------------------------
   # Perceptual Loss (LPIPS-based using pretrained network)
+  # ----------------------------------------------------------------------
   perceptual:
-    weight: 0.5
-    network_type: "alex"
-    is_fake_3d: true
-    fake_3d_ratio: 0.5
-
+    weight: 1.0  # Perceptual loss weight (raised from 0.5 to match VQGAN)
+    network_type: "medicalnet_resnet10_23datasets"  # Pretrained network
+      # Options: "alex", "vgg", "medicalnet_resnet10_23datasets", etc.
+    is_fake_3d: false  # Use 2.5D perceptual loss for 3D volumes, default: false
+    fake_3d_ratio: 0.5  # Fraction of slices used when is_fake_3d=True, default: 0.5
+  
+  # ----------------------------------------------------------------------
+  # Focal Frequency Loss (FFL) - REQUIRED if loss_type: "ffl"
+  # ----------------------------------------------------------------------
+  focal_frequency:  # Only used when loss_type: "ffl"
+    weight: 0.5  # FFL loss weight multiplier, default: 0.5
+    alpha: 1.0  # Focusing exponent (higher = more focus on large errors), default: 1.0
+    patch_factor: 1  # Split image into (patch_factor x patch_factor) patches before FFT, default: 1
+    ave_spectrum: false  # Use minibatch-average spectrum, default: false
+    log_matrix: false  # Apply log(1 + w) before normalization, default: false
+    batch_matrix: false  # Normalize w using batch-level max, default: false
+    eps: 1e-8  # Numerical stability constant, default: 1e-8
+    axes: [2, 3, 4]  # Slicing axes for 3D: 2=D (axial), 3=H (coronal), 4=W (sagittal)
+    ratio: 1.0  # Fraction of slices to use per axis (1.0 = all slices), default: 1.0
+  
+  # ----------------------------------------------------------------------
   # Adversarial loss
+  # ----------------------------------------------------------------------
   adversarial:
-    weight: 0.1  # Base weight (scaled adaptively)
-    criterion: "least_squares"  # hinge, least_squares, bce
-
-  # Commitment loss (FSQ)
+    weight: 0.8  # Adversarial loss base weight (raised from 0.1 to match VQGAN)
+    criterion: "least_squares"  # hinge, least_squares, bce, default: least_squares
+    # Note: VQGAN uses hinge loss by default, but least_squares is common alternative
+  
+  # ----------------------------------------------------------------------
+  # Commitment loss (FSQ) - NOTE: FSQ does not use commitment loss
+  # ----------------------------------------------------------------------
+  # FSQ (Finite Scalar Quantization) uses learned projection layers to quantize
+  # each dimension independently to discrete scalar values in [-1, 1] range.
+  # Unlike VQ, FSQ does NOT have a codebook that needs stabilization,
+  # therefore commitment loss is not applicable (always 0.0).
   commitment:
-    weight: 0.0
-
+    weight: 0.0  # FSQ has no codebook, so no commitment loss needed
+  
+  # ----------------------------------------------------------------------
   # Adaptive weight calculation
+  # ----------------------------------------------------------------------
   adaptive:
-    max_weight: 10000.0  # Clamp adaptive weight
-    grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio
-
+    max_weight: 10000.0  # Clamp adaptive weight (VQGAN standard)
+    grad_norm_eps: 0.0001  # Epsilon for gradient norm ratio, default: 0.0001
+    
 # =============================================================================
 # Callbacks Configuration
 # =============================================================================
 callbacks:
+  # ----------------------------------------------------------------------
   # Model checkpointing
+  # ----------------------------------------------------------------------
   checkpoint:
-    monitor: "val/lpips"
-    mode: "min"
-    save_top_k: 3
-    save_last: true
-    every_n_epochs: 1  # check every epoch
-
+    monitor: "val/lpips"  # Metric to monitor for best model, default: val/combined_metric
+    mode: "min"  # Mode for monitoring (min=maximize, min=minimize), default: max
+    save_top_k: 3  # Number of best models to save, default: 3
+    save_last: true  # Always save last checkpoint, default: true
+    every_n_epochs: null  # Checkpoint every N epochs (null = disabled)
+  
+  # ----------------------------------------------------------------------
   # Early stopping
+  # ----------------------------------------------------------------------
   early_stop:
-    enabled: true
-    monitor: "val/lpips"
-    patience: 10
-    mode: "min"
-    min_delta: 0.0  # Minimum change to qualify as improvement
-
+    enabled: true  # Enable early stopping, default: true
+    monitor: "val/lpips"  # Metric to monitor, default: val/combined_metric
+    patience: 10  # Epochs to wait before stopping, default: 10
+    mode: "min"  # Mode for monitoring (min=maximize, min=minimize), default: max
+    min_delta: 0.0  # Minimum change to qualify as improvement, default: 0.0
+    check_finite: true  # Stop when metric is NaN/Inf, default: true
+  
+  # ----------------------------------------------------------------------
   # Learning rate monitoring
-  lr_monitor: true
-
-  # PyTorch Profiler (disabled by default)
+  # ----------------------------------------------------------------------
+  lr_monitor: true  # Log learning rate, default: true
+  
+  # ----------------------------------------------------------------------
+  # PyTorch Profiler
+  # ----------------------------------------------------------------------
   profiler:
-    enabled: false
-    profile_cpu: true
-    profile_cuda: true
-    record_shapes: true
-    with_stack: true
-    profile_memory: true
-    trace_dir: "profiler"
-
+    enabled: false  # Enable PyTorch profiler, default: false
+    profile_cpu: true  # Profile CPU activities
+    profile_cuda: true  # Profile CUDA activities
+    record_shapes: true  # Record tensor shapes
+    with_stack: true  # Record stack traces
+    profile_memory: true  # Profile memory usage
+    trace_dir: "profiler"  # Subdirectory within output_dir for trace files
+    
 # =============================================================================
 # Trainer Configuration
 # =============================================================================
 trainer:
+  # ----------------------------------------------------------------------
   # Training settings
-  max_epochs: 100
-
-  # Hardware
+  # ----------------------------------------------------------------------
+  max_epochs: 100  # Maximum number of training epochs, default: 100
+  
+  # ----------------------------------------------------------------------
+  # Hardware configuration
+  # ----------------------------------------------------------------------
   hardware:
-    accelerator: "auto"  # Auto-detect: gpu/mps/cpu
-    devices: "auto"       # Use all available devices
-    precision: "16-mixed"  # 32, 16-mixed, bf16-mixed (bf16 not supported on MPS)
-
-  # Logging
+    accelerator: "auto"  # Options: auto, cpu, gpu, mps, cuda, tpu, default: auto
+    devices: "auto"  # Options: auto, 1, 2, 4, [0, 1], etc., default: auto
+    precision: "16-mixed"  # Options: 32, 16-mixed, bf16-mixed (bf16 not on MPS), default: 32
+  
+  # ----------------------------------------------------------------------
+  # Logging configuration
+  # ----------------------------------------------------------------------
   logging:
-    log_every_n_steps: 10
-    val_check_interval: 1.0  # Validate every N epochs
-    limit_train_batches: null  # null = all batches
-    limit_val_batches: 5
-    logger_version: null  # null = auto-increment
-
+    log_every_n_steps: 10  # Log every N steps, default: 10
+    val_check_interval: 1.0  # Validate every N epochs, default: 1.0
+    limit_train_batches: null  # Limit training batches (null = all), default: null
+    limit_val_batches: 5.0  # Limit validation batches, default: 5.0
+    logger_version: null  # Logger version (null = auto-increment), default: null
+  
+  # ----------------------------------------------------------------------
   # Gradient handling
-  gradient_clip_val: 1.0
-  gradient_clip_algorithm: "norm"
-  accumulate_grad_batches: 1
-
+  # ----------------------------------------------------------------------
+  gradient_clip_val: 1.0  # Gradient clipping value (null = disabled), default: 1.0
+  gradient_clip_algorithm: "norm"  # Options: norm, value, default: norm
+  accumulate_grad_batches: 1  # Accumulate gradients over N batches, default: 1
+  
+  # ----------------------------------------------------------------------
   # Debugging/profiling
-  profiler: null  # null, simple, advanced, pytorch
-  detect_anomaly: false
-  benchmark: false
-
+  # ----------------------------------------------------------------------
+  profiler: null  # PyTorch profiler (null, simple, advanced, pytorch), default: null
+  detect_anomaly: false  # Enable autograd anomaly detection for NaN/Inf, default: false
+  benchmark: false  # Enable cudnn benchmarking, default: false
+    
 # =============================================================================
 # Sliding Window Inference
 # =============================================================================
 sliding_window:
-  # Enable SW for validation (training always uses direct calls)
-  enabled: false
-
-  # Window configuration
-  roi_size: [128, 128, 128]
-  overlap: 0.5  # 0-1, higher = smoother but slower
-  sw_batch_size: 1  # Increase if GPU memory allows
-  mode: "gaussian"  # gaussian, constant, mean
-
+  enabled: false  # Enable sliding window for validation/inference, default: false
+    # Training always uses direct calls (no SW needed)
+    # Enable for validation on large volumes
+    
+  roi_size: [64, 64, 64]  # Sliding window size [D, H, W], default: [64, 64, 64]
+  overlap: 0.5  # Window overlap 0-1 (higher = smoother but slower), default: 0.5
+  sw_batch_size: 1  # Sliding window batch size (increase if GPU memory allows), default: 1
+  mode: "gaussian"  # Blending mode: gaussian, constant, mean, default: gaussian
+    
 # =============================================================================
-# Metrics Configuration
+# Notes
 # =============================================================================
-# metrics section removed - using LPIPS as primary metric for checkpointing
+# 
+# 1. Environment Variables:
+#    - ${BRATS_DATA_DIR:data/BraTS} - Dataset path with default fallback
+#    - ${VAR_NAME:default} - Required env var with default value
+# 
+# 2. Loss Types:
+#    - "lpips" (default): Uses perceptual.perceptual section
+#    - "ffl": Requires loss.focal_frequency section
+# 
+# 3. Recommended settings for image sizes:
+#    - Small images (64³): num_d: 2, num_layers_d: 2
+#    - Large images (128³): num_d: 3, num_layers_d: 3
+# 
+# 4. For MedMNIST3D datasets, replace data section with dataset-specific config:
+#    - Add: dataset_name: "organmnist3d" (or other MedMNIST3D datasets)
+#    - Add: size: 64 (or 28)
+#    - Add: root: "./.medmnist"
+#    - Add: download: true
+#    - Remove modalities (not used)
+# 

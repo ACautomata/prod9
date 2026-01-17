@@ -45,14 +45,16 @@ model:
 # =============================================================================
 training:
   # Optimizer settings
+  # ----------------------------------------------------------------------
   optimizer:
-    lr_g: 1e-4  # Generator (autoencoder) learning rate (reduced for stability)
-    lr_d: 2e-4  # Discriminator learning rate (reduced for stability)
-    b1: 0.5
-    b2: 0.95
-    weight_decay: 1e-2
+    lr_g: 1e-4  # Generator (autoencoder) learning rate, default: 1e-4
+    lr_d: 4e-4  # Discriminator learning rate, default: 4e-4
+    b1: 0.5  # Adam beta1, default: 0.5
+    b2: 0.999  # Adam beta2, default: 0.999
+    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
 
-  # Learning rate scheduler (optional, currently constant)
+  # Learning rate scheduler (cosine annealing)
+  # ----------------------------------------------------------------------
   scheduler:
     type: "cosine"  # Options: constant, cosine, step
     T_max: 100  # For cosine

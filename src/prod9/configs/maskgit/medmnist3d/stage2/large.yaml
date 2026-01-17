@@ -36,15 +36,16 @@ model:
 # =============================================================================
 training:
   # Optimizer settings
+  # ----------------------------------------------------------------------
   optimizer:
-    learning_rate: 1e-4
-    beta1: 0.9
-    beta2: 0.999
-    weight_decay: 0.01
+    learning_rate: 1e-4  # Learning rate
+    beta1: 0.9  # Adam beta1, default: 0.9
+    beta2: 0.999  # Adam beta2, default: 0.999
+    weight_decay: 1e-5  # Weight decay (L2 regularization), default: 1e-5
 
   # Learning rate scheduler
   scheduler:
-    type: "constant"  # constant, cosine, step
+    type: "cosine"  # constant, cosine, step
     # T_max: 50  # For cosine
     # step_size: 15  # For step
     # gamma: 0.1  # For step
