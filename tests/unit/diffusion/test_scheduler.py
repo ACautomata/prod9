@@ -42,5 +42,5 @@ def test_step_euler_update() -> None:
     sample = torch.ones((1, 1, 2, 2, 2))
     model_output = torch.ones_like(sample)
 
-    result = scheduler.step(model_output, timestep=9, sample=sample)
+    result, _ = scheduler.step(model_output, timestep=9, sample=sample)
     torch.testing.assert_close(result, sample - 0.1)

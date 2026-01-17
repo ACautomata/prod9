@@ -74,7 +74,7 @@ class RectifiedFlowSampler:
             model_output = diffusion_model(sample, t_batch, condition)
 
             # Denoise step
-            sample = self.scheduler.step(model_output, int(t.item()), sample)
+            sample, _ = self.scheduler.step(model_output, int(t.item()), sample)
 
         return sample
 
@@ -125,7 +125,7 @@ class RectifiedFlowSampler:
         for i, t in enumerate(timesteps):
             t_batch = t.expand(sample.shape[0])
             model_output = diffusion_model(sample, t_batch, condition)
-            sample = self.scheduler.step(model_output, int(t.item()), sample)
+            sample, _ = self.scheduler.step(model_output, int(t.item()), sample)
 
             if progress_callback is not None:
                 progress_callback(i + 1, sample)

@@ -14,8 +14,7 @@ import torch.nn.functional as F
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
-from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
-                                         SlidingWindowConfig)
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.controlnet.condition_encoder import ConditionEncoder
 from prod9.controlnet.controlnet_model import ControlNetRF
 from prod9.diffusion.diffusion_model import DiffusionModelRF
@@ -300,7 +299,9 @@ class ControlNetLightning(pl.LightningModule):
             else:  # both or label
                 condition_input = {
                     "mask": batch.get("mask", source_image),
-                    "label": batch.get("label", torch.zeros(source_image.shape[0], dtype=torch.long)),
+                    "label": batch.get(
+                        "label", torch.zeros(source_image.shape[0], dtype=torch.long)
+                    ),
                 }
 
             condition = cast(nn.Module, self.condition_encoder)(condition_input)
@@ -344,7 +345,8 @@ class ControlNetLightning(pl.LightningModule):
         if self.condition_encoder is None:
             raise RuntimeError("Condition encoder not initialized.")
         return torch.optim.AdamW(
-            list(self.controlnet.parameters()) + list(cast(nn.Module, self.condition_encoder).parameters()),
+            list(self.controlnet.parameters())
+            + list(cast(nn.Module, self.condition_encoder).parameters()),
             lr=self.lr,
             betas=(0.9, 0.999),
             weight_decay=1e-5,
@@ -423,7 +425,7 @@ def _sample_with_controlnet(
 
         # Combine
         model_output = diffusion_output + controlnet_output
-        sample = self.scheduler.step(model_output, int(t.item()), sample)
+        sample, _ = self.scheduler.step(model_output, int(t.item()), sample)
 
     return sample
 
