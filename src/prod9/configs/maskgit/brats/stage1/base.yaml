@@ -7,8 +7,8 @@
 # =============================================================================
 # Output paths
 # =============================================================================
-output_dir: "outputs/stage1"
-autoencoder_export_path: "outputs/autoencoder_final.pt"
+output_dir: "outputs/brats_stage1-large"
+autoencoder_export_path: "outputs/brats_autoencoder-large.pt"
 # 
 # =============================================================================
 # Model Architecture
@@ -24,23 +24,23 @@ model:
     
     # REQUIRED: FSQ quantization levels
     # The codebook size = product of all levels
-    # Examples: [8,8,8] = 512, [6,6,6,5] = 1080, [8,8,6,5] = 2400
-    levels: [6, 6, 6, 5]  # REQUIRED - FSQ levels list
+    # Examples: [8,8,8] = 512, [6,6,6,5] = 1080, [8,8,8,6,5] = 15360
+    levels: [8, 8, 8, 6, 5]  # REQUIRED - FSQ levels list
     
     # REQUIRED: Encoder/decoder channel sizes per layer
     # Length determines network depth
-    num_channels: [64, 128, 256, 512]  # REQUIRED
+    num_channels: [128, 256, 512, 512]  # REQUIRED
     
     # REQUIRED: Which layers have attention mechanisms
     # Must match length of num_channels
-    attention_levels: [False, True, True, True]  # REQUIRED
+    attention_levels: [False, False, False, True]  # REQUIRED
     
     # REQUIRED: Number of residual blocks per layer
     # Must match length of num_channels
     num_res_blocks: [2, 2, 2, 2]  # REQUIRED
     
     norm_num_groups: 32  # Group normalization groups, default: 32
-    num_splits: 16  # Number of splits for attention heads, default: 16
+    num_splits: 2  # Number of splits for attention heads, default: 16
     save_mem: false  # Memory-saving checkpointing (not used in FSQ training)
     
   # ----------------------------------------------------------------------
@@ -51,14 +51,10 @@ model:
     in_channels: 1  # Input channels, default: 1
     out_channels: 1  # Output channels, default: 1
     
-    num_d: 2  # Number of discriminators (multi-scale), default: 2
-      # Use num_d: 2 for small images (e.g., MedMNIST3D 64³)
-      # Use num_d: 3 for larger images (e.g., BraTS 128³)
+    num_d: 1  # Number of discriminators (multi-scale)
     
-    channels: 32  # Base channel count, default: 32
-    num_layers_d: 2  # Layers per discriminator, default: 2
-      # Use num_layers_d: 2 for small images
-      # Use num_layers_d: 3 for larger images
+    channels: 64  # Base channel count
+    num_layers_d: 3  # Layers per discriminator
     
     kernel_size: 4  # Convolution kernel size, default: 4
     activation: ["LEAKYRELU", {"negative_slope": 0.2}]  # Activation function
@@ -204,11 +200,10 @@ loss:
   # Perceptual Loss (LPIPS-based using pretrained network)
   # ----------------------------------------------------------------------
   perceptual:
-    weight: 1.0  # Perceptual loss weight (raised from 0.5 to match VQGAN)
-    network_type: "medicalnet_resnet10_23datasets"  # Pretrained network
-      # Options: "alex", "vgg", "medicalnet_resnet10_23datasets", etc.
-    is_fake_3d: false  # Use 2.5D perceptual loss for 3D volumes, default: false
-    fake_3d_ratio: 0.5  # Fraction of slices used when is_fake_3d=True, default: 0.5
+    weight: 0.5
+    network_type: "alex"
+    is_fake_3d: true
+    fake_3d_ratio: 0.5
   
   # ----------------------------------------------------------------------
   # Focal Frequency Loss (FFL) - REQUIRED if loss_type: "ffl"
@@ -229,7 +224,7 @@ loss:
   # ----------------------------------------------------------------------
   adversarial:
     weight: 0.8  # Adversarial loss base weight (raised from 0.1 to match VQGAN)
-    criterion: "least_squares"  # hinge, least_squares, bce, default: least_squares
+    criterion: "hinge"  # hinge, least_squares, bce, default: least_squares
     # Note: VQGAN uses hinge loss by default, but least_squares is common alternative
   
   # ----------------------------------------------------------------------
