@@ -20,7 +20,7 @@ def condition_generator():
     return MaskGiTConditionGenerator(num_classes=4, latent_dim=64)
 
 
-def get_cond_uncond(condition_generator, source_latent, modality_idx, device='cpu'):
+def get_cond_uncond(condition_generator, source_latent, modality_idx, device="cpu"):
     """Helper to get cond and uncond from condition generator."""
     modality_tensor = torch.tensor([modality_idx], device=device, dtype=torch.long)
     if source_latent.dim() == 5:  # [B, C, H, W, D]
@@ -36,7 +36,7 @@ class TestMaskGiTConditionGenerator:
     def test_initialization(self, condition_generator):
         """Test condition generator initialization."""
         assert condition_generator.num_classes == 4
-        assert hasattr(condition_generator, 'contrast_embedding')
+        assert hasattr(condition_generator, "contrast_embedding")
         assert condition_generator.contrast_embedding.num_embeddings == 5  # num_classes + 1
         assert condition_generator.contrast_embedding.embedding_dim == 64
 
@@ -145,14 +145,17 @@ class TestMaskGiTConditionGenerator:
             pytest.skip("MPS not available")
             return
 
-        device = torch.device('mps')
+        device = torch.device("mps")
         batch_size = 1
         latent_dim = 64  # Must match condition_generator's latent_dim
         h, w, d = 4, 4, 4
 
         # Create a fresh generator on MPS device
         from prod9.generator.maskgit import MaskGiTConditionGenerator
-        condition_generator = MaskGiTConditionGenerator(num_classes=4, latent_dim=latent_dim).to(device)
+
+        condition_generator = MaskGiTConditionGenerator(num_classes=4, latent_dim=latent_dim).to(
+            device
+        )
 
         source_latent = torch.randn(batch_size, latent_dim, h, w, d, device=device)
         cond_idx = torch.tensor([0], dtype=torch.long, device=device)
@@ -170,17 +173,17 @@ class TestMaskGiTSampler:
     @pytest.fixture
     def sampler_log(self):
         """Create a sampler with log scheduler."""
-        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='log')
+        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="log")
 
     @pytest.fixture
     def sampler_linear(self):
         """Create a sampler with linear scheduler."""
-        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='linear')
+        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="linear")
 
     @pytest.fixture
     def sampler_sqrt(self):
         """Create a sampler with sqrt scheduler."""
-        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='sqrt')
+        return MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="sqrt")
 
     def test_initialization(self, sampler_log):
         """Test sampler initialization."""
@@ -191,12 +194,16 @@ class TestMaskGiTSampler:
 
     def test_invalid_scheduler_type(self):
         """Test that invalid scheduler type raises exception."""
-        with pytest.raises(Exception, match='unknown scheduler'):
-            MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='invalid')
+        with pytest.raises(Exception, match="unknown scheduler"):
+            MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="invalid")
+
+    def test_log2_scheduler_type_alias(self):
+        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="log2")
+        assert sampler.f is not None
 
     def test_schedule_factory_log(self):
         """Test log scheduler function."""
-        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='log')
+        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="log")
         # At step 0, log2(2) = 1.0
         result = sampler.f(0)
         expected = 1.0
@@ -204,7 +211,7 @@ class TestMaskGiTSampler:
 
     def test_schedule_factory_linear(self):
         """Test linear scheduler function."""
-        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="linear")
         # At step 0, should be 1.0
         assert sampler.f(0) == 1.0
         # At step 0.5, should be 0.5
@@ -212,7 +219,7 @@ class TestMaskGiTSampler:
 
     def test_schedule_factory_sqrt(self):
         """Test sqrt scheduler function."""
-        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type='sqrt')
+        sampler = MaskGiTSampler(steps=10, mask_value=-1.0, scheduler_type="sqrt")
         # At step 0, should be 1.0
         assert sampler.f(0) == 1.0
         # At step 0.5, should be sqrt(0.5) ≈ 0.707
@@ -246,7 +253,7 @@ class TestMaskGiTSampler:
         """Test that schedule raises ValueError on truncation."""
         # Create a sampler with many steps and small sequence to cause truncation
         # With steps=100 and seq_len=4, the log schedule will eventually have count <= 0
-        sampler = MaskGiTSampler(steps=100, mask_value=-1.0, scheduler_type='log')
+        sampler = MaskGiTSampler(steps=100, mask_value=-1.0, scheduler_type="log")
 
         batch_size = 1
         seq_len = 4  # Small sequence to trigger truncation with many steps
@@ -256,8 +263,8 @@ class TestMaskGiTSampler:
         # Setup mocks
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (2, 2, 1), seq_len = 4
@@ -301,7 +308,7 @@ class TestMaskGiTSampler:
         # Position 0 in sequence corresponds to (0,0,0) in spatial
         logits_spatial[:, 5, 0, 0, 0] = 10.0  # vocab_size=16, token_id=5
         mock_transformer.return_value = logits_spatial
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         # Create x first to get its dtype
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
@@ -313,7 +320,7 @@ class TestMaskGiTSampler:
             return torch.ones(B, K, embed_dim, dtype=x.dtype, device=x.device) * 99.0
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         cond = torch.zeros(batch_size, embed_dim, 2, 2, 2)  # Zero conditioning (2*2*2=8)
         uncond = torch.zeros_like(cond)
@@ -338,7 +345,7 @@ class TestMaskGiTSampler:
         h, w, d = 4, 4, 2
         logits_spatial = torch.randn(batch_size, vocab_size, h, w, d)
         mock_transformer.return_value = logits_spatial
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         # Create x first to get its dtype
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
@@ -349,14 +356,16 @@ class TestMaskGiTSampler:
             return torch.randn(B, K, embed_dim, dtype=x.dtype, device=x.device)
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         cond = torch.zeros(batch_size, embed_dim, 4, 4, 2)  # Zero conditioning (4*4*2=32)
         uncond = torch.zeros_like(cond)
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         initial_count = last_indices.shape[1]
-        _, new_indices = sampler_log.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
+        _, new_indices = sampler_log.step(
+            0, mock_transformer, mock_vae, x, cond, uncond, last_indices
+        )
 
         # After step, should have fewer indices to update
         # new_indices may have fewer total elements across all batches
@@ -425,8 +434,8 @@ class TestMaskGiTSampler:
         """Test that sample calls step for the specified number of steps."""
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 1), seq_len = 64
@@ -545,7 +554,7 @@ class TestMaskGiTScheduler:
 
         # Check that masked positions have mask value
         # Convert to sequence format for checking
-        z_masked_seq = rearrange(z_masked, 'b c h w d -> b (h w d) c')
+        z_masked_seq = rearrange(z_masked, "b c h w d -> b (h w d) c")
         for i in range(batch_size):
             for idx in indices[i]:
                 assert torch.allclose(z_masked_seq[i, idx], torch.tensor(scheduler.mask_value))
@@ -562,8 +571,8 @@ class TestMaskGiTScheduler:
 
         # Labels should contain original values at masked positions, zeros elsewhere
         # Convert to sequence format for checking
-        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
-        label_seq = rearrange(label, 'b c h w d -> b (h w d) c')
+        z_seq = rearrange(z, "b c h w d -> b (h w d) c")
+        label_seq = rearrange(label, "b c h w d -> b (h w d) c")
         for i in range(batch_size):
             for idx in indices[i]:
                 # Check that masked positions have original values
@@ -586,8 +595,8 @@ class TestMaskGiTScheduler:
 
         # Non-masked positions should be unchanged
         # Convert to sequence format for checking
-        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
-        z_masked_seq = rearrange(z_masked, 'b c h w d -> b (h w d) c')
+        z_seq = rearrange(z, "b c h w d -> b (h w d) c")
+        z_masked_seq = rearrange(z_masked, "b c h w d -> b (h w d) c")
         for i in range(batch_size):
             masked_set = set(indices[i].tolist())
             for pos in range(seq_len):
@@ -634,9 +643,9 @@ class TestIntegration:
         """Test that different scheduler types produce different results."""
         steps = 10
 
-        sampler_log = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type='log')
-        sampler_linear = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type='linear')
-        sampler_sqrt = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type='sqrt')
+        sampler_log = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type="log")
+        sampler_linear = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type="linear")
+        sampler_sqrt = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type="sqrt")
 
         seq_len = 100
         counts_log = [sampler_log.schedule(i, seq_len) for i in range(steps)]
@@ -654,7 +663,7 @@ class TestEdgeCases:
 
     def test_sampler_single_step(self):
         """Test sampler with only one step."""
-        sampler = MaskGiTSampler(steps=1, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=1, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
@@ -676,7 +685,7 @@ class TestEdgeCases:
 
     def test_sampler_large_sequence(self):
         """Test sampler with large sequence length."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         batch_size = 2
         seq_len = 1024
@@ -686,8 +695,8 @@ class TestEdgeCases:
         # Setup mocks
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
         # For spatial shape (8, 8, 16), seq_len = 1024
@@ -729,12 +738,12 @@ class TestEdgeCases:
 
     def test_sampler_with_batch_size_one(self):
         """Test sampler with batch size of 1."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         batch_size = 1
         seq_len = 16
@@ -795,7 +804,7 @@ class TestUnconditionalGeneration:
 
     def test_step_with_zero_conditioning(self):
         """Test that step works with zero conditioning tensor."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         # Create mock transformer with side_effect
         batch_size, seq_len, vocab_size = 2, 16, 32
@@ -838,7 +847,9 @@ class TestUnconditionalGeneration:
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Execute step
-        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
+        new_x, new_indices = sampler.step(
+            0, mock_transformer, mock_vae, x, cond, uncond, last_indices
+        )
 
         # Verify transformer was called twice (once with cond, once with uncond)
         assert call_count[0] == 2, "Transformer should be called twice for confidence computation"
@@ -849,7 +860,7 @@ class TestUnconditionalGeneration:
 
     def test_step_with_none_conditioning_uses_zeros(self):
         """Test that step with cond=None uses zero tensor implicitly."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         batch_size, seq_len, vocab_size = 2, 16, 32
@@ -860,7 +871,7 @@ class TestUnconditionalGeneration:
         h, w, d = 4, 2, 2
         logits = torch.randn(batch_size, vocab_size, h, w, d)
         mock_transformer.return_value = logits
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         mock_vae = Mock()
 
@@ -869,7 +880,7 @@ class TestUnconditionalGeneration:
             return torch.randn(B, K, embed_dim)
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # Zero conditioning (4*2*2=16)
@@ -877,7 +888,9 @@ class TestUnconditionalGeneration:
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # This should not raise an error
-        new_x, new_indices = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
+        new_x, new_indices = sampler.step(
+            0, mock_transformer, mock_vae, x, cond, uncond, last_indices
+        )
 
         # Verify transformer was called (twice - once for cond, once for uncond)
         assert mock_transformer.call_count == 2
@@ -886,12 +899,12 @@ class TestUnconditionalGeneration:
 
     def test_sample_with_unconditional_generation(self):
         """Test full sampling pipeline with unconditional generation."""
-        sampler = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         batch_size, seq_len, vocab_size = 1, 64, 32
         embed_dim = 4
@@ -925,7 +938,7 @@ class TestUnconditionalGeneration:
 
     def test_confidence_computation_with_zero_condition(self):
         """Test that confidence computation correctly uses zero conditioning."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         # Create transformer that returns higher confidence when conditioned
         mock_transformer = Mock()
@@ -945,11 +958,13 @@ class TestUnconditionalGeneration:
 
         def mock_transformer_call(x, cond):
             is_zero = torch.allclose(cond, torch.zeros_like(cond)) if cond is not None else True
-            call_log.append(('zero' if is_zero else 'nonzero', cond.shape if cond is not None else None))
+            call_log.append(
+                ("zero" if is_zero else "nonzero", cond.shape if cond is not None else None)
+            )
             return logits_low_conf if is_zero else logits_high_conf
 
         mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         mock_vae = Mock()
         embed_dim = 4
@@ -959,7 +974,7 @@ class TestUnconditionalGeneration:
             return torch.ones(B, K, embed_dim) * 99.0
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         h, w, d = 4, 2, 2  # Spatial dimensions
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
@@ -973,8 +988,8 @@ class TestUnconditionalGeneration:
         assert len(call_log) == 2
         # First call uses cond (zeros in this test), second call uses uncond (also zeros)
         # Both will be detected as zero since we passed zero conditioning
-        assert call_log[0][0] == 'zero'  # First call with cond (zeros)
-        assert call_log[1][0] == 'zero'  # Second call with uncond (also zeros)
+        assert call_log[0][0] == "zero"  # First call with cond (zeros)
+        assert call_log[1][0] == "zero"  # Second call with uncond (also zeros)
 
         # Some positions should be updated
         updated_mask = (new_x != -1.0).any(dim=[1, 2, 3, 4])
@@ -982,12 +997,12 @@ class TestUnconditionalGeneration:
 
     def test_conditional_vs_unconditional_difference(self):
         """Test that conditional and unconditional generation produce different results."""
-        sampler = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         batch_size, seq_len, vocab_size = 1, 16, 32
         embed_dim = 4
@@ -1010,7 +1025,9 @@ class TestUnconditionalGeneration:
         uncond_cond = torch.zeros_like(cond_cond)
         last_indices_cond = torch.arange(seq_len).unsqueeze(0)
 
-        x_cond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_cond, cond_cond, uncond_cond, last_indices_cond)
+        x_cond_out, _ = sampler.step(
+            0, mock_transformer, mock_vae, x_cond, cond_cond, uncond_cond, last_indices_cond
+        )
 
         # Reset call count
         mock_transformer.reset_mock()
@@ -1022,7 +1039,9 @@ class TestUnconditionalGeneration:
         uncond_uncond = torch.zeros_like(cond_uncond)
         last_indices_uncond = torch.arange(seq_len).unsqueeze(0)
 
-        x_uncond_out, _ = sampler.step(0, mock_transformer, mock_vae, x_uncond, cond_uncond, uncond_uncond, last_indices_uncond)
+        x_uncond_out, _ = sampler.step(
+            0, mock_transformer, mock_vae, x_uncond, cond_uncond, uncond_uncond, last_indices_uncond
+        )
 
         # Results should be different (or at least not guaranteed to be same)
         # We can't assert they're always different due to randomness, but we verify the process works
@@ -1034,12 +1053,12 @@ class TestNoGradDecorator:
 
     def test_step_does_not_create_graph(self):
         """Test that step doesn't create computation graph."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         batch_size, seq_len, vocab_size = 2, 8, 16
         embed_dim = 4
@@ -1068,7 +1087,7 @@ class TestNoGradDecorator:
 
     def test_sample_does_not_create_graph(self):
         """Test that sample doesn't create computation graph."""
-        sampler = MaskGiTSampler(steps=2, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=2, mask_value=-1.0, scheduler_type="linear")
 
         mock_transformer = Mock()
         mock_vae = Mock()
@@ -1111,21 +1130,25 @@ class TestGuidanceScaleParameter:
 
     def test_initialization_with_default_guidance_scale(self):
         """Test that sampler initializes with default guidance_scale=0.1."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear')
+        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type="linear")
 
-        assert hasattr(sampler, 'guidance_scale')
+        assert hasattr(sampler, "guidance_scale")
         assert sampler.guidance_scale == 0.1
 
     def test_initialization_with_custom_guidance_scale(self):
         """Test that sampler initializes with custom guidance_scale."""
         # Test various custom values
         for gs in [0.0, 0.5, 1.0, 2.0, 5.0]:
-            sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear', guidance_scale=gs)
+            sampler = MaskGiTSampler(
+                steps=5, mask_value=-1.0, scheduler_type="linear", guidance_scale=gs
+            )
             assert sampler.guidance_scale == gs
 
     def test_step_uses_default_guidance_scale(self):
         """Test that step uses instance default guidance_scale when no override provided."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear', guidance_scale=1.5)
+        sampler = MaskGiTSampler(
+            steps=5, mask_value=-1.0, scheduler_type="linear", guidance_scale=1.5
+        )
 
         mock_transformer = Mock()
         batch_size, seq_len, vocab_size = 2, 16, 32
@@ -1143,7 +1166,7 @@ class TestGuidanceScaleParameter:
             return torch.randn(batch_size, vocab_size, h, w, d)
 
         mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         mock_vae = Mock()
 
@@ -1152,7 +1175,7 @@ class TestGuidanceScaleParameter:
             return torch.randn(B, K, embed_dim)
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
@@ -1170,7 +1193,9 @@ class TestGuidanceScaleParameter:
 
     def test_step_with_override_guidance_scale(self):
         """Test that step uses override guidance_scale when provided."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear', guidance_scale=0.1)
+        sampler = MaskGiTSampler(
+            steps=5, mask_value=-1.0, scheduler_type="linear", guidance_scale=0.1
+        )
 
         mock_transformer = Mock()
         batch_size, seq_len, vocab_size = 2, 16, 32
@@ -1188,7 +1213,7 @@ class TestGuidanceScaleParameter:
             return torch.randn(batch_size, vocab_size, h, w, d)
 
         mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         mock_vae = Mock()
 
@@ -1197,7 +1222,7 @@ class TestGuidanceScaleParameter:
             return torch.randn(B, K, embed_dim)
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         x = torch.full((batch_size, embed_dim, 4, 2, 2), -1.0)
         cond = torch.zeros(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
@@ -1205,7 +1230,9 @@ class TestGuidanceScaleParameter:
         last_indices = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         # Call step WITH guidance_scale override
-        new_x, _ = sampler.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices, guidance_scale=2.5)
+        new_x, _ = sampler.step(
+            0, mock_transformer, mock_vae, x, cond, uncond, last_indices, guidance_scale=2.5
+        )
 
         # Verify transformer was called twice (CFG applied with override value)
         assert call_count[0] == 2
@@ -1215,7 +1242,9 @@ class TestGuidanceScaleParameter:
 
     def test_guidance_scale_zero_unconditional(self):
         """Test that guidance_scale=0.0 produces unconditional output."""
-        sampler = MaskGiTSampler(steps=5, mask_value=-1.0, scheduler_type='linear', guidance_scale=0.0)
+        sampler = MaskGiTSampler(
+            steps=5, mask_value=-1.0, scheduler_type="linear", guidance_scale=0.0
+        )
 
         mock_transformer = Mock()
         batch_size, seq_len, vocab_size = 2, 16, 32
@@ -1232,11 +1261,11 @@ class TestGuidanceScaleParameter:
 
         def mock_transformer_call(x, cond):
             is_zero = torch.allclose(cond, torch.zeros_like(cond)) if cond is not None else True
-            call_log.append(('zero' if is_zero else 'nonzero'))
+            call_log.append(("zero" if is_zero else "nonzero"))
             return logits_cond if not is_zero else logits_uncond
 
         mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         mock_vae = Mock()
 
@@ -1245,7 +1274,7 @@ class TestGuidanceScaleParameter:
             return torch.ones(B, K, embed_dim) * 99.0
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         h, w, d = 4, 2, 2  # Spatial dimensions
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
@@ -1286,17 +1315,19 @@ class TestGuidanceScaleParameter:
             return logits_uncond if is_zero else logits_cond
 
         mock_transformer.side_effect = mock_transformer_call
-        mock_transformer.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
 
         def mock_embed(tid):
             B, K = tid.shape
             return torch.ones(B, K, embed_dim) * 99.0
 
         mock_vae.embed = mock_embed
-        mock_vae.device = torch.device('cpu')
+        mock_vae.device = torch.device("cpu")
 
         # Test with guidance_scale=0.0
-        sampler_0 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=0.0)
+        sampler_0 = MaskGiTSampler(
+            steps=3, mask_value=-1.0, scheduler_type="linear", guidance_scale=0.0
+        )
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         cond = torch.randn(batch_size, embed_dim, 4, 2, 2)  # 5-D: B,C,H,W,D where H*W*D=16
         uncond = torch.zeros_like(cond)
@@ -1309,7 +1340,9 @@ class TestGuidanceScaleParameter:
         mock_transformer.reset_mock()
         call_count[0] = 0
 
-        sampler_1 = MaskGiTSampler(steps=3, mask_value=-1.0, scheduler_type='linear', guidance_scale=1.0)
+        sampler_1 = MaskGiTSampler(
+            steps=3, mask_value=-1.0, scheduler_type="linear", guidance_scale=1.0
+        )
         x = torch.full((batch_size, embed_dim, h, w, d), -1.0)
         x_out_1, _ = sampler_1.step(0, mock_transformer, mock_vae, x, cond, uncond, last_indices)
 
@@ -1326,15 +1359,15 @@ class TestTokenGenerationConsistency:
 
     def test_all_tokens_generated_log_schedule(self):
         """Test that all tokens are generated with log scheduler."""
-        self._verify_all_tokens_generated('log')
+        self._verify_all_tokens_generated("log")
 
     def test_all_tokens_generated_linear_schedule(self):
         """Test that all tokens are generated with linear scheduler."""
-        self._verify_all_tokens_generated('linear')
+        self._verify_all_tokens_generated("linear")
 
     def test_all_tokens_generated_sqrt_schedule(self):
         """Test that all tokens are generated with sqrt scheduler."""
-        self._verify_all_tokens_generated('sqrt')
+        self._verify_all_tokens_generated("sqrt")
 
     def _verify_all_tokens_generated(self, scheduler_type):
         """
@@ -1349,17 +1382,13 @@ class TestTokenGenerationConsistency:
         embed_dim = 8
         vocab_size = 32
 
-        sampler = MaskGiTSampler(
-            steps=steps,
-            mask_value=-1.0,
-            scheduler_type=scheduler_type
-        )
+        sampler = MaskGiTSampler(steps=steps, mask_value=-1.0, scheduler_type=scheduler_type)
 
         # Setup mocks
         mock_transformer = Mock()
         mock_vae = Mock()
-        mock_transformer.device = torch.device('cpu')
-        mock_vae.device = torch.device('cpu')
+        mock_transformer.device = torch.device("cpu")
+        mock_vae.device = torch.device("cpu")
 
         # Create deterministic logits with unique maximum per position
         # Transformer returns spatial logits [B, vocab_size, H, W, D]
@@ -1410,17 +1439,20 @@ class TestTokenGenerationConsistency:
 
         # Verify total tokens generated equals initial sequence length
         total_generated = sum(tokens_generated_per_step)
-        assert total_generated == initial_seq_len, \
-            f"{scheduler_type} schedule: Total tokens generated ({total_generated}) " \
-            f"!= initial seq_len ({initial_seq_len}). " \
+        assert total_generated == initial_seq_len, (
+            f"{scheduler_type} schedule: Total tokens generated ({total_generated}) "
+            f"!= initial seq_len ({initial_seq_len}). "
             f"Tokens per step: {tokens_generated_per_step}"
+        )
 
         # Verify all steps generated non-negative tokens
-        assert all(count >= 0 for count in tokens_generated_per_step), \
+        assert all(count >= 0 for count in tokens_generated_per_step), (
             f"{scheduler_type} schedule: Found negative token count in {tokens_generated_per_step}"
+        )
 
         # Verify that last_indices is empty at the end (all tokens generated)
         if step == steps - 1:  # Only check if we completed all steps
-            assert last_indices.numel() == 0, \
-                f"{scheduler_type} schedule: Not all tokens were generated. " \
+            assert last_indices.numel() == 0, (
+                f"{scheduler_type} schedule: Not all tokens were generated. "
                 f"Remaining indices: {last_indices.numel()}"
+            )

@@ -64,7 +64,7 @@ class TransformerLightning(pl.LightningModule):
         num_heads: Number of attention heads (default: 8)
         num_classes: Number of classes (default: 4). For BraTS: 4 modalities. For MedMNIST 3D: dataset-specific (e.g., 11 for OrganMNIST3D)
         contrast_embed_dim: Learnable embedding size for classes/conditions (default: 64)
-        scheduler_type: Scheduler type - 'log2', 'linear', 'sqrt' (default: 'log2')
+        scheduler_type: Scheduler type - 'log', 'log2', 'linear', 'sqrt' (default: 'log')
         num_steps: Number of sampling steps (default: 12)
         mask_value: Mask token value (default: -100)
         unconditional_prob: Probability of unconditional generation (default: 0.1)
@@ -98,7 +98,7 @@ class TransformerLightning(pl.LightningModule):
         num_heads: int = 8,
         num_classes: int = 4,
         contrast_embed_dim: int = 64,
-        scheduler_type: str = "log2",
+        scheduler_type: str = "log",
         num_steps: int = 12,
         mask_value: float = -100,
         unconditional_prob: float = 0.1,
@@ -160,6 +160,7 @@ class TransformerLightning(pl.LightningModule):
         # MaskGiTConditionGenerator for classifier-free guidance training
         # Note: uses latent_channels since we add embedding to the latent tensor
         from prod9.generator.maskgit import MaskGiTConditionGenerator
+
         self.condition_generator = MaskGiTConditionGenerator(
             num_classes=num_classes,
             latent_dim=latent_channels,
@@ -167,6 +168,7 @@ class TransformerLightning(pl.LightningModule):
 
         # MaskGiTScheduler for training data augmentation
         from prod9.generator.maskgit import MaskGiTScheduler
+
         self.scheduler = MaskGiTScheduler(steps=num_steps, mask_value=mask_value)
 
         # Metrics for validation
@@ -203,6 +205,7 @@ class TransformerLightning(pl.LightningModule):
 
         # Validate autoencoder config matches transformer expectations
         import numpy as np
+
         loaded_levels = config["levels"]
         loaded_latent_channels = len(loaded_levels)
         expected_latent_channels = self._transformer_config["latent_channels"]
@@ -222,6 +225,7 @@ class TransformerLightning(pl.LightningModule):
         # Create transformer if not provided
         if self.transformer is None:
             from prod9.generator.transformer import TransformerDecoder
+
             self.transformer = TransformerDecoder(
                 latent_dim=self._transformer_config["latent_channels"],
                 patch_size=self._transformer_config["patch_size"],
@@ -275,7 +279,9 @@ class TransformerLightning(pl.LightningModule):
         return self.transformer(x, cond)
 
     def training_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
+        self,
+        batch: Dict[str, torch.Tensor],
+        batch_idx: int,  # noqa: ARG002
     ) -> STEP_OUTPUT:
         """
         Training step with conditional generation using classifier-free guidance.
@@ -350,11 +356,7 @@ class TransformerLightning(pl.LightningModule):
         else:
             mask_indices_for_gather = mask_indices
 
-        label_indices = torch.gather(
-            target_indices,
-            dim=1,
-            index=mask_indices_for_gather
-        )
+        label_indices = torch.gather(target_indices, dim=1, index=mask_indices_for_gather)
 
         # Forward through transformer (masked_tokens_spatial is already 5D)
         if self.transformer is None:
@@ -375,8 +377,9 @@ class TransformerLightning(pl.LightningModule):
 
         # Initialize target with ignore_index
         ignore_index = -100  # Standard ignore index for cross_entropy
-        target = torch.full((b, seq_len), ignore_index,
-                           device=predicted_flat.device, dtype=torch.long)
+        target = torch.full(
+            (b, seq_len), ignore_index, device=predicted_flat.device, dtype=torch.long
+        )
 
         # Fill masked positions with token indices
         # Scatter label_indices into target at masked positions
@@ -398,7 +401,9 @@ class TransformerLightning(pl.LightningModule):
         return {"loss": loss}
 
     def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
+        self,
+        batch: Dict[str, torch.Tensor],
+        batch_idx: int,  # noqa: ARG002
     ) -> Optional[STEP_OUTPUT]:
         """
         Validation step with full sampling steps.
@@ -430,6 +435,7 @@ class TransformerLightning(pl.LightningModule):
 
         # Use MaskGiTSampler for generation
         from prod9.generator.maskgit import MaskGiTSampler
+
         sampler = MaskGiTSampler(
             steps=self.num_steps,
             mask_value=self.mask_value,
@@ -439,7 +445,9 @@ class TransformerLightning(pl.LightningModule):
         # Sample target tokens
         with torch.no_grad():
             # Sample with both cond and uncond for CFG
-            reconstructed_image = sampler.sample(self.transformer, autoencoder, target_latent.shape, cond, uncond)
+            reconstructed_image = sampler.sample(
+                self.transformer, autoencoder, target_latent.shape, cond, uncond
+            )
 
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)
@@ -548,6 +556,7 @@ class TransformerLightning(pl.LightningModule):
 
             # Sample using MaskGiTSampler with CFG
             from prod9.generator.maskgit import MaskGiTSampler
+
             sampler = MaskGiTSampler(
                 steps=self.num_steps,
                 mask_value=self.mask_value,
@@ -580,7 +589,7 @@ class TransformerLightning(pl.LightningModule):
         if self.logger is None:
             return
 
-        experiment = getattr(self.logger, 'experiment', None)
+        experiment = getattr(self.logger, "experiment", None)
         if experiment is None:
             return
 
@@ -591,7 +600,7 @@ class TransformerLightning(pl.LightningModule):
 
             # Generated image (denormalize from [-1,1] to [0,1] for visualization)
             generated_slice = _denormalize(generated_images[i, 0, :, :, mid_slice])  # [H, W]
-            if experiment and hasattr(experiment, 'add_image'):
+            if experiment and hasattr(experiment, "add_image"):
                 experiment.add_image(
                     f"val/samples/{modality}_{i}",
                     generated_slice.unsqueeze(0),  # Add channel dim

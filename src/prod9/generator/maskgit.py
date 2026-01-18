@@ -8,21 +8,12 @@ from prod9.generator.transformer import TransformerDecoder
 
 
 class MaskGiTSampler:
-    def __init__(
-        self,
-        steps,
-        mask_value,
-        scheduler_type='log',
-        guidance_scale=0.1
-    ):
+    def __init__(self, steps, mask_value, scheduler_type="log", guidance_scale=0.1):
         super().__init__()
         self.mask_value = mask_value
         self.steps = steps
-        self.scheduler = MaskGiTScheduler(
-            steps=steps,
-            mask_value=mask_value
-        )
-        self.f = self.schedule_fatctory(scheduler_type)
+        self.scheduler = MaskGiTScheduler(steps=steps, mask_value=mask_value)
+        self.f = self.schedule_factory(scheduler_type)
         self.guidance_scale = guidance_scale
 
     @torch.no_grad()
@@ -74,7 +65,7 @@ class MaskGiTSampler:
         guidance = guidance_scale if guidance_scale is not None else self.guidance_scale
 
         # Convert 5D x to sequence format for index operations
-        x_seq = rearrange(x, 'b c h w d -> b (h w d) c')
+        x_seq = rearrange(x, "b c h w d -> b (h w d) c")
 
         # Transformer expects spatial inputs (x is already 5D)
         logits_cond = transformer(x, cond)
@@ -82,13 +73,15 @@ class MaskGiTSampler:
 
         # Convert transformer outputs from spatial to sequence format
         # logits shape: [B, codebook_size, H, W, D] -> [B, S, codebook_size]
-        logits_cond_sequence = rearrange(logits_cond, 'b v h w d -> b (h w d) v')
-        logits_uncond_sequence = rearrange(logits_uncond, 'b v h w d -> b (h w d) v')
+        logits_cond_sequence = rearrange(logits_cond, "b v h w d -> b (h w d) v")
+        logits_uncond_sequence = rearrange(logits_uncond, "b v h w d -> b (h w d) v")
 
         # Classifier-Free Guidance formula
-        logits = (1 + guidance) * logits_cond_sequence - guidance * logits_uncond_sequence  # [B, S, V]
+        logits = (
+            1 + guidance
+        ) * logits_cond_sequence - guidance * logits_uncond_sequence  # [B, S, V]
 
-        conf = logits.softmax(-1).amax(-1)                     # [B,S]
+        conf = logits.softmax(-1).amax(-1)  # [B,S]
         # [B,S] 预测 token id
         token_id = logits.argmax(-1)
 
@@ -101,17 +94,17 @@ class MaskGiTSampler:
         sorted_pos = selected_conf.argsort(dim=1, descending=True)  # [B,S]
 
         # 根据 schedule 选出要更新的位置
-        pos = sorted_pos[:, :self.schedule(step, seq_len)]  # [B,K]
+        pos = sorted_pos[:, : self.schedule(step, seq_len)]  # [B,K]
 
         # 对应的 token id
-        tid = token_id.gather(1, pos)          # [B,K]
+        tid = token_id.gather(1, pos)  # [B,K]
 
         # embed 成向量并写回 x_seq
-        vec = vae.embed(tid)                   # [B,K,c]
+        vec = vae.embed(tid)  # [B,K,c]
         x_seq.scatter_(1, pos.unsqueeze(-1).expand(-1, -1, c), vec)
 
         # Convert back to 5D spatial format
-        x_new = rearrange(x_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
+        x_new = rearrange(x_seq, "b (h w d) c -> b c h w d", h=h, w=w, d=d)
 
         # Update last_indices
         new_last_indices = []
@@ -145,20 +138,19 @@ class MaskGiTSampler:
         # Create 5D masked token tensor directly
         z = torch.full((bs, c, h, w, d), self.mask_value, device=device)
         seq_len = h * w * d
-        last_indices = torch.arange(
-            end=seq_len, device=device)[None, :].repeat(bs, 1)
+        last_indices = torch.arange(end=seq_len, device=device)[None, :].repeat(bs, 1)
 
         for step in range(self.steps):
-            z, last_indices = self.step(
-                step, transformer, vae, z, cond, uncond, last_indices)
+            z, last_indices = self.step(step, transformer, vae, z, cond, uncond, last_indices)
 
         # z is already 5D, directly decode
         return vae.decode_stage_2_outputs(z)
 
     @torch.no_grad()
     def schedule(self, step, seq_len):
-        count = int(self.f(step / self.steps) * seq_len) - \
-            int(self.f((step + 1) / self.steps) * seq_len)
+        count = int(self.f(step / self.steps) * seq_len) - int(
+            self.f((step + 1) / self.steps) * seq_len
+        )
         if count <= 0:
             raise ValueError(
                 f"Schedule truncation: step={step}, seq_len={seq_len}, steps={self.steps}. "
@@ -167,16 +159,16 @@ class MaskGiTSampler:
             )
         return count
 
-    def schedule_fatctory(self, schedule_type):
+    def schedule_factory(self, schedule_type):
         match schedule_type:
-            case "log":
+            case "log" | "log2":
                 return lambda x: math.log2(2 - x)
             case "linear":
                 return lambda x: 1 - x
             case "sqrt":
                 return lambda x: math.sqrt(1 - x)
             case _:
-                raise Exception(f'unknown scheduler {schedule_type}')
+                raise Exception(f"unknown scheduler {schedule_type}")
 
 
 class MaskGiTScheduler:
@@ -199,9 +191,8 @@ class MaskGiTScheduler:
         bs, _, h, w, d = z.shape
         seq_len = h * w * d
         ratio = self.mask_ratio(step)
-        indices = torch.stack(
-            [torch.randperm(seq_len, device=z.device) for _ in range(bs)])
-        indices = indices[:, :math.ceil(ratio * seq_len)]
+        indices = torch.stack([torch.randperm(seq_len, device=z.device) for _ in range(bs)])
+        indices = indices[:, : math.ceil(ratio * seq_len)]
         return indices
 
     @torch.no_grad()
@@ -221,7 +212,7 @@ class MaskGiTScheduler:
         seq_len = h * w * d
 
         # Convert 5D z to sequence format for masking operations
-        z_seq = rearrange(z, 'b c h w d -> b (h w d) c')
+        z_seq = rearrange(z, "b c h w d -> b (h w d) c")
 
         # Expand indices for all channels: [B, K] -> [B, K, C]
         indices_expanded = indices[:, :, None].expand(-1, -1, c)
@@ -231,7 +222,7 @@ class MaskGiTScheduler:
         z_masked_seq.scatter_(
             dim=1,
             index=indices_expanded,
-            src=torch.full_like(z_masked_seq, float(self.mask_value), device=z.device)
+            src=torch.full_like(z_masked_seq, float(self.mask_value), device=z.device),
         )
 
         # Create label with zeros everywhere, then put original values at masked positions
@@ -242,8 +233,8 @@ class MaskGiTScheduler:
         label_seq.scatter_(dim=1, index=indices_expanded, src=gathered_values)
 
         # Convert back to 5D spatial format
-        z_masked = rearrange(z_masked_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
-        label = rearrange(label_seq, 'b (h w d) c -> b c h w d', h=h, w=w, d=d)
+        z_masked = rearrange(z_masked_seq, "b (h w d) c -> b c h w d", h=h, w=w, d=d)
+        label = rearrange(label_seq, "b (h w d) c -> b c h w d", h=h, w=w, d=d)
 
         return z_masked, label
 
@@ -273,11 +264,13 @@ class MaskGiTConditionGenerator(nn.Module):
         super().__init__()
         self.contrast_embedding = nn.Embedding(
             num_embeddings=num_classes + 1,  # +1 for uncondition
-            embedding_dim=latent_dim
+            embedding_dim=latent_dim,
         )
         self.num_classes = num_classes
 
-    def forward(self, cond: torch.Tensor, cond_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, cond: torch.Tensor, cond_idx: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Generate conditional and unconditional tensors with contrast embeddings.
 
@@ -310,4 +303,3 @@ class MaskGiTConditionGenerator(nn.Module):
         cond = cond + cond_contrast
 
         return cond, uncond
-    

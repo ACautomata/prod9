@@ -7,14 +7,18 @@ from typing import Any, Dict, Mapping, cast
 import torch
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.cli.shared import (create_trainer, fit_with_resume, get_device,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    get_device,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 from prod9.generator.maskgit import MaskGiTSampler
 from prod9.training.brats_data import BraTSDataModuleStage2
 from prod9.training.config import load_config
-from prod9.training.lightning_module import (TransformerLightning,
-                                             TransformerLightningConfig)
+from prod9.training.lightning_module import TransformerLightning, TransformerLightningConfig
 
 
 def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None) -> AutoencoderFSQ:
@@ -98,6 +102,7 @@ def train_transformer(config: str) -> None:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
+
     config_path = resolve_config_path(config)
     cfg = load_validated_config(config_path, stage="transformer")
 
@@ -111,6 +116,7 @@ def train_transformer(config: str) -> None:
     if "dataset_name" in cfg.get("data", {}):
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
+
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder with explicit device
@@ -154,6 +160,7 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
 
     # Load configuration with validation
     from prod9.training.config import load_validated_config
+
     config_path = resolve_config_path(config)
     cfg = load_validated_config(config_path, stage="transformer")
 
@@ -167,6 +174,7 @@ def validate_transformer(config: str, checkpoint: str) -> Mapping[str, float]:
     if "dataset_name" in cfg.get("data", {}):
         # MedMNIST 3D dataset
         from prod9.training.medmnist3d_data import MedMNIST3DDataModuleStage2
+
         data_module = MedMNIST3DDataModuleStage2.from_config(cfg, autoencoder=None)
         autoencoder_path = cfg.get("autoencoder_path", "outputs/autoencoder_final.pt")
         # Load and set autoencoder with explicit device
@@ -290,8 +298,12 @@ def generate(
     # Override SW config with CLI parameters if provided
     default_roi_size = cast(tuple[int, int, int], tuple(sw_cfg.get("roi_size", (64, 64, 64))))
     final_sw_roi_size: tuple[int, int, int] = roi_size if roi_size is not None else default_roi_size
-    final_sw_overlap: float = overlap if overlap is not None else cast(float, sw_cfg.get("overlap", 0.5))
-    final_sw_batch_size: int = sw_batch_size if sw_batch_size is not None else cast(int, sw_cfg.get("sw_batch_size", 1))
+    final_sw_overlap: float = (
+        overlap if overlap is not None else cast(float, sw_cfg.get("overlap", 0.5))
+    )
+    final_sw_batch_size: int = (
+        sw_batch_size if sw_batch_size is not None else cast(int, sw_cfg.get("sw_batch_size", 1))
+    )
 
     # Create model with custom SW config
     # We need to pass the SW config to the model before calling setup
@@ -317,7 +329,7 @@ def generate(
     # Get configuration
     num_steps = cfg.get("num_steps", 12)
     mask_value = cfg.get("mask_value", -100)
-    scheduler_type = cfg.get("scheduler_type", "log2")
+    scheduler_type = cfg.get("scheduler_type", "log")
 
     # Create sampler
     sampler = MaskGiTSampler(
@@ -340,6 +352,7 @@ def generate(
 
             # Save generated image
             from monai.transforms.io.array import SaveImage
+
             save_image = SaveImage(output_dir=output, output_postfix=f"_sample_{i}")
             save_image(generated_image.cpu())
 
