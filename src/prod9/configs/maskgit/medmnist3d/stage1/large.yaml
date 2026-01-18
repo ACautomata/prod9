@@ -135,7 +135,7 @@ loss:
   # Adversarial loss
   adversarial:
     weight: 0.8  # Aligned with base.yaml
-    criterion: "hinge"  # Aligned with base.yaml: hinge, least_squares, bce
+    criterion: "least_squares"  # Aligned with base.yaml: hinge, least_squares, bce
 
   # Commitment loss (FSQ)
   commitment:

@@ -173,7 +173,7 @@ loss:
   # ----------------------------------------------------------------------
   adversarial:
     weight: 0.8  # Adversarial loss base weight (raised from 0.1 to match VQGAN)
-    criterion: "hinge"  # hinge, least_squares, bce
+    criterion: "least_squares"  # hinge, least_squares, bce
   
   # ----------------------------------------------------------------------
   # Commitment loss (FSQ) - NOTE: FSQ does not use commitment loss

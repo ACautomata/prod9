@@ -224,8 +224,8 @@ loss:
   # ----------------------------------------------------------------------
   adversarial:
     weight: 0.8  # Adversarial loss base weight (raised from 0.1 to match VQGAN)
-    criterion: "hinge"  # hinge, least_squares, bce, default: least_squares
-    # Note: VQGAN uses hinge loss by default, but least_squares is common alternative
+    criterion: "least_squares"  # hinge, least_squares, bce, default: least_squares
+    # Note: least_squares is recommended for medical image reconstruction stability
   
   # ----------------------------------------------------------------------
   # Commitment loss (FSQ) - NOTE: FSQ does not use commitment loss
