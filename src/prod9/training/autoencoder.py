@@ -12,13 +12,11 @@ from typing import Dict, Optional, Union, cast
 
 import pytorch_lightning as pl
 import torch
-from monai.networks.nets.patchgan_discriminator import \
-    MultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
-                                         SlidingWindowConfig)
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.training.losses import VAEGANLoss
 from prod9.training.metrics import LPIPSMetric, PSNRMetric, SSIMMetric
 from prod9.training.schedulers import create_warmup_scheduler
@@ -416,9 +414,11 @@ class AutoencoderLightning(pl.LightningModule):
         # Reconstruct - use SW if enabled
         wrapper = self._get_inference_wrapper()
         if wrapper is not None:
-            from prod9.autoencoder.padding import (compute_scale_factor,
-                                                   pad_for_sliding_window,
-                                                   unpad_from_sliding_window)
+            from prod9.autoencoder.padding import (
+                compute_scale_factor,
+                pad_for_sliding_window,
+                unpad_from_sliding_window,
+            )
 
             scale_factor = compute_scale_factor(self.autoencoder)
 

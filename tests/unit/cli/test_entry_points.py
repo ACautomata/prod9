@@ -1,7 +1,8 @@
 """Test CLI entry points."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestCLIEntryPoints:

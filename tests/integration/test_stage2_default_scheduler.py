@@ -1,12 +1,12 @@
-import tempfile
 import os
+import tempfile
 import unittest
 
 import pytest
 import torch
 
-from prod9.training.transformer import TransformerLightning
 from prod9.generator.maskgit import MaskGiTSampler
+from prod9.training.transformer import TransformerLightning
 
 
 class TestStage2DefaultScheduler(unittest.TestCase):

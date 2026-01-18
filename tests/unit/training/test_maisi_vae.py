@@ -5,10 +5,9 @@ Tests for MAISI VAELightning with discriminator, perceptual loss,
 and adversarial loss components.
 """
 
+import unittest
 from typing import Any, Dict, Optional, cast
 from unittest.mock import MagicMock, patch
-
-import unittest
 
 import torch
 import torch.nn as nn

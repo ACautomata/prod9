@@ -9,17 +9,17 @@ import os
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-import torch
 import numpy as np
+import torch
 
 from prod9.training.brats_data import (
     BraTSDataModuleStage1,
     BraTSDataModuleStage2,
+    PreEncodedSample,
     _CachedRandomModalityDataset,
     _PreEncodedDataset,
-    PreEncodedSample,
 )
 
 

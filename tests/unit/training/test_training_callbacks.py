@@ -8,9 +8,9 @@ by logging gradient norms after each backward pass.
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.training.callbacks import GradientNormLogging

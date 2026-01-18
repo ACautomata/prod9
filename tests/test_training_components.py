@@ -7,15 +7,16 @@ This test module covers:
 - DataModules: BraTS stage 1 and stage 2 data loading
 """
 
+import shutil
+import tempfile
+from typing import Any, Dict, cast
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
+
 import pytest
 import torch
-import tempfile
-import shutil
-from typing import Any, Dict, cast
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
 
 from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import PSNRMetric, SSIMMetric, LPIPSMetric
+from prod9.training.metrics import LPIPSMetric, PSNRMetric, SSIMMetric
 
 
 class TestVAEGANLoss:
@@ -446,8 +447,8 @@ class TestDataModuleStage2:
 
     def test_stage2_set_autoencoder(self, temp_data_dir, mock_autoencoder):
         """Test setting the autoencoder."""
-        from prod9.training.brats_data import BraTSDataModuleStage2
         from prod9.autoencoder.inference import AutoencoderInferenceWrapper
+        from prod9.training.brats_data import BraTSDataModuleStage2
 
         dm = BraTSDataModuleStage2(data_dir=temp_data_dir)
         dm.set_autoencoder(mock_autoencoder)

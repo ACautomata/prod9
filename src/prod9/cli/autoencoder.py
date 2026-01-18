@@ -6,15 +6,18 @@ from typing import Any, Dict, Mapping
 
 import torch
 
-from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
-                                         SlidingWindowConfig)
-from prod9.cli.shared import (create_trainer, fit_with_resume, get_device,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    get_device,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 from prod9.training.brats_data import BraTSDataModuleStage1
 from prod9.training.config import load_config
-from prod9.training.lightning_module import (AutoencoderLightning,
-                                             AutoencoderLightningConfig)
+from prod9.training.lightning_module import AutoencoderLightning, AutoencoderLightningConfig
 
 
 def train_autoencoder(config: str) -> None:
@@ -244,9 +247,11 @@ def infer_autoencoder(
     image = image.unsqueeze(0).to(device)  # Add batch dimension
 
     # Get scale_factor and apply padding
-    from prod9.autoencoder.padding import (compute_scale_factor,
-                                           pad_for_sliding_window,
-                                           unpad_from_sliding_window)
+    from prod9.autoencoder.padding import (
+        compute_scale_factor,
+        pad_for_sliding_window,
+        unpad_from_sliding_window,
+    )
 
     scale_factor = compute_scale_factor(model.autoencoder)
 

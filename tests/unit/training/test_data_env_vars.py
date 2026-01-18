@@ -40,7 +40,7 @@ class TestConfigEnvVars(unittest.TestCase):
 
     def test_resolve_env_var_nested(self) -> None:
         """Test environment variable in nested config."""
-        from prod9.training.config import _replace_env_variables, _parse_yaml_config
+        from prod9.training.config import _parse_yaml_config, _replace_env_variables
 
         os.environ["DATA_DIR"] = "/data"
         config_str = '''
@@ -56,6 +56,7 @@ class TestConfigEnvVars(unittest.TestCase):
     def test_load_config_with_env_vars(self) -> None:
         """Test load_config resolves environment variables."""
         import tempfile
+
         import yaml
 
         from prod9.training.config import load_config

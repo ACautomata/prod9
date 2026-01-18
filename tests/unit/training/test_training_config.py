@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from prod9.training.config import (
-    load_config,
-    save_config,
-    load_validated_config,
     get_default_config,
+    load_config,
+    load_validated_config,
+    save_config,
 )
 
 

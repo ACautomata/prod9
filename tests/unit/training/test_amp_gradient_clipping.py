@@ -21,11 +21,12 @@ class TestAMPGradientClipping(unittest.TestCase):
 
     def test_optimizer_step_exists(self):
         """Test that _optimizer_step method exists and works."""
-        from prod9.training.autoencoder import AutoencoderLightning
-        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from monai.networks.nets.patchgan_discriminator import (
             MultiScalePatchDiscriminator,
         )
+
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.training.autoencoder import AutoencoderLightning
 
         mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
         mock_autoencoder.get_last_layer.return_value = nn.Parameter(torch.randn(10))
@@ -54,11 +55,12 @@ class TestAMPGradientClipping(unittest.TestCase):
 
     def test_optimizer_step_with_scheduler(self):
         """Test that _optimizer_step calls scheduler when warmup is enabled."""
-        from prod9.training.autoencoder import AutoencoderLightning
-        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from monai.networks.nets.patchgan_discriminator import (
             MultiScalePatchDiscriminator,
         )
+
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.training.autoencoder import AutoencoderLightning
 
         mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
         mock_autoencoder.get_last_layer.return_value = nn.Parameter(torch.randn(10))
@@ -97,11 +99,12 @@ class TestAMPGradientClipping(unittest.TestCase):
 
     def test_autoencoder_lightning_initialization(self):
         """Test that AutoencoderLightning initializes correctly."""
-        from prod9.training.autoencoder import AutoencoderLightning
-        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from monai.networks.nets.patchgan_discriminator import (
             MultiScalePatchDiscriminator,
         )
+
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.training.autoencoder import AutoencoderLightning
 
         mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
         mock_autoencoder.get_last_layer.return_value = nn.Parameter(torch.randn(10))
@@ -119,11 +122,12 @@ class TestAMPGradientClipping(unittest.TestCase):
 
     def test_manual_optimization_mode(self):
         """Test that manual optimization is enabled."""
-        from prod9.training.autoencoder import AutoencoderLightning
-        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from monai.networks.nets.patchgan_discriminator import (
             MultiScalePatchDiscriminator,
         )
+
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.training.autoencoder import AutoencoderLightning
 
         mock_autoencoder = MagicMock(spec=AutoencoderFSQ)
         mock_autoencoder.get_last_layer.return_value = nn.Parameter(torch.randn(10))

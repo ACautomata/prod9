@@ -159,9 +159,9 @@ def load_validated_config(
     MAISIControlNetFullConfig: type[Any] | None = None
     try:
         from prod9.training.config_schema import (
-            MAISIVAEFullConfig,
-            MAISIDiffusionFullConfig,
             MAISIControlNetFullConfig,
+            MAISIDiffusionFullConfig,
+            MAISIVAEFullConfig,
         )
         MAISI_SCHEMAS_AVAILABLE = True
     except ImportError:
@@ -206,8 +206,8 @@ def get_default_config(stage: str = "autoencoder") -> Dict[str, Any]:
     """
     from prod9.training.config_schema import (
         AutoencoderFullConfig,
-        TransformerFullConfig,
         DataConfig,
+        TransformerFullConfig,
     )
 
     if stage == "autoencoder":

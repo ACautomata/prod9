@@ -6,8 +6,8 @@ for use in the prod9 framework.
 """
 
 from prod9.diffusion.diffusion_model import DiffusionModelRF
-from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
 from prod9.diffusion.sampling import RectifiedFlowSampler
+from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
 
 __all__ = [
     "DiffusionModelRF",

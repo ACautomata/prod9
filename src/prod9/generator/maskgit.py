@@ -1,8 +1,9 @@
+import math
+import random
+
 import torch
 import torch.nn as nn
 from einops import rearrange
-import random
-import math
 
 from prod9.generator.transformer import TransformerDecoder
 

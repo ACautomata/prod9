@@ -8,9 +8,12 @@ from YAML configuration files.
 from typing import Any, Dict, Tuple
 
 from prod9.diffusion.diffusion_model import DiffusionModelRF
-from prod9.training.config_schema import (MAISIDiffusionFullConfig,
-                                          ModelConfig, RectifiedFlowConfig,
-                                          TrainingConfig)
+from prod9.training.config_schema import (
+    MAISIDiffusionFullConfig,
+    ModelConfig,
+    RectifiedFlowConfig,
+    TrainingConfig,
+)
 from prod9.training.maisi_diffusion import MAISIDiffusionLightning
 
 

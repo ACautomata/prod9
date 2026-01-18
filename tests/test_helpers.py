@@ -9,9 +9,10 @@ This module provides:
 
 from __future__ import annotations
 
-from typing import Dict, Any, TypedDict, Callable
-import torch
+from typing import Any, Callable, Dict, TypedDict
+
 import pytest
+import torch
 
 
 # === TypedDict Definitions for Configuration ===

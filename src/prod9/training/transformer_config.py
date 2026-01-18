@@ -4,7 +4,7 @@ Configuration class for TransformerLightning.
 Helper class to create TransformerLightning from config dictionary.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 import torch.nn as nn
 

@@ -6,6 +6,7 @@ MONAI's MultiScalePatchDiscriminator implementation.
 """
 
 import unittest
+
 import torch
 import torch.nn as nn
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator

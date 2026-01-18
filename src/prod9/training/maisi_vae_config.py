@@ -7,14 +7,16 @@ from YAML configuration files.
 
 from typing import Any, Dict, Tuple
 
-from monai.networks.nets.patchgan_discriminator import \
-    MultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
-from prod9.training.config_schema import (DiscriminatorConfig,
-                                          MAISIAutoencoderModelConfig,
-                                          MAISIVAEFullConfig,
-                                          MAISIVAELossConfig, TrainingConfig)
+from prod9.training.config_schema import (
+    DiscriminatorConfig,
+    MAISIAutoencoderModelConfig,
+    MAISIVAEFullConfig,
+    MAISIVAELossConfig,
+    TrainingConfig,
+)
 from prod9.training.maisi_vae import MAISIVAELightning
 
 

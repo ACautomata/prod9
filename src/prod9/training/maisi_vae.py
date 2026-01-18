@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Dict, Optional, cast
 
 import pytorch_lightning as pl
 import torch
-from monai.networks.nets.patchgan_discriminator import \
-    MultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 from pytorch_lightning.utilities.types import STEP_OUTPUT
+
 # Import Optimizer for runtime use (not just type checking)
 from torch.optim import Optimizer
 

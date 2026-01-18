@@ -6,9 +6,13 @@ from typing import Mapping
 
 import torch
 
-from prod9.cli.shared import (create_trainer, fit_with_resume,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 from prod9.training.maisi_vae import MAISIVAELightning
 from prod9.training.maisi_vae_config import MAISIVAELightningConfig
 
@@ -181,11 +185,12 @@ def infer_maisi_vae(
     """
     setup_environment()
 
-    from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
-                                             SlidingWindowConfig)
-    from prod9.autoencoder.padding import (compute_scale_factor,
-                                           pad_for_sliding_window,
-                                           unpad_from_sliding_window)
+    from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
+    from prod9.autoencoder.padding import (
+        compute_scale_factor,
+        pad_for_sliding_window,
+        unpad_from_sliding_window,
+    )
     from prod9.training.config import load_validated_config
 
     config_path = resolve_config_path(config)

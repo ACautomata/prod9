@@ -1,8 +1,9 @@
-from einops import rearrange
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 from .modules import AdaLNZeroBlock, SinCosPosEmbed
+
 
 class TransformerDecoder(nn.Module):
     def __init__(

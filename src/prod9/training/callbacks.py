@@ -6,9 +6,9 @@ This module provides custom callbacks for training stability monitoring.
 
 from typing import Any, Optional, cast
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 
 

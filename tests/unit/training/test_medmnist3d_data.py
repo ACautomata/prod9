@@ -18,10 +18,12 @@ import numpy as np
 import pytest
 import torch
 
-from prod9.training.medmnist3d_data import (MedMNIST3DDataModuleStage1,
-                                            MedMNIST3DDataModuleStage2,
-                                            _MedMNIST3DStage1Dataset,
-                                            _MedMNIST3DStage2Dataset)
+from prod9.training.medmnist3d_data import (
+    MedMNIST3DDataModuleStage1,
+    MedMNIST3DDataModuleStage2,
+    _MedMNIST3DStage1Dataset,
+    _MedMNIST3DStage2Dataset,
+)
 
 
 class TestMedMNIST3DStage1Dataset:

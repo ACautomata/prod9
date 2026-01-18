@@ -7,9 +7,9 @@ import torch
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.autoencoder.padding import (
     compute_scale_factor,
-    validate_config,
     pad_for_sliding_window,
     unpad_from_sliding_window,
+    validate_config,
 )
 
 

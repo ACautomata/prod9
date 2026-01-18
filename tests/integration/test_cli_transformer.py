@@ -137,8 +137,9 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_validate_command_output_type(self):
         """Test that validate functions return correct type."""
+        from typing import Mapping, get_type_hints
+
         from prod9.cli.transformer import validate_transformer
-        from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(validate_transformer)
@@ -146,8 +147,9 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
+        from typing import Mapping, get_type_hints
+
         from prod9.cli.transformer import test_transformer
-        from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(test_transformer)
@@ -199,9 +201,9 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_train_transformer_loads_and_sets_autoencoder(self):
         """Test that train_transformer loads autoencoder and sets it on DataModule."""
+        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
         from prod9.cli.transformer import train_transformer
         from prod9.training.brats_data import BraTSDataModuleStage2
-        from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 
         # Create a real (but minimal) autoencoder
         # Note: channels must be multiple of norm_num_groups (default 32)
@@ -233,8 +235,9 @@ class TestTransformerCLI(unittest.TestCase):
             for modality in ["t1", "t1ce", "t2", "flair"]:
                 filepath = os.path.join(subject_dir, f"{subject_id}_{modality}.nii.gz")
                 # Create a minimal valid NIfTI file
-                import numpy as np
                 import gzip
+
+                import numpy as np
 
                 # Write minimal data (not a valid NIfTI, but enough to skip file not found errors)
                 with gzip.open(filepath, "wb") as f:
@@ -276,8 +279,8 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_validate_transformer_loads_and_sets_autoencoder(self):
         """Test that validate_transformer loads autoencoder and sets it on DataModule."""
-        from prod9.cli.transformer import validate_transformer
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.cli.transformer import validate_transformer
 
         # Create and save autoencoder
         # Note: channels must be multiple of norm_num_groups (default 32)
@@ -308,8 +311,9 @@ class TestTransformerCLI(unittest.TestCase):
             os.makedirs(subject_dir, exist_ok=True)
             for modality in ["t1", "t1ce", "t2", "flair"]:
                 filepath = os.path.join(subject_dir, f"{subject_id}_{modality}.nii.gz")
-                import numpy as np
                 import gzip
+
+                import numpy as np
 
                 with gzip.open(filepath, "wb") as f:
                     f.write(np.zeros((16, 16, 16), dtype=np.float32).tobytes())
@@ -346,8 +350,8 @@ class TestTransformerCLI(unittest.TestCase):
 
     def test_test_transformer_loads_and_sets_autoencoder(self):
         """Test that test_transformer loads autoencoder and sets it on DataModule."""
-        from prod9.cli.transformer import test_transformer
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+        from prod9.cli.transformer import test_transformer
 
         # Create and save autoencoder
         # Note: channels must be multiple of norm_num_groups (default 32)
@@ -378,8 +382,9 @@ class TestTransformerCLI(unittest.TestCase):
             os.makedirs(subject_dir, exist_ok=True)
             for modality in ["t1", "t1ce", "t2", "flair"]:
                 filepath = os.path.join(subject_dir, f"{subject_id}_{modality}.nii.gz")
-                import numpy as np
                 import gzip
+
+                import numpy as np
 
                 with gzip.open(filepath, "wb") as f:
                     f.write(np.zeros((16, 16, 16), dtype=np.float32).tobytes())

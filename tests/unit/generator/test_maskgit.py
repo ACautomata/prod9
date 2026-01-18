@@ -5,13 +5,14 @@ This module contains comprehensive tests for the MaskGIT implementation,
 including unit tests, integration tests, and edge case tests.
 """
 
-import pytest
-import torch
 import math
 from unittest.mock import Mock
+
+import pytest
+import torch
 from einops import rearrange
 
-from prod9.generator.maskgit import MaskGiTSampler, MaskGiTScheduler, MaskGiTConditionGenerator
+from prod9.generator.maskgit import MaskGiTConditionGenerator, MaskGiTSampler, MaskGiTScheduler
 
 
 @pytest.fixture

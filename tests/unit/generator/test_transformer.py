@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from prod9.generator.transformer import TransformerDecoder
+
 from ...test_helpers import get_test_device
 
 

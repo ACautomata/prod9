@@ -10,10 +10,10 @@ import os
 import random
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, cast
 
-import torch
-from torch.utils.data import DataLoader, Dataset
 import pytorch_lightning as pl
+import torch
 from monai.transforms.compose import Compose
+from torch.utils.data import DataLoader, Dataset
 
 from prod9.training.brats_data import MODALITY_KEYS, _get_brats_files
 
@@ -389,7 +389,9 @@ def Orientationd(keys, axcodes):
 
 def ScaleIntensityRanged(keys, a_min, a_max, b_min, b_max, clip):
     """Scale intensity range with MONAI ScaleIntensityRanged."""
-    from monai.transforms.intensity.dictionary import ScaleIntensityRanged as MONAIScaleIntensityRanged
+    from monai.transforms.intensity.dictionary import (
+        ScaleIntensityRanged as MONAIScaleIntensityRanged,
+    )
 
     return MONAIScaleIntensityRanged(
         keys=keys,
@@ -410,7 +412,9 @@ def CropForegroundd(keys, source_key):
 
 def RandCropByPosNegLabeld(keys, label_key, spatial_size, pos, neg, num_samples):
     """Random crop by label with MONAI RandCropByPosNegLabeld."""
-    from monai.transforms.croppad.dictionary import RandCropByPosNegLabeld as MONAIRandCropByPosNegLabeld
+    from monai.transforms.croppad.dictionary import (
+        RandCropByPosNegLabeld as MONAIRandCropByPosNegLabeld,
+    )
 
     return MONAIRandCropByPosNegLabeld(
         keys=keys,

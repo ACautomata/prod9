@@ -1,9 +1,10 @@
 from typing import Sequence, cast
-from sympy import false
+
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 from monai.apps.generation.maisi.networks.autoencoderkl_maisi import AutoencoderKlMaisi
+from sympy import false
 
 
 class FiniteScalarQuantizer(nn.Module):

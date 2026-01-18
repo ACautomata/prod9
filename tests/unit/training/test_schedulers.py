@@ -11,7 +11,7 @@ import unittest
 import torch
 import torch.nn as nn
 
-from prod9.training.schedulers import create_warmup_scheduler, WarmupCosineScheduler
+from prod9.training.schedulers import WarmupCosineScheduler, create_warmup_scheduler
 
 
 class TestWarmupScheduler(unittest.TestCase):

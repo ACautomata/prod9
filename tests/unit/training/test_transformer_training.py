@@ -7,9 +7,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from prod9.training.transformer import TransformerLightning
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.generator.transformer import TransformerDecoder
+from prod9.training.transformer import TransformerLightning
 
 
 class TestTransformerInit(unittest.TestCase):

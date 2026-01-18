@@ -5,9 +5,13 @@ from typing import Mapping
 
 import torch
 
-from prod9.cli.shared import (create_trainer, fit_with_resume,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 from prod9.training.maisi_diffusion import MAISIDiffusionLightning
 from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
 

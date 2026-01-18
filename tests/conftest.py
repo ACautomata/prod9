@@ -5,23 +5,24 @@ This file contains global pytest configuration and fixtures that are available
 to all test files without explicit import.
 """
 
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Any, Callable, Dict, Generator, List, Union
+
 import pytest
 import torch
-import tempfile
-import shutil
-from pathlib import Path
-from typing import Generator, Dict, Any, Union, List, Callable
 
 from .test_helpers import (
-    get_test_device,
-    get_minimal_system_config,
-    SystemTestConfig,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_LATENT_DIMS,
+    DEFAULT_SPATIAL_DIMS,
     AutoencoderConfigDict,
     DiscriminatorConfigDict,
+    SystemTestConfig,
     TrainingConfigDict,
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_SPATIAL_DIMS,
-    DEFAULT_LATENT_DIMS,
+    get_minimal_system_config,
+    get_test_device,
 )
 
 

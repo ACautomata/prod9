@@ -7,13 +7,15 @@ from YAML configuration files.
 
 from typing import Any, Dict, Tuple
 
-from prod9.controlnet.condition_encoder import (ConditionEncoder,
-                                                MultiConditionEncoder)
+from prod9.controlnet.condition_encoder import ConditionEncoder, MultiConditionEncoder
 from prod9.controlnet.controlnet_model import ControlNetRF
-from prod9.training.config_schema import (ControlNetConditionConfig,
-                                          MAISIControlNetFullConfig,
-                                          ModelConfig, RectifiedFlowConfig,
-                                          TrainingConfig)
+from prod9.training.config_schema import (
+    ControlNetConditionConfig,
+    MAISIControlNetFullConfig,
+    ModelConfig,
+    RectifiedFlowConfig,
+    TrainingConfig,
+)
 
 
 def _get_metric_ranges_from_data(data_config: Any) -> Tuple[float, float]:

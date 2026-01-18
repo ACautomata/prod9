@@ -7,8 +7,7 @@ Helper class to create LightningModule from config dictionary.
 from typing import Any, Dict, Tuple
 
 import torch
-from monai.networks.nets.patchgan_discriminator import \
-    MultiScalePatchDiscriminator
+from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
 from prod9.training.autoencoder import AutoencoderLightning

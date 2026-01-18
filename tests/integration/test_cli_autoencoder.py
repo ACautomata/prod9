@@ -71,8 +71,9 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_main_help(self):
         """Test CLI main help command."""
-        from prod9.cli.autoencoder import main
         import argparse
+
+        from prod9.cli.autoencoder import main
 
         # Mock sys.argv to simulate --help
         with patch("sys.argv", ["prod9-train-autoencoder", "--help"]):
@@ -105,8 +106,9 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_infer_command_output_type(self):
         """Test that infer functions return correct type."""
+        from typing import Mapping, get_type_hints
+
         from prod9.cli.autoencoder import validate_autoencoder
-        from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(validate_autoencoder)
@@ -114,8 +116,9 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_test_command_output_type(self):
         """Test that test functions return correct type."""
+        from typing import Mapping, get_type_hints
+
         from prod9.cli.autoencoder import test_autoencoder
-        from typing import get_type_hints, Mapping
 
         # Check return type annotation is Mapping[str, float]
         hints = get_type_hints(test_autoencoder)
@@ -123,8 +126,9 @@ class TestAutoencoderCLI(unittest.TestCase):
 
     def test_infer_sliding_window_config_type(self):
         """Test that sliding window config is properly typed."""
-        from prod9.autoencoder.inference import SlidingWindowConfig
         from typing import get_type_hints
+
+        from prod9.autoencoder.inference import SlidingWindowConfig
 
         # Check SlidingWindowConfig has device attribute
         hints = get_type_hints(SlidingWindowConfig.__init__)

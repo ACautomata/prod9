@@ -6,12 +6,15 @@ from typing import Mapping, cast
 
 import torch
 
-from prod9.cli.shared import (create_trainer, fit_with_resume,
-                              resolve_config_path, resolve_last_checkpoint,
-                              setup_environment)
+from prod9.cli.shared import (
+    create_trainer,
+    fit_with_resume,
+    resolve_config_path,
+    resolve_last_checkpoint,
+    setup_environment,
+)
 from prod9.training.controlnet_lightning import ControlNetLightning
-from prod9.training.maisi_controlnet_config import \
-    MAISIControlNetLightningConfig
+from prod9.training.maisi_controlnet_config import MAISIControlNetLightningConfig
 
 
 def train_maisi_controlnet(config: str) -> None:

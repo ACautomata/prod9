@@ -10,9 +10,9 @@ This module implements any-to-any cross-modality generation with:
 import random
 from typing import Dict, Optional
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ

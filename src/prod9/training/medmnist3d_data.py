@@ -478,9 +478,7 @@ class MedMNIST3DDataModuleStage1(pl.LightningDataModule):
             Compose or None: Augmentation transform pipeline (None for validation)
         """
         from monai.transforms.intensity.dictionary import RandShiftIntensityd
-        from monai.transforms.spatial.dictionary import (RandFlipd,
-                                                         RandRotated,
-                                                         RandZoomd)
+        from monai.transforms.spatial.dictionary import RandFlipd, RandRotated, RandZoomd
 
         # No augmentation for validation
         if not train or self.augmentation is None or not self.augmentation.get("enabled", False):

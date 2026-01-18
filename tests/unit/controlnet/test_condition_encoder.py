@@ -1,5 +1,5 @@
-import torch
 import pytest
+import torch
 
 from prod9.controlnet.condition_encoder import ConditionEncoder, MultiConditionEncoder
 

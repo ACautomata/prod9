@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import os
 import random
-from typing import Dict, List, Tuple, Optional, Union, Any, TypedDict, cast, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
-import torch
-from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
-from monai.transforms.compose import Compose
-from monai.transforms.io.dictionary import LoadImaged
-from monai.transforms.utility.dictionary import EnsureChannelFirstd
-from monai.transforms.spatial.dictionary import Spacingd, Orientationd, RandFlipd, RandRotate90d
-from monai.transforms.intensity.dictionary import ScaleIntensityRanged, RandShiftIntensityd
-from monai.transforms.croppad.dictionary import CropForegroundd, RandCropByPosNegLabeld
-from monai.transforms.utility.dictionary import EnsureTyped
+import torch
+
 # Use correct import path for CacheDataset (MONAI v1.2+)
 from monai.data.dataset import CacheDataset
+from monai.transforms.compose import Compose
+from monai.transforms.croppad.dictionary import CropForegroundd, RandCropByPosNegLabeld
+from monai.transforms.intensity.dictionary import RandShiftIntensityd, ScaleIntensityRanged
+from monai.transforms.io.dictionary import LoadImaged
+from monai.transforms.spatial.dictionary import Orientationd, RandFlipd, RandRotate90d, Spacingd
+from monai.transforms.utility.dictionary import EnsureChannelFirstd, EnsureTyped
+from torch.utils.data import DataLoader, Dataset
 
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 
@@ -650,6 +650,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
         # Resource diagnostics for multiprocessing debugging
         try:
             import resource
+
             import psutil
 
             # Check file descriptor limits
@@ -866,6 +867,7 @@ class BraTSDataModuleStage1(pl.LightningDataModule):
 
         # Diagnostics for DataLoader configuration
         import os
+
         import torch
 
         print(f"[BraTSDataModuleStage1] Creating DataLoader with:")
@@ -1098,6 +1100,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
         # Resource diagnostics for multiprocessing debugging
         try:
             import resource
+
             import psutil
 
             # Check file descriptor limits
@@ -1307,6 +1310,7 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
 
         # Diagnostics for DataLoader configuration
         import os
+
         import torch
 
         print(f"[BraTSDataModuleStage2] Creating DataLoader with:")

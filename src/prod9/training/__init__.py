@@ -9,19 +9,12 @@ This module provides training utilities for:
 - MAISI Stage 3: ControlNet conditional generation
 """
 
-from prod9.training.config import load_config
-from prod9.training.losses import VAEGANLoss
-from prod9.training.metrics import (
-    PSNRMetric,
-    SSIMMetric,
-    LPIPSMetric,
-)
 from prod9.training.brats_data import (
+    MODALITY_KEYS,
     BraTSDataModuleStage1,
     BraTSDataModuleStage2,
-    MODALITY_KEYS,
 )
-# Callbacks are now handled by standard PyTorch Lightning callbacks
+from prod9.training.config import load_config
 
 # Lightning modules - always import, let ImportError propagate if dependencies missing
 from prod9.training.lightning_module import (
@@ -30,16 +23,25 @@ from prod9.training.lightning_module import (
     TransformerLightning,
     TransformerLightningConfig,
 )
+from prod9.training.losses import VAEGANLoss
+from prod9.training.metrics import (
+    LPIPSMetric,
+    PSNRMetric,
+    SSIMMetric,
+)
+
+# Callbacks are now handled by standard PyTorch Lightning callbacks
+
 
 # MAISI modules
 try:
-    from prod9.training.maisi_vae import MAISIVAELightning
-    from prod9.training.maisi_vae_config import MAISIVAELightningConfig
-    from prod9.training.maisi_diffusion import MAISIDiffusionLightning
-    from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
+    from prod9.training.brats_controlnet_data import BraTSControlNetDataModule
     from prod9.training.controlnet_lightning import ControlNetLightning
     from prod9.training.maisi_controlnet_config import MAISIControlNetLightningConfig
-    from prod9.training.brats_controlnet_data import BraTSControlNetDataModule
+    from prod9.training.maisi_diffusion import MAISIDiffusionLightning
+    from prod9.training.maisi_diffusion_config import MAISIDiffusionLightningConfig
+    from prod9.training.maisi_vae import MAISIVAELightning
+    from prod9.training.maisi_vae_config import MAISIVAELightningConfig
     MAISI_AVAILABLE = True
 except ImportError:
     MAISI_AVAILABLE = False

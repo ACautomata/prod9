@@ -13,8 +13,7 @@ import torch.nn as nn
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
-from prod9.autoencoder.inference import (AutoencoderInferenceWrapper,
-                                         SlidingWindowConfig)
+from prod9.autoencoder.inference import AutoencoderInferenceWrapper, SlidingWindowConfig
 from prod9.diffusion.diffusion_model import DiffusionModelRF
 from prod9.diffusion.sampling import RectifiedFlowSampler
 from prod9.diffusion.scheduler import RectifiedFlowSchedulerRF
