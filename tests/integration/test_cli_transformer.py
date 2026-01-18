@@ -20,6 +20,7 @@ class TestTransformerCLI(unittest.TestCase):
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _create_minimal_config(self, config_path: str) -> None:
@@ -53,7 +54,7 @@ class TestTransformerCLI(unittest.TestCase):
                 "val_check_interval": 100,
             },
             "sampler": {
-                "scheduler_type": "log2",
+                "scheduler_type": "log",
                 "steps": 6,
                 "mask_value": -100,
             },
@@ -102,7 +103,9 @@ class TestTransformerCLI(unittest.TestCase):
         from prod9.cli.transformer import main
 
         # Mock sys.argv with non-existent config
-        with patch("sys.argv", ["prod9-train-transformer", "train", "--config", "nonexistent.yaml"]):
+        with patch(
+            "sys.argv", ["prod9-train-transformer", "train", "--config", "nonexistent.yaml"]
+        ):
             with self.assertRaises(FileNotFoundError):
                 main()
 
@@ -232,8 +235,9 @@ class TestTransformerCLI(unittest.TestCase):
                 # Create a minimal valid NIfTI file
                 import numpy as np
                 import gzip
+
                 # Write minimal data (not a valid NIfTI, but enough to skip file not found errors)
-                with gzip.open(filepath, 'wb') as f:
+                with gzip.open(filepath, "wb") as f:
                     f.write(np.zeros((16, 16, 16), dtype=np.float32).tobytes())
 
         # Mock the trainer to avoid actual training
@@ -261,10 +265,14 @@ class TestTransformerCLI(unittest.TestCase):
 
         # Verify torch.load was called to load the autoencoder
         # If autoencoder was not loaded, this would fail at DataModule.setup()
-        self.assertTrue(len(torch_load_calls) > 0, "torch.load should be called to load autoencoder")
+        self.assertTrue(
+            len(torch_load_calls) > 0, "torch.load should be called to load autoencoder"
+        )
         # Verify the autoencoder path was used
         load_args = [call[0][0] for call in torch_load_calls]
-        self.assertIn(autoencoder_path, load_args, "autoencoder_path should be passed to torch.load")
+        self.assertIn(
+            autoencoder_path, load_args, "autoencoder_path should be passed to torch.load"
+        )
 
     def test_validate_transformer_loads_and_sets_autoencoder(self):
         """Test that validate_transformer loads autoencoder and sets it on DataModule."""
@@ -302,7 +310,8 @@ class TestTransformerCLI(unittest.TestCase):
                 filepath = os.path.join(subject_dir, f"{subject_id}_{modality}.nii.gz")
                 import numpy as np
                 import gzip
-                with gzip.open(filepath, 'wb') as f:
+
+                with gzip.open(filepath, "wb") as f:
                     f.write(np.zeros((16, 16, 16), dtype=np.float32).tobytes())
 
         # Mock the trainer
@@ -327,9 +336,13 @@ class TestTransformerCLI(unittest.TestCase):
                         pass
 
         # Verify torch.load was called to load the autoencoder
-        self.assertTrue(len(torch_load_calls) > 0, "torch.load should be called to load autoencoder")
+        self.assertTrue(
+            len(torch_load_calls) > 0, "torch.load should be called to load autoencoder"
+        )
         load_args = [call[0][0] for call in torch_load_calls]
-        self.assertIn(autoencoder_path, load_args, "autoencoder_path should be passed to torch.load")
+        self.assertIn(
+            autoencoder_path, load_args, "autoencoder_path should be passed to torch.load"
+        )
 
     def test_test_transformer_loads_and_sets_autoencoder(self):
         """Test that test_transformer loads autoencoder and sets it on DataModule."""
@@ -367,7 +380,8 @@ class TestTransformerCLI(unittest.TestCase):
                 filepath = os.path.join(subject_dir, f"{subject_id}_{modality}.nii.gz")
                 import numpy as np
                 import gzip
-                with gzip.open(filepath, 'wb') as f:
+
+                with gzip.open(filepath, "wb") as f:
                     f.write(np.zeros((16, 16, 16), dtype=np.float32).tobytes())
 
         # Mock the trainer
@@ -392,9 +406,13 @@ class TestTransformerCLI(unittest.TestCase):
                         pass
 
         # Verify torch.load was called to load the autoencoder
-        self.assertTrue(len(torch_load_calls) > 0, "torch.load should be called to load autoencoder")
+        self.assertTrue(
+            len(torch_load_calls) > 0, "torch.load should be called to load autoencoder"
+        )
         load_args = [call[0][0] for call in torch_load_calls]
-        self.assertIn(autoencoder_path, load_args, "autoencoder_path should be passed to torch.load")
+        self.assertIn(
+            autoencoder_path, load_args, "autoencoder_path should be passed to torch.load"
+        )
 
 
 if __name__ == "__main__":

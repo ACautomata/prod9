@@ -20,6 +20,7 @@ class TestLoadAutoencoder(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_load_autoencoder_with_export_format(self):
@@ -38,20 +39,23 @@ class TestLoadAutoencoder(unittest.TestCase):
         )
 
         export_path = Path(self.temp_dir) / "autoencoder.pt"
-        torch.save({
-            "state_dict": autoencoder.state_dict(),
-            "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": [2, 2, 2, 2],
-                "num_channels": [32, 64],
-                "attention_levels": [False, False],
-                "num_res_blocks": [1, 1],
-                "norm_num_groups": 32,
-                "num_splits": 1,
-            }
-        }, export_path)
+        torch.save(
+            {
+                "state_dict": autoencoder.state_dict(),
+                "config": {
+                    "spatial_dims": 3,
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "levels": [2, 2, 2, 2],
+                    "num_channels": [32, 64],
+                    "attention_levels": [False, False],
+                    "num_res_blocks": [1, 1],
+                    "norm_num_groups": 32,
+                    "num_splits": 1,
+                },
+            },
+            export_path,
+        )
 
         loaded = _load_autoencoder(str(export_path))
 
@@ -62,10 +66,13 @@ class TestLoadAutoencoder(unittest.TestCase):
     def test_load_autoencoder_with_missing_levels_raises_error(self):
         """Test ValueError when config missing 'levels'."""
         invalid_config_path = Path(self.temp_dir) / "no_levels.pt"
-        torch.save({
-            "state_dict": {},
-            "config": {"spatial_dims": 3, "in_channels": 1}  # Missing 'levels'
-        }, invalid_config_path)
+        torch.save(
+            {
+                "state_dict": {},
+                "config": {"spatial_dims": 3, "in_channels": 1},  # Missing 'levels'
+            },
+            invalid_config_path,
+        )
 
         with self.assertRaises(ValueError) as ctx:
             _load_autoencoder(str(invalid_config_path))
@@ -95,20 +102,23 @@ class TestLoadAutoencoder(unittest.TestCase):
         )
 
         export_path = Path(self.temp_dir) / "autoencoder_cpu.pt"
-        torch.save({
-            "state_dict": autoencoder.state_dict(),
-            "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": [2, 2, 2, 2],
-                "num_channels": [32, 64],
-                "attention_levels": [False, False],
-                "num_res_blocks": [1, 1],
-                "norm_num_groups": 32,
-                "num_splits": 1,
-            }
-        }, export_path)
+        torch.save(
+            {
+                "state_dict": autoencoder.state_dict(),
+                "config": {
+                    "spatial_dims": 3,
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "levels": [2, 2, 2, 2],
+                    "num_channels": [32, 64],
+                    "attention_levels": [False, False],
+                    "num_res_blocks": [1, 1],
+                    "norm_num_groups": 32,
+                    "num_splits": 1,
+                },
+            },
+            export_path,
+        )
 
         # Load on CPU
         loaded = _load_autoencoder(str(export_path), device=torch.device("cpu"))
@@ -131,7 +141,7 @@ sliding_window:
   overlap: 0.5
   sw_batch_size: 1
 num_steps: 12
-scheduler_type: log2
+scheduler_type: log
 mask_value: -100
 """)
 
@@ -140,14 +150,15 @@ mask_value: -100
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch('monai.transforms.io.array.SaveImage')
-    @patch('prod9.cli.transformer.MaskGiTSampler')
-    @patch('prod9.cli.transformer.setup_environment')
-    @patch('prod9.cli.transformer.resolve_config_path')
-    @patch('prod9.cli.transformer.load_config')
-    @patch('prod9.cli.transformer.TransformerLightningConfig')
+    @patch("monai.transforms.io.array.SaveImage")
+    @patch("prod9.cli.transformer.MaskGiTSampler")
+    @patch("prod9.cli.transformer.setup_environment")
+    @patch("prod9.cli.transformer.resolve_config_path")
+    @patch("prod9.cli.transformer.load_config")
+    @patch("prod9.cli.transformer.TransformerLightningConfig")
     def test_generate_creates_output_directory(
         self, mock_model_class, mock_load, mock_resolve, mock_setup, mock_sampler, mock_save_image
     ):
@@ -156,7 +167,7 @@ mask_value: -100
         mock_load.return_value = {
             "sliding_window": {"roi_size": [64, 64, 64], "overlap": 0.5, "sw_batch_size": 1},
             "num_steps": 12,
-            "scheduler_type": "log2",
+            "scheduler_type": "log",
             "mask_value": -100,
         }
 
@@ -176,12 +187,12 @@ mask_value: -100
 
         self.assertTrue(self.output_dir.exists())
 
-    @patch('monai.transforms.io.array.SaveImage')
-    @patch('prod9.cli.transformer.MaskGiTSampler')
-    @patch('prod9.cli.transformer.setup_environment')
-    @patch('prod9.cli.transformer.resolve_config_path')
-    @patch('prod9.cli.transformer.load_config')
-    @patch('prod9.cli.transformer.TransformerLightningConfig')
+    @patch("monai.transforms.io.array.SaveImage")
+    @patch("prod9.cli.transformer.MaskGiTSampler")
+    @patch("prod9.cli.transformer.setup_environment")
+    @patch("prod9.cli.transformer.resolve_config_path")
+    @patch("prod9.cli.transformer.load_config")
+    @patch("prod9.cli.transformer.TransformerLightningConfig")
     def test_generate_with_roi_override(
         self, mock_model_class, mock_load, mock_resolve, mock_setup, mock_sampler, mock_save_image
     ):
@@ -190,7 +201,7 @@ mask_value: -100
         mock_load.return_value = {
             "sliding_window": {"roi_size": [64, 64, 64], "overlap": 0.5, "sw_batch_size": 1},
             "num_steps": 12,
-            "scheduler_type": "log2",
+            "scheduler_type": "log",
             "mask_value": -100,
         }
 
@@ -217,48 +228,84 @@ mask_value: -100
 class TestTransformerCLIMain(unittest.TestCase):
     """Test main CLI entry point."""
 
-    @patch('sys.argv', ['prog', 'train', '--config', 'test.yaml'])
-    @patch('prod9.cli.transformer.train_transformer')
+    @patch("sys.argv", ["prog", "train", "--config", "test.yaml"])
+    @patch("prod9.cli.transformer.train_transformer")
     def test_main_train_command(self, mock_train):
         """Test main with train command."""
         main()
-        mock_train.assert_called_once_with('test.yaml')
+        mock_train.assert_called_once_with("test.yaml")
 
-    @patch('sys.argv', ['prog', 'validate', '--config', 'test.yaml', '--checkpoint', 'model.ckpt'])
-    @patch('prod9.cli.transformer.validate_transformer')
+    @patch("sys.argv", ["prog", "validate", "--config", "test.yaml", "--checkpoint", "model.ckpt"])
+    @patch("prod9.cli.transformer.validate_transformer")
     def test_main_validate_command(self, mock_validate):
         """Test main with validate command."""
         main()
-        mock_validate.assert_called_once_with('test.yaml', 'model.ckpt')
+        mock_validate.assert_called_once_with("test.yaml", "model.ckpt")
 
-    @patch('sys.argv', ['prog', 'test', '--config', 'test.yaml', '--checkpoint', 'model.ckpt'])
-    @patch('prod9.cli.transformer.test_transformer')
+    @patch("sys.argv", ["prog", "test", "--config", "test.yaml", "--checkpoint", "model.ckpt"])
+    @patch("prod9.cli.transformer.test_transformer")
     def test_main_test_command(self, mock_test):
         """Test main with test command."""
         main()
-        mock_test.assert_called_once_with('test.yaml', 'model.ckpt')
+        mock_test.assert_called_once_with("test.yaml", "model.ckpt")
 
-    @patch('sys.argv', ['prog', 'generate', '--config', 'test.yaml', '--checkpoint', 'model.ckpt',
-                        '--output', '/tmp/out', '--num-samples', '5'])
-    @patch('prod9.cli.transformer.generate')
+    @patch(
+        "sys.argv",
+        [
+            "prog",
+            "generate",
+            "--config",
+            "test.yaml",
+            "--checkpoint",
+            "model.ckpt",
+            "--output",
+            "/tmp/out",
+            "--num-samples",
+            "5",
+        ],
+    )
+    @patch("prod9.cli.transformer.generate")
     def test_main_generate_command(self, mock_generate):
         """Test main with generate command."""
         main()
         mock_generate.assert_called_once_with(
-            'test.yaml', 'model.ckpt', '/tmp/out', 5,
-            roi_size=None, overlap=None, sw_batch_size=None
+            "test.yaml",
+            "model.ckpt",
+            "/tmp/out",
+            5,
+            roi_size=None,
+            overlap=None,
+            sw_batch_size=None,
         )
 
-    @patch('sys.argv', ['prog', 'generate', '--config', 'test.yaml', '--checkpoint', 'model.ckpt',
-                        '--output', '/tmp/out', '--num-samples', '5',
-                        '--roi-size', '32', '32', '32', '--overlap', '0.25'])
-    @patch('prod9.cli.transformer.generate')
+    @patch(
+        "sys.argv",
+        [
+            "prog",
+            "generate",
+            "--config",
+            "test.yaml",
+            "--checkpoint",
+            "model.ckpt",
+            "--output",
+            "/tmp/out",
+            "--num-samples",
+            "5",
+            "--roi-size",
+            "32",
+            "32",
+            "32",
+            "--overlap",
+            "0.25",
+        ],
+    )
+    @patch("prod9.cli.transformer.generate")
     def test_main_generate_with_cli_overrides(self, mock_generate):
         """Test generate command with parameter overrides."""
         main()
         call_args = mock_generate.call_args
-        self.assertEqual(call_args.kwargs['roi_size'], (32, 32, 32))
-        self.assertEqual(call_args.kwargs['overlap'], 0.25)
+        self.assertEqual(call_args.kwargs["roi_size"], (32, 32, 32))
+        self.assertEqual(call_args.kwargs["overlap"], 0.25)
 
 
 class TestTransformerCLISignature(unittest.TestCase):

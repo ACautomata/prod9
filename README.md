@@ -560,7 +560,7 @@ transformer = TransformerDecoder(
 sampler = MaskGiTSampler(
     steps=12,
     mask_value=-100,
-    scheduler_type="log2",  # or "linear", "sqrt"
+    scheduler_type="log",  # default; also supports "log2" alias
 )
 
 # Generate tokens

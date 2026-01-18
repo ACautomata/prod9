@@ -42,7 +42,7 @@ class TestTransformerTraining:
             },
             "num_modalities": 4,
             "contrast_embed_dim": 32,
-            "scheduler_type": "log2",
+            "scheduler_type": "log",
             "num_steps": 6,  # Smaller for testing
             "mask_value": -100,
         }
@@ -84,7 +84,9 @@ class TestTransformerTraining:
         assert output.shape == expected_shape
         assert torch.isfinite(output).all()
 
-    def test_conditional_generation(self, minimal_config: Dict[str, Any], temp_output_dir: str, device: torch.device):
+    def test_conditional_generation(
+        self, minimal_config: Dict[str, Any], temp_output_dir: str, device: torch.device
+    ):
         """Test that conditional generation works."""
         config = minimal_config.copy()
         model = TransformerLightningConfig.from_config(config)
@@ -93,6 +95,7 @@ class TestTransformerTraining:
 
         # Create fake autoencoder for testing (since we don't have a trained one)
         from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
+
         autoencoder = AutoencoderFSQ(
             spatial_dims=3,
             levels=(4, 4, 4),
@@ -132,7 +135,9 @@ class TestTransformerTraining:
         # Verify condition_generator exists (replaces label_embeddings)
         assert model.condition_generator is not None
         assert model.condition_generator.num_classes == 4
-        assert model.condition_generator.contrast_embedding.embedding_dim == 192  # Match cond_dim in config
+        assert (
+            model.condition_generator.contrast_embedding.embedding_dim == 192
+        )  # Match cond_dim in config
 
         # Verify conditional and unconditional outputs have correct shape and are finite
         cond = torch.randn(2, model.latent_channels, 4, 4, 4, device=device)

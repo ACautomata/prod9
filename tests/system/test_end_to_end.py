@@ -84,7 +84,7 @@ class TestEndToEnd:
             },
             "num_modalities": 4,
             "contrast_embed_dim": 32,
-            "scheduler_type": "log2",
+            "scheduler_type": "log",
             "num_steps": 6,
             "mask_value": -100,
         }

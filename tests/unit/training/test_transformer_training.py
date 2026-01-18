@@ -1,10 +1,3 @@
-"""
-Unit tests for TransformerLightning training methods.
-
-Tests for training_step, validation_step, configure_optimizers, sample,
-_log_samples, and error paths.
-"""
-
 import tempfile
 import unittest
 from typing import Any, cast
@@ -20,23 +13,26 @@ from prod9.generator.transformer import TransformerDecoder
 
 
 class TestTransformerInit(unittest.TestCase):
-    """Test TransformerLightning initialization."""
-
     def test_initialization_with_defaults(self):
-        """Test initialization with default parameters."""
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
             # Create minimal valid checkpoint
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-                "num_channels": [32, 64],
-                "attention_levels": [False, False],
-                "num_res_blocks": [1, 1],
-                "norm_num_groups": 32,
-                "num_splits": 1,
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                        "num_channels": [32, 64],
+                        "attention_levels": [False, False],
+                        "num_res_blocks": [1, 1],
+                        "norm_num_groups": 32,
+                        "num_splits": 1,
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         model = TransformerLightning(
@@ -47,7 +43,7 @@ class TestTransformerInit(unittest.TestCase):
         self.assertEqual(model.num_classes, 4)
         self.assertEqual(model.contrast_embed_dim, 64)
         self.assertEqual(model.unconditional_prob, 0.1)
-        self.assertEqual(model.scheduler_type, "log2")
+        self.assertEqual(model.scheduler_type, "log")
         self.assertEqual(model.num_steps, 12)
         self.assertEqual(model.mask_value, -100)
         self.assertEqual(model.lr, 1e-4)
@@ -56,14 +52,19 @@ class TestTransformerInit(unittest.TestCase):
         self.assertIsNone(model.transformer)
 
     def test_initialization_with_custom_params(self):
-        """Test initialization with custom parameters."""
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         model = TransformerLightning(
@@ -90,14 +91,19 @@ class TestTransformerInit(unittest.TestCase):
         self.assertEqual(model.sample_every_n_steps, 50)
 
     def test_initialization_with_transformer(self):
-        """Test initialization with pre-configured transformer."""
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         custom_transformer = MagicMock()
@@ -116,12 +122,18 @@ class TestGetAutoencoder(unittest.TestCase):
     def test_get_autoencoder_raises_when_none(self):
         """Test RuntimeError when autoencoder not loaded."""
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         model = TransformerLightning(
@@ -137,6 +149,7 @@ class TestGetAutoencoder(unittest.TestCase):
         """Test _get_autoencoder returns wrapper when loaded."""
         # Create a persistent checkpoint file
         import os
+
         autoencoder = AutoencoderFSQ(
             spatial_dims=3,
             levels=[2, 2, 2, 2],
@@ -150,10 +163,13 @@ class TestGetAutoencoder(unittest.TestCase):
         )
 
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save({
-                "state_dict": autoencoder.state_dict(),
-                "config": autoencoder._init_config,
-            }, f.name)
+            torch.save(
+                {
+                    "state_dict": autoencoder.state_dict(),
+                    "config": autoencoder._init_config,
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         try:
@@ -176,12 +192,18 @@ class TestForward(unittest.TestCase):
     def test_forward_raises_when_transformer_none(self):
         """Test RuntimeError when transformer not initialized."""
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         model = TransformerLightning(
@@ -198,12 +220,18 @@ class TestForward(unittest.TestCase):
     def test_forward_with_mock_transformer(self):
         """Test forward passes through to transformer."""
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
-            torch.save({"state_dict": {}, "config": {
-                "spatial_dims": 3,
-                "in_channels": 1,
-                "out_channels": 1,
-                "levels": (2, 2, 2, 2),
-            }}, f.name)
+            torch.save(
+                {
+                    "state_dict": {},
+                    "config": {
+                        "spatial_dims": 3,
+                        "in_channels": 1,
+                        "out_channels": 1,
+                        "levels": (2, 2, 2, 2),
+                    },
+                },
+                f.name,
+            )
             checkpoint_path = f.name
 
         mock_transformer = MagicMock()
@@ -228,19 +256,26 @@ class TestTrainingStep(unittest.TestCase):
 
     def setUp(self):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
-        torch.save({"state_dict": {}, "config": {
-            "spatial_dims": 3,
-            "in_channels": 1,
-            "out_channels": 1,
-            "levels": (2, 2, 2, 2),
-        }}, self.temp_file.name)
+        torch.save(
+            {
+                "state_dict": {},
+                "config": {
+                    "spatial_dims": 3,
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "levels": (2, 2, 2, 2),
+                },
+            },
+            self.temp_file.name,
+        )
         self.checkpoint_path = self.temp_file.name
 
     def tearDown(self):
         import os
+
         os.unlink(self.temp_file.name)
 
-    @patch('random.randint')
+    @patch("random.randint")
     def test_training_step_raises_when_transformer_none(self, mock_randint):
         """Test RuntimeError when transformer is None."""
         mock_randint.return_value = 1  # Mock the random step
@@ -262,7 +297,7 @@ class TestTrainingStep(unittest.TestCase):
 
         self.assertIn("Transformer not initialized", str(ctx.exception))
 
-    @patch('random.randint')
+    @patch("random.randint")
     def test_training_step_logs_loss(self, mock_randint):
         """Test training_step computes and logs loss."""
         mock_randint.return_value = 1  # Mock the random step
@@ -299,13 +334,14 @@ class TestTrainingStep(unittest.TestCase):
 
         # training_step should return a dict with loss
         from typing import cast
+
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
         self.assertIn("loss", result_dict)
         # Verify transformer was called
         mock_transformer.assert_called_once()
 
-    @patch('random.randint')
+    @patch("random.randint")
     def test_training_step_handles_5d_target_indices(self, mock_randint):
         """Test training_step handles 5D target_indices from MedMNIST3D pipeline."""
         mock_randint.return_value = 1  # Mock the random step
@@ -336,10 +372,11 @@ class TestTrainingStep(unittest.TestCase):
         result = model.training_step(batch, 0)
 
         from typing import cast
+
         result_dict = cast(dict, result)
         self.assertIn("loss", result_dict)
 
-    @patch('random.randint')
+    @patch("random.randint")
     def test_training_step_uses_condition_generator(self, mock_randint):
         """Test training_step uses MaskGiTConditionGenerator."""
         mock_randint.return_value = 1
@@ -371,6 +408,7 @@ class TestTrainingStep(unittest.TestCase):
         result = model.training_step(batch, 0)
 
         from typing import cast
+
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
         self.assertIn("loss", result_dict)
@@ -392,14 +430,18 @@ class TestValidationStep(unittest.TestCase):
             norm_num_groups=32,
             num_splits=1,
         )
-        torch.save({
-            "state_dict": autoencoder.state_dict(),
-            "config": autoencoder._init_config,
-        }, self.temp_file.name)
+        torch.save(
+            {
+                "state_dict": autoencoder.state_dict(),
+                "config": autoencoder._init_config,
+            },
+            self.temp_file.name,
+        )
         self.checkpoint_path = self.temp_file.name
 
     def tearDown(self):
         import os
+
         os.unlink(self.temp_file.name)
 
     def test_validation_step_raises_when_autoencoder_none(self):
@@ -420,10 +462,12 @@ class TestValidationStep(unittest.TestCase):
 
         self.assertIn("Autoencoder not loaded", str(ctx.exception))
 
-    @patch('prod9.generator.maskgit.MaskGiTSampler')
-    @patch('prod9.training.metrics.FIDMetric3D.update')
-    @patch('prod9.training.metrics.FIDMetric3D.compute')
-    def test_validation_step_logs_metrics(self, mock_fid_compute, mock_fid_update, mock_sampler_class):
+    @patch("prod9.generator.maskgit.MaskGiTSampler")
+    @patch("prod9.training.metrics.FIDMetric3D.update")
+    @patch("prod9.training.metrics.FIDMetric3D.compute")
+    def test_validation_step_logs_metrics(
+        self, mock_fid_compute, mock_fid_update, mock_sampler_class
+    ):
         """Test validation_step calls metric update and returns modality_metrics key."""
         # Mock FID to avoid issues with autoencoder decode
         mock_fid_compute.return_value = torch.tensor(1.0)
@@ -437,7 +481,9 @@ class TestValidationStep(unittest.TestCase):
 
         # Mock sampler - sample() should return a generated image
         mock_sampler = MagicMock()
-        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)  # [B, C, H, W, D] generated image
+        mock_sampler.sample.return_value = torch.randn(
+            1, 1, 64, 64, 64
+        )  # [B, C, H, W, D] generated image
         mock_sampler_class.return_value = mock_sampler
 
         batch = {
@@ -452,14 +498,15 @@ class TestValidationStep(unittest.TestCase):
         # validation_step should return a dict with modality_metrics key
         # (actual metrics like FID, IS are computed at epoch end)
         from typing import cast
+
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
         self.assertIn("modality_metrics", result_dict)
         # Verify FID and IS metrics were updated (computed at epoch end)
         mock_fid_update.assert_called_once()
 
-    @patch('prod9.generator.maskgit.MaskGiTSampler')
-    @patch('prod9.training.transformer.TransformerLightning.logger', new=None)
+    @patch("prod9.generator.maskgit.MaskGiTSampler")
+    @patch("prod9.training.transformer.TransformerLightning.logger", new=None)
     def test_validation_step_skips_logging_when_logger_none(self, mock_sampler_class):
         """Test validation_step skips _log_samples when logger is None."""
         model = TransformerLightning(
@@ -470,7 +517,9 @@ class TestValidationStep(unittest.TestCase):
 
         # Mock sampler - sample() should return a generated image
         mock_sampler = MagicMock()
-        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)  # [B, C, H, W, D] generated image
+        mock_sampler.sample.return_value = torch.randn(
+            1, 1, 64, 64, 64
+        )  # [B, C, H, W, D] generated image
         mock_sampler_class.return_value = mock_sampler
 
         batch = {
@@ -483,6 +532,7 @@ class TestValidationStep(unittest.TestCase):
         # Should not raise
         result = model.validation_step(batch, 0)
         from typing import cast
+
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
         self.assertIn("modality_metrics", result_dict)
@@ -493,16 +543,23 @@ class TestConfigureOptimizers(unittest.TestCase):
 
     def setUp(self):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
-        torch.save({"state_dict": {}, "config": {
-            "spatial_dims": 3,
-            "in_channels": 1,
-            "out_channels": 1,
-            "levels": (2, 2, 2, 2),
-        }}, self.temp_file.name)
+        torch.save(
+            {
+                "state_dict": {},
+                "config": {
+                    "spatial_dims": 3,
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "levels": (2, 2, 2, 2),
+                },
+            },
+            self.temp_file.name,
+        )
         self.checkpoint_path = self.temp_file.name
 
     def tearDown(self):
         import os
+
         os.unlink(self.temp_file.name)
 
     def test_configure_optimizers_raises_when_transformer_none(self):
@@ -529,7 +586,11 @@ class TestConfigureOptimizers(unittest.TestCase):
         )
 
         # Patch condition_generator.parameters to return parameters
-        with patch.object(model.condition_generator, 'parameters', return_value=[torch.randn(1, requires_grad=True)]):
+        with patch.object(
+            model.condition_generator,
+            "parameters",
+            return_value=[torch.randn(1, requires_grad=True)],
+        ):
             result = model.configure_optimizers()
             # When warmup_enabled=False, returns optimizer directly
             optimizer = cast(torch.optim.AdamW, result)
@@ -555,14 +616,18 @@ class TestSample(unittest.TestCase):
             norm_num_groups=32,
             num_splits=1,
         )
-        torch.save({
-            "state_dict": autoencoder.state_dict(),
-            "config": autoencoder._init_config,
-        }, self.temp_file.name)
+        torch.save(
+            {
+                "state_dict": autoencoder.state_dict(),
+                "config": autoencoder._init_config,
+            },
+            self.temp_file.name,
+        )
         self.checkpoint_path = self.temp_file.name
 
     def tearDown(self):
         import os
+
         os.unlink(self.temp_file.name)
 
     def test_sample_raises_when_autoencoder_none(self):
@@ -578,7 +643,7 @@ class TestSample(unittest.TestCase):
 
         self.assertIn("Autoencoder not loaded", str(ctx.exception))
 
-    @patch('prod9.generator.maskgit.MaskGiTSampler')
+    @patch("prod9.generator.maskgit.MaskGiTSampler")
     def test_sample_generates_image(self, mock_sampler_class):
         """Test sample generates image using MaskGiTSampler."""
         model = TransformerLightning(
@@ -598,7 +663,7 @@ class TestSample(unittest.TestCase):
         self.assertEqual(result.shape, (1, 1, 64, 64, 64))
         mock_sampler.sample.assert_called_once()
 
-    @patch('prod9.generator.maskgit.MaskGiTSampler')
+    @patch("prod9.generator.maskgit.MaskGiTSampler")
     def test_sample_unconditional(self, mock_sampler_class):
         """Test sample with is_unconditional=True."""
         model = TransformerLightning(
@@ -622,19 +687,26 @@ class TestLogSamples(unittest.TestCase):
 
     def setUp(self):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
-        torch.save({"state_dict": {}, "config": {
-            "spatial_dims": 3,
-            "in_channels": 1,
-            "out_channels": 1,
-            "levels": (2, 2, 2, 2),
-        }}, self.temp_file.name)
+        torch.save(
+            {
+                "state_dict": {},
+                "config": {
+                    "spatial_dims": 3,
+                    "in_channels": 1,
+                    "out_channels": 1,
+                    "levels": (2, 2, 2, 2),
+                },
+            },
+            self.temp_file.name,
+        )
         self.checkpoint_path = self.temp_file.name
 
     def tearDown(self):
         import os
+
         os.unlink(self.temp_file.name)
 
-    @patch('prod9.training.transformer.TransformerLightning.logger', new=None)
+    @patch("prod9.training.transformer.TransformerLightning.logger", new=None)
     def test_log_samples_returns_when_logger_none(self):
         """Test _log_samples returns early when logger is None."""
         model = TransformerLightning(
@@ -646,7 +718,7 @@ class TestLogSamples(unittest.TestCase):
         # Should not raise
         model._log_samples(generated, "test_modality")
 
-    @patch('prod9.training.transformer.TransformerLightning.logger')
+    @patch("prod9.training.transformer.TransformerLightning.logger")
     def test_log_samples_returns_when_experiment_none(self, mock_logger):
         """Test _log_samples returns early when experiment is None."""
         mock_logger.experiment = None
