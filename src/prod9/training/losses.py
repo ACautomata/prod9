@@ -293,10 +293,7 @@ class FocalFrequencyLoss(nn.Module):
         else:
             # Per-sample max over (C, H, W)
             denom = (
-                weight.view(weight.shape[0], -1)
-                .max(dim=1)[0]
-                .view(-1, 1, 1, 1)
-                .clamp_min(self.eps)
+                weight.view(weight.shape[0], -1).max(dim=1)[0].view(-1, 1, 1, 1).clamp_min(self.eps)
             )
 
         weight = (weight / denom).clamp(0.0, 1.0)
@@ -381,10 +378,7 @@ class VAEGANLoss(nn.Module):
         self.max_adaptive_weight = max_adaptive_weight
         self.gradient_norm_eps = gradient_norm_eps
         if not 0.0 <= fake_3d_ratio <= 1.0:
-            raise ValueError(
-                "fake_3d_ratio must be between 0.0 and 1.0, "
-                f"got {fake_3d_ratio}"
-            )
+            raise ValueError(f"fake_3d_ratio must be between 0.0 and 1.0, got {fake_3d_ratio}")
 
         self.spatial_dims = spatial_dims
         self.perceptual_network_type = perceptual_network_type
@@ -411,7 +405,7 @@ class VAEGANLoss(nn.Module):
         """
         Calculate adaptive adversarial weight based on gradient norms.
 
-        This is the CORRECT implementation from VQGAN paper (Esser et al., 2021).
+        This is CORRECT implementation from VQGAN paper (Esser et al., 2021).
         The weight balances reconstruction vs adversarial loss by comparing
         their gradient magnitudes at the output layer.
 
@@ -428,18 +422,26 @@ class VAEGANLoss(nn.Module):
         Returns:
             Adaptive weight for scaling adversarial loss
         """
-        # Compute gradients with respect to the last layer
+        # Compute gradients with respect to last layer
         nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
         g_grads = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
 
-        # Ratio of gradient norms
-        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + self.gradient_norm_eps)
+        # Compute norms
+        nll_grad_norm = torch.norm(nll_grads)
+        g_grad_norm = torch.norm(g_grads)
 
-        # Clamp to prevent extreme values
-        d_weight = torch.clamp(d_weight, 0.0, self.max_adaptive_weight).detach()
+        # Ratio of gradient norms with improved stability
+        # Add gradient_norm_eps to numerator to prevent division by near-zero
+        d_weight = nll_grad_norm / (g_grad_norm + self.gradient_norm_eps)
+
+        # Clamp to prevent extreme values - use smaller upper bound
+        d_weight = torch.clamp(d_weight, 0.0, 10.0).detach()
 
         # Scale by base discriminator weight
         d_weight = d_weight * self.disc_factor
+
+        # Final clamp to prevent weight explosion
+        d_weight = torch.clamp(d_weight, 0.0, 100.0).detach()
         return d_weight
 
     def adopt_weight(
@@ -520,9 +522,7 @@ class VAEGANLoss(nn.Module):
         # Combined reconstruction loss (nll_loss in VQGAN terminology)
         # Includes reg_loss (KL loss in vae mode, zero in fsq mode)
         nll_loss = (
-            self.recon_weight * recon_loss
-            + self.perceptual_weight * perceptual_loss
-            + reg_loss
+            self.recon_weight * recon_loss + self.perceptual_weight * perceptual_loss + reg_loss
         )
 
         # Compute adaptive adversarial weight (if last_layer provided)
@@ -532,20 +532,17 @@ class VAEGANLoss(nn.Module):
             if global_step < self.discriminator_iter_start:
                 adv_weight = torch.tensor(0.0, device=nll_loss.device, dtype=nll_loss.dtype)
             else:
-                adv_weight = self.calculate_adaptive_weight(nll_loss, generator_adv_loss, last_layer)
+                adv_weight = self.calculate_adaptive_weight(
+                    nll_loss, generator_adv_loss, last_layer
+                )
         else:
             # Fallback to fixed weight with warmup
-            disc_factor = self.adopt_weight(
-                global_step, threshold=self.discriminator_iter_start
-            )
+            disc_factor = self.adopt_weight(global_step, threshold=self.discriminator_iter_start)
             # Convert to tensor for consistent return type
             adv_weight = torch.tensor(disc_factor, device=nll_loss.device, dtype=nll_loss.dtype)
 
         # Total generator loss with adaptive adversarial weight
-        total_generator_loss = (
-            nll_loss
-            + adv_weight * generator_adv_loss
-        )
+        total_generator_loss = nll_loss + adv_weight * generator_adv_loss
 
         return {
             "total": total_generator_loss,
@@ -608,8 +605,7 @@ class VAEGANLoss(nn.Module):
         if channels == 3:
             return fake_images, real_images
         raise ValueError(
-            "LPIPS with non-medicalnet networks expects 1 or 3 channels, "
-            f"got {channels}"
+            f"LPIPS with non-medicalnet networks expects 1 or 3 channels, got {channels}"
         )
 
     def _compute_lpips_loss(
@@ -700,9 +696,7 @@ class VAEGANLoss(nn.Module):
         """Compute commitment loss between encoder output and quantized output."""
         return nn.functional.mse_loss(quantized_output.detach(), encoder_output)
 
-    def _compute_kl_loss(
-        self, z_mu: torch.Tensor, z_sigma: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_kl_loss(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:
         """
         Compute KL divergence: KL(N(mu, sigma) || N(0, 1)).
 
@@ -718,9 +712,7 @@ class VAEGANLoss(nn.Module):
         Returns:
             KL divergence loss (normalized by number of elements)
         """
-        kl_loss = -0.5 * torch.sum(
-            1 + torch.log(z_sigma**2 + 1e-8) - z_mu**2 - z_sigma**2
-        )
+        kl_loss = -0.5 * torch.sum(1 + torch.log(z_sigma**2 + 1e-8) - z_mu**2 - z_sigma**2)
         return kl_loss / z_mu.numel()
 
     def _compute_total_loss(

@@ -211,15 +211,11 @@ class AutoencoderLightning(pl.LightningModule):
                 sw_batch_size=self.sw_batch_size,
                 mode=self.sw_mode,
             )
-            self._inference_wrapper = AutoencoderInferenceWrapper(
-                self.autoencoder, sw_config
-            )
+            self._inference_wrapper = AutoencoderInferenceWrapper(self.autoencoder, sw_config)
 
         return self._inference_wrapper
 
-    def training_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> STEP_OUTPUT:
+    def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> STEP_OUTPUT:
         """
         Training step for single-modality reconstruction.
 
@@ -280,6 +276,10 @@ class AutoencoderLightning(pl.LightningModule):
         Returns:
             Discriminator loss
         """
+        # Apply warmup: skip discriminator training entirely during warmup period
+        if self.global_step < self.vaegan_loss.discriminator_iter_start:
+            return torch.tensor(0.0, device=real_images.device, dtype=real_images.dtype)
+
         # Generate fake images
         with torch.no_grad():
             fake_images, _, _ = self.autoencoder(real_images)
@@ -290,10 +290,6 @@ class AutoencoderLightning(pl.LightningModule):
 
         # Compute discriminator loss
         disc_loss = self.vaegan_loss.discriminator_loss(real_outputs, fake_outputs)
-
-        # Apply warmup
-        if self.global_step < self.vaegan_loss.discriminator_iter_start:
-            disc_loss = disc_loss * 0.0
 
         # Set marker for gradient norm logging callback
         self._current_backward_branch = "disc"
@@ -306,9 +302,7 @@ class AutoencoderLightning(pl.LightningModule):
 
         return disc_loss
 
-    def _train_generator(
-        self, real_images: torch.Tensor, opt_g
-    ) -> Dict[str, torch.Tensor]:
+    def _train_generator(self, real_images: torch.Tensor, opt_g) -> Dict[str, torch.Tensor]:
         """
         Train generator (autoencoder) with adaptive adversarial weight.
 
@@ -344,9 +338,7 @@ class AutoencoderLightning(pl.LightningModule):
 
         return losses
 
-    def _optimizer_step(
-        self, optimizer: torch.optim.Optimizer, optimizer_idx: int
-    ) -> None:
+    def _optimizer_step(self, optimizer: torch.optim.Optimizer, optimizer_idx: int) -> None:
         """Helper to step optimizer with Lightning step tracking.
 
         Args:
@@ -373,7 +365,10 @@ class AutoencoderLightning(pl.LightningModule):
             schedulers = self.lr_schedulers()
             if isinstance(schedulers, list) and schedulers and optimizer_idx < len(schedulers):
                 # For discriminator (optimizer_idx=1), only step scheduler after warmup period
-                if optimizer_idx == 1 and self.global_step < self.vaegan_loss.discriminator_iter_start:
+                if (
+                    optimizer_idx == 1
+                    and self.global_step < self.vaegan_loss.discriminator_iter_start
+                ):
                     pass
                 else:
                     scheduler = schedulers[optimizer_idx]
@@ -386,13 +381,15 @@ class AutoencoderLightning(pl.LightningModule):
 
     def _optimizer_zero_grad(self, optimizer) -> None:
         """Helper to zero grad, handling both LightningOptimizer and raw optimizers."""
-        if hasattr(optimizer, 'optimizer'):
+        if hasattr(optimizer, "optimizer"):
             optimizer.optimizer.zero_grad()
         else:
             optimizer.zero_grad()
 
     def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int  # noqa: ARG002
+        self,
+        batch: Dict[str, torch.Tensor],
+        batch_idx: int,  # noqa: ARG002
     ) -> Optional[STEP_OUTPUT]:
         """
         Validation step for single-modality reconstruction.
@@ -457,7 +454,7 @@ class AutoencoderLightning(pl.LightningModule):
         if not self.logger:
             return
 
-        experiment = getattr(self.logger, 'experiment', None)
+        experiment = getattr(self.logger, "experiment", None)
         if experiment is None:
             return
 
@@ -465,7 +462,7 @@ class AutoencoderLightning(pl.LightningModule):
             reconstructed = self.forward(images)
 
         # Log first sample from batch - take middle slice for 3D visualization
-        if experiment and hasattr(experiment, 'add_image'):
+        if experiment and hasattr(experiment, "add_image"):
             # Get middle slice for 3D images (D dimension)
             d_mid = images.shape[4] // 2  # Shape: [B, C, H, W, D]
             real_2d = _denormalize(images[0, 0, :, :, d_mid])  # Shape: [H, W], [-1,1] -> [0,1]
@@ -476,24 +473,18 @@ class AutoencoderLightning(pl.LightningModule):
             recon_2d = recon_2d.unsqueeze(-1)  # Shape: [H, W, 1]
 
             experiment.add_image(
-                f"val/{modality}_real",
-                real_2d,
-                self.global_step,
-                dataformats="HWC"
+                f"val/{modality}_real", real_2d, self.global_step, dataformats="HWC"
             )
             experiment.add_image(
-                f"val/{modality}_recon",
-                recon_2d,
-                self.global_step,
-                dataformats="HWC"
+                f"val/{modality}_recon", recon_2d, self.global_step, dataformats="HWC"
             )
 
     def configure_optimizers(self):
         """Configure separate optimizers for generator and discriminator, with optional warmup."""
-        lr_g = float(getattr(self.hparams, 'lr_g', 1e-4))
-        lr_d = float(getattr(self.hparams, 'lr_d', 4e-4))
-        b1 = float(getattr(self.hparams, 'b1', 0.5))
-        b2 = float(getattr(self.hparams, 'b2', 0.999))
+        lr_g = float(getattr(self.hparams, "lr_g", 1e-4))
+        lr_d = float(getattr(self.hparams, "lr_d", 4e-4))
+        b1 = float(getattr(self.hparams, "b1", 0.5))
+        b2 = float(getattr(self.hparams, "b2", 0.999))
 
         opt_g = torch.optim.Adam(
             self.autoencoder.parameters(),
@@ -568,6 +559,6 @@ class AutoencoderLightning(pl.LightningModule):
     def on_validation_end(self) -> None:
         """Called at the end of validation."""
         if self.trainer.checkpoint_callback:
-            best_model_path = getattr(self.trainer.checkpoint_callback, 'best_model_path', '')
+            best_model_path = getattr(self.trainer.checkpoint_callback, "best_model_path", "")
             if best_model_path:
                 self.print(f"Best model: {best_model_path}")
