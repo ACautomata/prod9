@@ -7,6 +7,7 @@ This module implements any-to-any cross-modality generation with:
 - MaskGiT sampling for token prediction
 """
 
+import math
 import random
 from typing import Dict, Optional
 
@@ -54,13 +55,11 @@ class TransformerLightning(pl.LightningModule):
 
     Args:
         autoencoder_path: Path to trained Stage 1 autoencoder checkpoint
-        transformer: TransformerDecoder model
+        transformer: TransformerDecoderSingleStream model
         latent_channels: Number of latent channels (default: 4)
-        cond_channels: Number of condition channels (default: 4)
         patch_size: Patch size for transformer (default: 2)
         num_blocks: Number of transformer blocks (default: 12)
         hidden_dim: Hidden dimension (default: 512)
-        cond_dim: Condition dimension (default: 512)
         num_heads: Number of attention heads (default: 8)
         num_classes: Number of classes (default: 4). For BraTS: 4 modalities. For MedMNIST 3D: dataset-specific (e.g., 11 for OrganMNIST3D)
         contrast_embed_dim: Learnable embedding size for classes/conditions (default: 64)
@@ -68,6 +67,9 @@ class TransformerLightning(pl.LightningModule):
         num_steps: Number of sampling steps (default: 12)
         mask_value: Mask token value (default: -100)
         unconditional_prob: Probability of unconditional generation (default: 0.1)
+        use_pure_in_context: Use pure in-context architecture (default: True)
+        guidance_scale: CFG guidance scale (default: 0.1)
+        modality_dropout_prob: Modality dropout probability (default: 0.0)
         lr: Learning rate (default: 1e-4)
         beta1: Adam beta1 (default: 0.9)
         beta2: Adam beta2 (default: 0.999)
@@ -94,7 +96,6 @@ class TransformerLightning(pl.LightningModule):
         patch_size: int = 2,
         num_blocks: int = 12,
         hidden_dim: int = 512,
-        cond_dim: int = 512,
         num_heads: int = 8,
         num_classes: int = 4,
         contrast_embed_dim: int = 64,
@@ -102,6 +103,10 @@ class TransformerLightning(pl.LightningModule):
         num_steps: int = 12,
         mask_value: float = -100,
         unconditional_prob: float = 0.1,
+        # Pure in-context and CFG parameters
+        use_pure_in_context: bool = True,
+        guidance_scale: float = 0.1,
+        modality_dropout_prob: float = 0.0,
         lr: float = 1e-4,
         beta1: float = 0.9,
         beta2: float = 0.999,
@@ -130,7 +135,6 @@ class TransformerLightning(pl.LightningModule):
             "patch_size": patch_size,
             "num_blocks": num_blocks,
             "hidden_dim": hidden_dim,
-            "cond_dim": cond_dim,
             "num_heads": num_heads,
         }
 
@@ -138,6 +142,9 @@ class TransformerLightning(pl.LightningModule):
         self.num_classes = num_classes  # Unified: BraTS modalities or MedMNIST 3D classes
         self.contrast_embed_dim = contrast_embed_dim
         self.unconditional_prob = unconditional_prob
+        self.use_pure_in_context = use_pure_in_context
+        self.guidance_scale = guidance_scale
+        self.modality_dropout_prob = modality_dropout_prob
         self.scheduler_type = scheduler_type
         self.num_steps = num_steps
         self.mask_value = mask_value
@@ -157,19 +164,30 @@ class TransformerLightning(pl.LightningModule):
         self.warmup_ratio = warmup_ratio
         self.warmup_eta_min = warmup_eta_min
 
-        # MaskGiTConditionGenerator for classifier-free guidance training
-        # Note: uses latent_channels since we add embedding to the latent tensor
-        from prod9.generator.maskgit import MaskGiTConditionGenerator
+        # ModalityProcessor for in-context sequence construction
+        from prod9.generator.modality_processor import ModalityProcessor
 
-        self.condition_generator = MaskGiTConditionGenerator(
-            num_classes=num_classes,
+        self.modality_processor = ModalityProcessor(
             latent_dim=latent_channels,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            patch_size=patch_size,
         )
 
         # MaskGiTScheduler for training data augmentation
         from prod9.generator.maskgit import MaskGiTScheduler
 
         self.scheduler = MaskGiTScheduler(steps=num_steps, mask_value=mask_value)
+
+        # Create schedule function for sampling
+        from prod9.generator.maskgit import MaskGiTSampler
+
+        self._sampler_temp = MaskGiTSampler(
+            steps=num_steps,
+            mask_value=mask_value,
+            scheduler_type=scheduler_type,
+        )
+        self._schedule_fn = self._sampler_temp.f
 
         # Metrics for validation
         self.fid = FIDMetric3D()
@@ -224,14 +242,13 @@ class TransformerLightning(pl.LightningModule):
 
         # Create transformer if not provided
         if self.transformer is None:
-            from prod9.generator.transformer import TransformerDecoder
+            from prod9.generator.transformer import TransformerDecoderSingleStream
 
-            self.transformer = TransformerDecoder(
+            self.transformer = TransformerDecoderSingleStream(
                 latent_dim=self._transformer_config["latent_channels"],
                 patch_size=self._transformer_config["patch_size"],
                 num_blocks=self._transformer_config["num_blocks"],
                 hidden_dim=self._transformer_config["hidden_dim"],
-                cond_dim=self._transformer_config["cond_dim"],
                 num_heads=self._transformer_config["num_heads"],
                 codebook_size=codebook_size,  # Use actual codebook_size from levels
             )
@@ -263,20 +280,26 @@ class TransformerLightning(pl.LightningModule):
             self.autoencoder.autoencoder = self.autoencoder.autoencoder.to(self.device)
             self.autoencoder.sw_config.device = self.device
 
-    def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        context_seq: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.BoolTensor] = None,
+    ) -> torch.Tensor:
         """
         Forward pass through transformer.
 
         Args:
             x: Input latent tokens [B, C, H, W, D]
-            cond: Condition tensor [B, cond_channels, H, W, D] or None
+            context_seq: Context sequence [B, S_context, hidden_dim] or None
+            key_padding_mask: Attention mask for context [B, S_context] or None
 
         Returns:
             Reconstructed latent tokens [B, C, H, W, D]
         """
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
-        return self.transformer(x, cond)
+        return self.transformer(x, context_seq, key_padding_mask)
 
     def training_step(
         self,
@@ -284,9 +307,7 @@ class TransformerLightning(pl.LightningModule):
         batch_idx: int,  # noqa: ARG002
     ) -> STEP_OUTPUT:
         """
-        Training step with conditional generation using classifier-free guidance.
-
-        Unified for both BraTS and MedMNIST 3D datasets using MaskGiTConditionGenerator.
+        Training step with in-context learning and two-pass classifier-free guidance.
 
         Args:
             batch: Dictionary with:
@@ -303,52 +324,70 @@ class TransformerLightning(pl.LightningModule):
         Returns:
             Loss dictionary for logging
         """
-        # Unified fields for both datasets
+        # Extract batch fields
         cond_latent = batch["cond_latent"]  # [B, C, H, W, D]
         cond_idx = batch["cond_idx"]  # [B] - BraTS: modality, MedMNIST: label
         target_latent = batch["target_latent"]
         target_indices = batch["target_indices"]
 
-        # Generate both cond and uncond with contrast embeddings (unified!)
-        cond, uncond = self.condition_generator(cond_latent, cond_idx)
+        # Determine dataset type based on presence of target_modality_idx
+        is_brats = "target_modality_idx" in batch
 
-        # Probabilistic condition dropout for classifier-free guidance
-        batch_size = cond.shape[0]
-        drop_mask = torch.rand(batch_size, device=cond.device) < self.unconditional_prob
-        if drop_mask.any():
-            # Replace with unconditional for dropped samples
-            cond[drop_mask] = uncond[drop_mask]
+        # Convert batch format to ModalityProcessor format (nested lists)
+        batch_labels = []
+        batch_latents = []
 
-        # Generate masked pairs via MaskGiTScheduler
-        # target_latent is already 5D spatial format [B, C, H, W, D]
+        for i in range(cond_latent.shape[0]):
+            if is_brats:
+                # Apply modality dropout here if configured
+                if self.modality_dropout_prob > 0:
+                    # Randomly decide whether to drop source modality
+                    if torch.rand(1).item() < self.modality_dropout_prob:
+                        batch_labels.append([])
+                        batch_latents.append([])
+                    else:
+                        batch_labels.append([cond_idx[i]])
+                        batch_latents.append([cond_latent[i]])
+                else:
+                    # Single source logic for BraTS current format
+                    batch_labels.append([cond_idx[i]])
+                    batch_latents.append([cond_latent[i]])
+            else:
+                # MedMNIST (label-only)
+                batch_labels.append([])
+                batch_latents.append([])
+
+        # Determine target label
+        if is_brats:
+            target_label = batch["target_modality_idx"]
+        else:
+            # For MedMNIST, cond_idx is the class label
+            target_label = cond_idx
+
+        # Build context sequences using ModalityProcessor
+        context_seq_cond, key_padding_mask_cond = self.modality_processor(
+            batch_labels, batch_latents, target_label, is_unconditional=False
+        )
+        context_seq_uncond, key_padding_mask_uncond = self.modality_processor(
+            [], [], None, is_unconditional=True
+        )
+
+        # Generate masked pairs via MaskGiTScheduler (unchanged)
         step = random.randint(1, self.num_steps)
         mask_indices = self.scheduler.select_indices(target_latent, step)
         masked_tokens_spatial, _ = self.scheduler.generate_pair(target_latent, mask_indices)
 
-        # Get token indices for masked positions from target_indices
-        # target_indices shape: [B, S] where S = H*W*D (flattened)
-        # mask_indices shape: [B, num_masked]
-        # Gather token indices for masked positions
-
+        # Handle target_indices and mask_indices reshaping (unchanged)
         # Ensure target_indices is 2D [B, S] where S = H*W*D
-        # Handle different input shapes from the data pipeline:
-        # - 5D [B, 1, H, W, D] -> squeeze dim 1, flatten -> [B, H*W*D]
-        # - 4D [B, H, W, D] -> flatten -> [B, H*W*D]
-        # - 3D [B, S, 1] -> squeeze last dim -> [B, S]
-        # - 2D [B, S] -> already correct
         if target_indices.dim() == 5:
-            # [B, 1, H, W, D] -> [B, H, W, D] -> [B, H*W*D]
             target_indices = target_indices.squeeze(1)
             b, h, w, d = target_indices.shape
             target_indices = target_indices.view(b, h * w * d)
         elif target_indices.dim() == 4:
-            # [B, H, W, D] -> [B, H*W*D]
             b, h, w, d = target_indices.shape
             target_indices = target_indices.view(b, h * w * d)
         elif target_indices.dim() == 3:
-            # [B, S, 1] -> [B, S]
             target_indices = target_indices.squeeze(-1)
-        # else: dim == 2, already [B, S], no change needed
 
         # Ensure mask_indices is 2D [B, num_masked]
         if mask_indices.dim() == 3:
@@ -358,42 +397,65 @@ class TransformerLightning(pl.LightningModule):
 
         label_indices = torch.gather(target_indices, dim=1, index=mask_indices_for_gather)
 
-        # Forward through transformer (masked_tokens_spatial is already 5D)
+        # Two-pass CFG with batched forward passes
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
-        predicted_logits = self.transformer(masked_tokens_spatial, cond)
 
-        # Compute cross-entropy loss on masked positions only
-        b, vocab_size, h, w, d = predicted_logits.shape
+        batch_size = target_latent.shape[0]
+        device = target_latent.device
+
+        # Drop mask for unconditional generation
+        drop_mask = torch.rand(batch_size, device=device) < self.unconditional_prob
+
+        # Run full batch conditional forward
+        logits_cond_all = self.transformer(
+            masked_tokens_spatial,
+            context_seq_cond,
+            key_padding_mask=key_padding_mask_cond,
+        )
+
+        # Run full batch unconditional forward
+        logits_uncond_all = self.transformer(
+            masked_tokens_spatial,
+            context_seq_uncond,
+            key_padding_mask=key_padding_mask_uncond,
+        )
+
+        # Apply drop mask: replace cond logits with uncond where dropped
+        # This makes CFG formula produce uncond results for dropped samples
+        logits_cond_used = torch.where(
+            drop_mask.view(-1, 1, 1, 1, 1),
+            logits_uncond_all,
+            logits_cond_all,
+        )
+
+        # Apply CFG formula
+        logits = (
+            1 + self.guidance_scale
+        ) * logits_cond_used - self.guidance_scale * logits_uncond_all
+
+        # Compute cross-entropy loss on masked positions (unchanged)
+        b, vocab_size, h, w, d = logits.shape
         seq_len = h * w * d
 
         # Reshape logits: [B, codebook_size, H, W, D] -> [B, codebook_size, H*W*D]
-        predicted_flat = predicted_logits.view(b, vocab_size, seq_len)
+        predicted_flat = logits.view(b, vocab_size, seq_len)
 
         # Create target tensor with ignore_index for non-masked positions
-        # target_indices shape: [B, seq_len] (flattened token indices)
-        # mask_indices shape: [B, num_masked]
-        # label_indices shape: [B, num_masked] (token indices for masked positions)
-
-        # Initialize target with ignore_index
-        ignore_index = -100  # Standard ignore index for cross_entropy
+        ignore_index = -100
         target = torch.full(
             (b, seq_len), ignore_index, device=predicted_flat.device, dtype=torch.long
         )
 
         # Fill masked positions with token indices
-        # Scatter label_indices into target at masked positions
         target.scatter_(dim=1, index=mask_indices_for_gather, src=label_indices)
 
-        # Cross-entropy loss (automatically ignores positions with ignore_index)
-        loss_per_token = nn.functional.cross_entropy(
+        # Cross-entropy loss
+        loss = nn.functional.cross_entropy(
             predicted_flat,
             target,
             ignore_index=ignore_index,
-        )  # Scalar loss (mean over non-ignored positions)
-
-        # Normalize by number of masked tokens (already accounted by ignore_index)
-        loss = loss_per_token
+        )
 
         # Log loss
         self.log("train/loss", loss, prog_bar=True)
@@ -408,14 +470,13 @@ class TransformerLightning(pl.LightningModule):
         """
         Validation step with full sampling steps.
 
-        Unified for both BraTS and MedMNIST 3D datasets using MaskGiTConditionGenerator.
-
         Args:
             batch: Dictionary with:
                 - 'cond_latent': [B, C, H, W, D] - conditioning latent
                 - 'cond_idx': [B] - condition index (BraTS: modality, MedMNIST: label)
                 - 'target_latent': [B, C, H, W, D] - target modality latent
                 - 'target_indices': [B, H*W*D] - target token indices
+                - 'target_modality_idx': [B] - (BraTS only) target modality indices
 
             batch_idx: Batch index (unused)
 
@@ -425,29 +486,50 @@ class TransformerLightning(pl.LightningModule):
         metrics = {}
         autoencoder = self._get_autoencoder()
 
-        # Unified fields for both datasets
-        cond_latent = batch["cond_latent"]  # [B, C, H, W, D]
-        cond_idx = batch["cond_idx"]  # [B] - BraTS: modality, MedMNIST: label
+        # Extract batch fields
+        cond_latent = batch["cond_latent"]
+        cond_idx = batch["cond_idx"]
         target_latent = batch["target_latent"]
 
-        # Generate both cond and uncond with contrast embeddings (unified!)
-        cond, uncond = self.condition_generator(cond_latent, cond_idx)
+        # Determine dataset type
+        is_brats = "target_modality_idx" in batch
 
-        # Use MaskGiTSampler for generation
-        from prod9.generator.maskgit import MaskGiTSampler
+        # Determine target label
+        if is_brats:
+            target_label = batch["target_modality_idx"]
+        else:
+            target_label = cond_idx
 
-        sampler = MaskGiTSampler(
-            steps=self.num_steps,
-            mask_value=self.mask_value,
-            scheduler_type=self.scheduler_type,
+        # Build context sequences using ModalityProcessor (with source modality)
+        if is_brats:
+            batch_labels = [[cond_idx[i]] for i in range(cond_latent.shape[0])]
+            batch_latents = [[cond_latent[i]] for i in range(cond_latent.shape[0])]
+        else:
+            batch_labels = [[] for _ in range(cond_latent.shape[0])]
+            batch_latents = [[] for _ in range(cond_latent.shape[0])]
+
+        context_seq_cond, key_padding_mask_cond = self.modality_processor(
+            batch_labels, batch_latents, target_label, is_unconditional=False
         )
 
-        # Sample target tokens
+        # Custom sampling loop for new transformer interface (CFG disabled)
         with torch.no_grad():
-            # Sample with both cond and uncond for CFG
-            reconstructed_image = sampler.sample(
-                self.transformer, autoencoder, target_latent.shape, cond, uncond
-            )
+            bs, c, h, w, d = target_latent.shape
+            device = target_latent.device
+
+            # Create fully masked target
+            z = torch.full((bs, c, h, w, d), self.mask_value, device=device)
+            seq_len = h * w * d
+            last_indices = torch.arange(end=seq_len, device=device)[None, :].repeat(bs, 1)
+
+            # Iterative sampling with CFG disabled (guidance_scale=0.0)
+            for step in range(self.num_steps):
+                z, last_indices = self._sample_single_step(
+                    z, step, context_seq_cond, key_padding_mask_cond, last_indices
+                )
+
+            # Decode generated latent
+            reconstructed_image = autoencoder.decode_stage_2_outputs(z)
 
             # Decode target for comparison
             target_image = autoencoder.decode_stage_2_outputs(target_latent)
@@ -456,13 +538,94 @@ class TransformerLightning(pl.LightningModule):
             self.fid.update(reconstructed_image, target_image)
             self.is_metric.update(reconstructed_image)
 
-            metrics["modality_metrics"] = {}  # Epoch-level metrics computed later
+            metrics["modality_metrics"] = {}
 
             # Log sample images to TensorBoard (only for first batch)
             if batch_idx == 0 and self.logger is not None:
                 self._log_samples(generated_images=reconstructed_image, modality="generated")
 
         return metrics
+
+    def _sample_single_step(
+        self,
+        z: torch.Tensor,
+        step: int,
+        context_seq: torch.Tensor,
+        key_padding_mask: torch.Tensor,
+        last_indices: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Single sampling step using new transformer interface."""
+        if self.transformer is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
+
+        bs, c, h, w, d = z.shape
+        device = z.device
+        seq_len = h * w * d
+
+        # Get mask indices for current step
+        mask_indices = self.scheduler.select_indices(z, step)
+        num_masked = mask_indices.size(1)
+
+        # Get predicted logits
+        logits = self.transformer(z, context_seq, key_padding_mask=key_padding_mask)
+
+        # Process logits
+        b, vocab_size, h_out, w_out, d_out = logits.shape
+        logits_seq = logits.view(b, vocab_size, h_out * w_out * d_out).transpose(1, 2)
+
+        # Get confidence scores and token predictions
+        conf = logits_seq.softmax(-1)
+        token_id = logits_seq.argmax(-1)
+
+        # Get remaining masked positions
+        last_mask = torch.zeros_like(conf, dtype=torch.bool)
+        last_mask.scatter_(1, token_id.unsqueeze(-1), True)
+
+        # Select top-k confident positions among unmasked
+        conf_masked = conf.masked_fill(~last_mask, -1)
+        sorted_pos = conf_masked.argsort(dim=1, descending=True)
+
+        # Get positions to update based on schedule
+        num_update = int(self._schedule_fn(step / self.num_steps) * seq_len) - int(
+            self._schedule_fn((step + 1) / self.num_steps) * seq_len
+        )
+        pos = sorted_pos[:, :num_update]
+
+        # Get token IDs for update positions
+        if len(pos.shape) == 1:
+            pos = pos.unsqueeze(-1)
+        elif len(pos.shape) == 2:
+            pass
+        else:
+            pos = pos.unsqueeze(-1)
+
+        # Select token IDs
+        if len(pos.shape) == 2:
+            token_id_update = token_id.gather(1, pos)
+        else:
+            token_id_update = token_id[:, pos]
+
+        # Embed tokens and update z
+        z_seq = z.view(bs, c, h * w * d).transpose(1, 2)
+
+        # Get embeddings using autoencoder embed
+        autoencoder = self._get_autoencoder()
+        vec = autoencoder.embed(token_id_update)
+
+        # Update z at selected positions
+        z_seq.scatter_(1, pos, vec)
+
+        # Convert back to 5D
+        z = z_seq.transpose(1, 2).view(bs, c, h, w, d)
+
+        # Update last_indices
+        new_last_indices_list = []
+        for b_idx in range(last_indices.size(0)):
+            diff = last_indices[b_idx][~torch.isin(last_indices[b_idx], pos[b_idx])]
+            new_last_indices_list.append(diff)
+
+        last_indices_new = torch.stack(new_last_indices_list)
+        return z, last_indices_new
 
     def on_validation_epoch_end(self) -> None:
         """Compute epoch-level metrics (FID, IS)."""
@@ -482,7 +645,7 @@ class TransformerLightning(pl.LightningModule):
         if self.transformer is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
         optimizer = torch.optim.AdamW(
-            [*self.transformer.parameters(), *self.condition_generator.parameters()],
+            [*self.transformer.parameters(), *self.modality_processor.parameters()],
             lr=self.lr,
             betas=(self.beta1, self.beta2),
         )
@@ -543,33 +706,43 @@ class TransformerLightning(pl.LightningModule):
             # We use z_mu (unquantized) for condition generation
             _, source_latent = autoencoder.encode(source_image)
 
-            # Create source modality tensor
-            source_modality_tensor = torch.tensor(
-                [source_modality_idx], device=source_image.device, dtype=torch.long
+            # Build context sequences using ModalityProcessor
+            bs = source_latent.shape[0]
+            batch_labels = [[source_modality_idx] for _ in range(bs)]
+            batch_latents = [[source_latent[i]] for i in range(bs)]
+
+            target_label = torch.tensor(
+                [target_modality_idx], device=source_latent.device, dtype=torch.long
             )
 
-            # Generate both cond and uncond with contrast embeddings
-            cond, uncond = self.condition_generator(source_latent, source_modality_tensor)
+            context_seq_cond, key_padding_mask_cond = self.modality_processor(
+                batch_labels, batch_latents, target_label, is_unconditional=False
+            )
 
             if is_unconditional:
-                cond = uncond
+                # Use unconditional context for generation
+                context_seq = context_seq_cond
+                key_padding_mask = key_padding_mask_cond
+            else:
+                # Use conditional context for generation
+                context_seq = context_seq_cond
+                key_padding_mask = key_padding_mask_cond
 
-            # Sample using MaskGiTSampler with CFG
-            from prod9.generator.maskgit import MaskGiTSampler
+            # Create fully masked target and sample iteratively
+            c, h, w, d = source_latent.shape
+            device = source_latent.device
 
-            sampler = MaskGiTSampler(
-                steps=self.num_steps,
-                mask_value=self.mask_value,
-                scheduler_type=self.scheduler_type,
-            )
+            z = torch.full((bs, c, h, w, d), self.mask_value, device=device)
+            seq_len = h * w * d
+            last_indices = torch.arange(end=seq_len, device=device)[None, :].repeat(bs, 1)
 
-            generated_image = sampler.sample(
-                self.transformer,
-                autoencoder,
-                source_latent.shape,
-                cond,
-                uncond,
-            )
+            for step in range(self.num_steps):
+                z, last_indices = self._sample_single_step(
+                    z, step, context_seq, key_padding_mask, last_indices
+                )
+
+            # Decode generated latent
+            generated_image = autoencoder.decode_stage_2_outputs(z)
 
         self.train()
         return generated_image

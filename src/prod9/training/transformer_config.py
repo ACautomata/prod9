@@ -55,18 +55,25 @@ class TransformerLightningConfig:
         return TransformerLightning(
             autoencoder_path=config.get("autoencoder_path", "outputs/autoencoder_final.pt"),
             transformer=transformer,
-            latent_channels=transformer_config.get("latent_dim", transformer_config.get("d_model", transformer_config.get("latent_channels", 192))),
+            latent_channels=transformer_config.get(
+                "latent_dim",
+                transformer_config.get("d_model", transformer_config.get("latent_channels", 192)),
+            ),
             patch_size=transformer_config.get("patch_size", 2),
             num_blocks=transformer_config.get("num_blocks", 12),
             hidden_dim=transformer_config.get("hidden_dim", 512),
-            cond_dim=transformer_config.get("cond_dim", 512),
             num_heads=transformer_config.get("num_heads", 8),
-            num_classes=model_config.get("num_classes", 4),  # Unified: 4 for BraTS, variable for MedMNIST 3D
+            num_classes=model_config.get(
+                "num_classes", 4
+            ),  # Unified: 4 for BraTS, variable for MedMNIST 3D
             contrast_embed_dim=model_config.get("contrast_embed_dim", 64),
             scheduler_type=sampler_config.get("scheduler_type", "log"),
             num_steps=sampler_config.get("steps", 12),
             mask_value=sampler_config.get("mask_value", -100),
             unconditional_prob=unconditional_config.get("unconditional_prob", 0.1),
+            use_pure_in_context=transformer_config.get("use_pure_in_context", True),
+            guidance_scale=transformer_config.get("guidance_scale", 0.1),
+            modality_dropout_prob=transformer_config.get("modality_dropout_prob", 0.0),
             lr=optimizer_config.get("learning_rate", 1e-4),
             beta1=optimizer_config.get("beta1", 0.9),
             beta2=optimizer_config.get("beta2", 0.999),
@@ -79,15 +86,14 @@ class TransformerLightningConfig:
 
     @staticmethod
     def _create_transformer(config: Dict[str, Any]) -> nn.Module:
-        """Create TransformerDecoder from config."""
-        from prod9.generator.transformer import TransformerDecoder
+        """Create TransformerDecoderSingleStream from config."""
+        from prod9.generator.transformer import TransformerDecoderSingleStream
 
-        return TransformerDecoder(
+        return TransformerDecoderSingleStream(
             latent_dim=config.get("latent_dim", config.get("d_model", 192)),
             patch_size=config.get("patch_size", 2),
             num_blocks=config.get("num_blocks", 12),
             hidden_dim=config.get("hidden_dim", 512),
-            cond_dim=config.get("cond_dim", 512),
             num_heads=config.get("num_heads", 8),
             codebook_size=config.get("codebook_size", 512),
         )

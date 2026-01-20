@@ -1,0 +1,260 @@
+# =============================================================================
+# prod9 BraTS Stage 2 Configuration - Pure In-Context
+# Complete configuration for MaskGiT transformer training
+# Using pure in-context architecture with TransformerDecoderSingleStream
+# =============================================================================
+#
+# =============================================================================
+# Paths (must match output from stage1/base.yaml)
+# =============================================================================
+autoencoder_path: "outputs/brats_autoencoder-large.pt"
+output_dir: "outputs/brats_stage2-pure_in_context"
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  # ----------------------------------------------------------------------
+  # Transformer decoder configuration
+  # ----------------------------------------------------------------------
+  transformer:
+    latent_dim: 5  # Latent channels (must equal len(levels) for FSQ) - aligned with medmnist3d/large stage1
+    patch_size: 2  # 3D patch size
+    hidden_dim: 512  # Aligned with medmnist3d stage2 base (large model)
+    cond_dim: 512  # Aligned with medmnist3d stage2 base (large model)
+    num_heads: 8  # Aligned with medmnist3d stage2 base (large model)
+    num_blocks: 12  # Aligned with medmnist3d stage2 base (large model)
+    codebook_size: 15360  # Aligned with medmnist3d/large (8*8*6*5 for levels=[8,8,8,6,5])
+    mlp_ratio: 4.0
+    dropout: 0.1
+
+  # ----------------------------------------------------------------------
+  # Class/condition embeddings for BraTS modalities
+  # ----------------------------------------------------------------------
+  num_classes: 4  # 4 BraTS modalities: T1, T1ce, T2, FLAIR
+  contrast_embed_dim: 64  # Keep BraTS base value (4 modalities)
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  # ----------------------------------------------------------------------
+  # Optimizer settings
+  # ----------------------------------------------------------------------
+  optimizer:
+    learning_rate: 1e-4  # Learning rate
+    beta1: 0.9  # Adam beta1, default: 0.9
+    beta2: 0.96  # Adam beta2
+    weight_decay: 0.045  # Weight decay (MaskGIT default)
+
+  # ----------------------------------------------------------------------
+  # Learning rate scheduler
+  # ----------------------------------------------------------------------
+  scheduler:
+    type: "cosine"  # Options: constant, cosine, step
+      # constant: no scheduling
+      # cosine: cosine annealing (requires T_max, eta_min)
+      # step: step decay (requires step_size, gamma)
+
+    # Cosine scheduler parameters (if type: "cosine")
+    T_max: 50  # For cosine
+    eta_min: 0  # For cosine
+
+    # Step scheduler parameters (if type: "step")
+    step_size: 15  # Decay every N epochs
+    gamma: 0.1  # Multiplicative decay factor
+
+    # Warmup configuration (applies to all schedulers)
+    warmup:
+      enabled: true  # Enable learning rate warmup, default: true
+      warmup_steps: null  # Explicit warmup steps (overrides warmup_ratio)
+      warmup_ratio: 0.02  # Ratio of total_steps for warmup (2%), default: 0.02
+
+  # ----------------------------------------------------------------------
+  # Training loop settings
+  # ----------------------------------------------------------------------
+  loop:
+    sample_every_n_steps: 100  # How often to generate samples during training, default: 100
+
+  # ----------------------------------------------------------------------
+  # Training stability settings
+  # ----------------------------------------------------------------------
+  stability:
+    grad_norm_logging: true  # Log gradient norms for monitoring training health - aligned with medmnist3d/large
+    warmup_enabled: true  # Enable learning rate warmup, default: true
+    warmup_steps: null  # Auto-calculate based on warmup_ratio - aligned with medmnist3d/large
+    warmup_ratio: 0.02  # 2% of total training steps for warmup - aligned with medmnist3d/large
+
+  # ----------------------------------------------------------------------
+  # Pure In-Context Settings
+  # ----------------------------------------------------------------------
+  use_pure_in_context: true  # Enable pure in-context architecture (TransformerDecoderSingleStream)
+  guidance_scale: 0.1  # Classifier-free guidance scale for training
+  modality_dropout_prob: 0.1  # Probability of dropping source modality during training
+
+# =============================================================================
+# MaskGiT Sampler Configuration
+# =============================================================================
+sampler:
+  steps: 12
+  mask_value: -100
+  scheduler_type: "log"  # log, linear, sqrt
+  temperature: 1.0  # Sampling temperature (lower = more deterministic)
+
+# =============================================================================
+# Data Configuration
+# =============================================================================
+data:
+  # ----------------------------------------------------------------------
+  # Data paths
+  # ----------------------------------------------------------------------
+  data_dir: "${BRATS_DATA_DIR:data/BraTS}"
+
+  # ----------------------------------------------------------------------
+  # Modalities
+  # ----------------------------------------------------------------------
+  modalities: ["T1", "T1ce", "T2", "FLAIR"]
+
+  # ----------------------------------------------------------------------
+  # Data loader
+  # ----------------------------------------------------------------------
+  batch_size: 2  # Keep as BraTS requires smaller batch size
+  num_workers: 4
+  cache_num_workers: 0
+  cache_rate: 0.5  # 0-1, 1.0 = cache all in RAM - keep BraTS value
+  pin_memory: true
+  train_val_split: 0.8  # BraTS split
+
+  # ----------------------------------------------------------------------
+  # Training crop size
+  # ----------------------------------------------------------------------
+  roi_size: [64, 64, 64]
+
+  # ----------------------------------------------------------------------
+  # Preprocessing (same as stage 1)
+  # ----------------------------------------------------------------------
+  preprocessing:
+    spacing: [1.0, 1.0, 1.0]  # Pixel dimensions [D, H, W], default: [1.0, 1.0, 1.0]
+    spacing_mode: "bilinear"  # Resampling mode, default: bilinear
+    orientation: "RAS"  # NIfTI orientation, default: RAS
+    intensity_a_min: 0.0  # ScaleIntensityRanged lower bound, default: 0.0
+    intensity_a_max: 500.0  # ScaleIntensityRanged upper bound, default: 500.0
+    intensity_b_min: 0.0  # Output lower bound after normalization, default: 0.0
+    intensity_b_max: 1.0  # Output upper bound after normalization, default: 1.0
+    clip: true  # Clip intensities to [a_min, a_max], default: true
+
+  # ----------------------------------------------------------------------
+  # Augmentation (usually disabled for stage 2)
+  # ----------------------------------------------------------------------
+  augmentation:
+    flip_prob: 0.0  # Disable for stage 2
+    flip_axes: null
+    rotate_prob: 0.0
+    rotate_max_k: 0
+    rotate_axes: [0, 1]
+    shift_intensity_prob: 0.0
+    shift_intensity_offset: 0.0
+
+# =============================================================================
+# Loss Configuration
+# =============================================================================
+loss:
+  # ----------------------------------------------------------------------
+  # Cross-entropy loss
+  # ----------------------------------------------------------------------
+  cross_entropy:
+    weight: 1.0
+
+# =============================================================================
+# Callbacks Configuration
+# =============================================================================
+callbacks:
+  # ----------------------------------------------------------------------
+  # Model checkpointing
+  # ----------------------------------------------------------------------
+  checkpoint:
+    monitor: "val/fid"  # Metric to monitor for best model
+    mode: "min"
+    save_top_k: 3  # Number of best models to save, default: 3
+    save_last: true  # Always save last checkpoint, default: true
+    every_n_epochs: null  # Checkpoint every N epochs (null = disabled)
+
+  # ----------------------------------------------------------------------
+  # Early stopping
+  # ----------------------------------------------------------------------
+  early_stop:
+    enabled: true  # Enable early stopping, default: true
+    monitor: "val/fid"  # Metric to monitor, default: val/combined_metric
+    patience: 10  # Epochs to wait before stopping, default: 10
+    mode: "min"  # Mode for monitoring (min=maximize, min=minimize), default: max
+    min_delta: 0.001  # Aligned with medmnist3d/large
+
+  # ----------------------------------------------------------------------
+  # Learning rate monitoring
+  # ----------------------------------------------------------------------
+  lr_monitor: true  # Log learning rate, default: true
+
+  # ----------------------------------------------------------------------
+  # PyTorch Profiler (disabled by default)
+  # ----------------------------------------------------------------------
+  profiler:
+    enabled: false  # Enable PyTorch profiler, default: false
+    profile_cpu: true  # Profile CPU activities
+    profile_cuda: true  # Profile CUDA activities
+    record_shapes: true  # Record tensor shapes
+    with_stack: true  # Record stack traces
+    profile_memory: true  # Profile memory usage
+    trace_dir: "profiler"  # Subdirectory within output_dir for trace files
+
+# =============================================================================
+# Trainer Configuration
+# =============================================================================
+trainer:
+  # ----------------------------------------------------------------------
+  # Training settings
+  # ----------------------------------------------------------------------
+  max_epochs: 50  # Maximum number of training epochs
+
+  # ----------------------------------------------------------------------
+  # Hardware configuration
+  # ----------------------------------------------------------------------
+  hardware:
+    accelerator: "auto"  # Options: auto, cpu, gpu, mps, cuda, tpu, default: auto
+    devices: "auto"  # Options: auto, 1, 2, 4, [0, 1], etc., default: auto
+    precision: "16-mixed"  # Options: 32, 16-mixed, bf16-mixed (bf16 not on MPS), default: 32
+
+  # ----------------------------------------------------------------------
+  # Logging configuration
+  # ----------------------------------------------------------------------
+  logging:
+    log_every_n_steps: 10  # Log every N steps, default: 10
+    val_check_interval: 1.0  # Validate every N epochs, default: 1.0
+    limit_train_batches: null  # Limit training batches (null = all), default: null
+    limit_val_batches: 5  # Limit validation batches, default: 5.0
+    logger_version: null  # Logger version (null = auto-increment), default: null
+
+  # ----------------------------------------------------------------------
+  # Gradient handling
+  # ----------------------------------------------------------------------
+  gradient_clip_val: 1.0  # Gradient clipping value (null = disabled), default: 1.0
+  gradient_clip_algorithm: "norm"  # Options: norm, value, default: norm
+  accumulate_grad_batches: 1  # Accumulate gradients over N batches, default: 1
+
+  # ----------------------------------------------------------------------
+  # Debugging/profiling
+  # ----------------------------------------------------------------------
+  profiler: null  # PyTorch profiler (null, simple, advanced, pytorch), default: null
+  detect_anomaly: false  # Enable autograd anomaly detection for NaN/Inf, default: false
+  benchmark: false  # Enable cudnn benchmarking, default: false
+
+# =============================================================================
+# Sliding Window Inference (REQUIRED for transformer)
+# =============================================================================
+sliding_window:
+  enabled: true  # Always true for transformer
+
+  # Window configuration
+  roi_size: [64, 64, 64]
+  overlap: 0.5  # 0-1, higher = smoother but slower
+  sw_batch_size: 1  # Increase if GPU memory allows
+  mode: "gaussian"  # gaussian, constant, mean

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 # Model Architecture Configuration
 # =============================================================================
 
+
 class AutoencoderModelConfig(BaseModel):
     """Configuration for AutoencoderFSQ model.
 
@@ -75,15 +76,13 @@ class DiscriminatorConfig(BaseModel):
 
     # Other parameters (can have defaults)
     kernel_size: int = Field(default=4, ge=1)
-    activation: Tuple[str, Dict[str, Any]] = Field(
-        default=("LEAKYRELU", {"negative_slope": 0.2})
-    )
+    activation: Tuple[str, Dict[str, Any]] = Field(default=("LEAKYRELU", {"negative_slope": 0.2}))
     norm: str = Field(default="BATCH")
     minimum_size_im: int = Field(default=64, ge=1)
 
 
 class TransformerModelConfig(BaseModel):
-    """Configuration for TransformerDecoder model.
+    """Configuration for TransformerDecoderSingleStream model.
 
     Critical network architecture parameters are required and must be
     explicitly defined in the YAML configuration file.
@@ -91,7 +90,6 @@ class TransformerModelConfig(BaseModel):
 
     # REQUIRED: Core transformer architecture - no defaults
     latent_dim: int = Field(ge=1, description="Latent channels (must equal len(levels) for FSQ)")
-    cond_dim: int = Field(ge=1, description="Transformer cond hidden dimension")
     hidden_dim: int = Field(ge=1, description="Transformer hidden dimension")
     num_heads: int = Field(ge=1, description="Number of attention heads")
     num_blocks: int = Field(ge=1, description="Number of transformer blocks")
@@ -102,6 +100,22 @@ class TransformerModelConfig(BaseModel):
     mlp_ratio: float = Field(default=4.0, ge=1.0)
     dropout: float = Field(default=0.1, ge=0.0, le=1.0)
 
+    # Optional parameters (for backward compatibility)
+    cond_dim: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="DEPRECATED: Transformer cond hidden dimension (kept for backward compatibility, not used)",
+    )
+    use_pure_in_context: Optional[bool] = Field(
+        default=True, description="Use pure in-context architecture (default: True)"
+    )
+    guidance_scale: Optional[float] = Field(
+        default=0.1, ge=0.0, description="CFG guidance scale (default: 0.1)"
+    )
+    modality_dropout_prob: Optional[float] = Field(
+        default=0.0, ge=0.0, le=1.0, description="Modality dropout probability (default: 0.0)"
+    )
+
 
 class ModelConfig(BaseModel):
     """Combined model configuration."""
@@ -109,13 +123,18 @@ class ModelConfig(BaseModel):
     autoencoder: Optional[AutoencoderModelConfig] = None
     discriminator: Optional[DiscriminatorConfig] = None
     transformer: Optional[TransformerModelConfig] = None
-    num_classes: int = Field(default=4, ge=1, description="Number of classes (4 for BraTS modalities, variable for MedMNIST 3D)")
+    num_classes: int = Field(
+        default=4,
+        ge=1,
+        description="Number of classes (4 for BraTS modalities, variable for MedMNIST 3D)",
+    )
     contrast_embed_dim: Optional[int] = Field(default=64, ge=1)  # Allow None for Stage 1
 
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
+
 
 class OptimizerConfig(BaseModel):
     """Optimizer configuration."""
@@ -213,15 +232,19 @@ class UnconditionalConfig(BaseModel):
     """Unconditional generation configuration."""
 
     unconditional_prob: float = Field(default=0.1, ge=0, le=1)
+    guidance_scale: Optional[float] = Field(
+        default=0.1, ge=0.0, description="CFG guidance scale (default: 0.1)"
+    )
+    modality_dropout_prob: Optional[float] = Field(
+        default=0.0, ge=0.0, le=1.0, description="Modality dropout probability (default: 0.0)"
+    )
 
 
 class TrainingConfig(BaseModel):
     """Combined training configuration."""
 
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    scheduler: LearningRateSchedulerConfig = Field(
-        default_factory=LearningRateSchedulerConfig
-    )
+    scheduler: LearningRateSchedulerConfig = Field(default_factory=LearningRateSchedulerConfig)
     loop: TrainingLoopConfig = Field(default_factory=TrainingLoopConfig)
     # Training stability controls
     stability: StabilityConfig = Field(default_factory=StabilityConfig)
@@ -232,6 +255,7 @@ class TrainingConfig(BaseModel):
 # =============================================================================
 # Data Configuration
 # =============================================================================
+
 
 class PreprocessingConfig(BaseModel):
     """Data preprocessing configuration."""
@@ -296,6 +320,7 @@ class DataConfig(BaseModel):
 # Loss Configuration
 # =============================================================================
 
+
 class ReconstructionLossConfig(BaseModel):
     """Reconstruction loss configuration."""
 
@@ -308,7 +333,7 @@ class PerceptualLossConfig(BaseModel):
     weight: float = Field(default=0.5, ge=0, description="Loss weight multiplier")
     network_type: str = Field(
         default="medicalnet_resnet10_23datasets",
-        description="Pretrained network for feature extraction (e.g., medicalnet_resnet10_23datasets)"
+        description="Pretrained network for feature extraction (e.g., medicalnet_resnet10_23datasets)",
     )
     is_fake_3d: bool = Field(
         default=False,
@@ -340,12 +365,8 @@ class FocalFrequencyLossConfig(BaseModel):
         ge=1,
         description="Split image into (patch_factor x patch_factor) patches before FFT",
     )
-    ave_spectrum: bool = Field(
-        default=False, description="Use minibatch-average spectrum"
-    )
-    log_matrix: bool = Field(
-        default=False, description="Apply log(1 + w) before normalization"
-    )
+    ave_spectrum: bool = Field(default=False, description="Use minibatch-average spectrum")
+    log_matrix: bool = Field(default=False, description="Apply log(1 + w) before normalization")
     batch_matrix: bool = Field(
         default=False, description="Normalize w using batch-level max instead of per-sample max"
     )
@@ -392,9 +413,7 @@ class LossConfig(BaseModel):
         description="Type of perceptual loss: 'lpips' (MONAI PerceptualLoss) or 'ffl' (Focal Frequency Loss)",
     )
     discriminator_iter_start: int = Field(default=0, ge=0)
-    reconstruction: ReconstructionLossConfig = Field(
-        default_factory=ReconstructionLossConfig
-    )
+    reconstruction: ReconstructionLossConfig = Field(default_factory=ReconstructionLossConfig)
     perceptual: PerceptualLossConfig = Field(default_factory=PerceptualLossConfig)
     focal_frequency: Optional[FocalFrequencyLossConfig] = Field(
         default=None,
@@ -410,6 +429,7 @@ class LossConfig(BaseModel):
 # =============================================================================
 # Callbacks Configuration
 # =============================================================================
+
 
 class CheckpointConfig(BaseModel):
     """Model checkpoint configuration."""
@@ -460,6 +480,7 @@ class CallbacksConfig(BaseModel):
 # Trainer Configuration
 # =============================================================================
 
+
 class HardwareConfig(BaseModel):
     """Trainer hardware configuration.
 
@@ -499,6 +520,7 @@ class TrainerConfig(BaseModel):
 # Sliding Window Configuration
 # =============================================================================
 
+
 class SlidingWindowConfig(BaseModel):
     """Sliding window inference configuration."""
 
@@ -513,6 +535,7 @@ class SlidingWindowConfig(BaseModel):
 # Sampler Configuration (for MaskGiT)
 # =============================================================================
 
+
 class SamplerConfig(BaseModel):
     """MaskGiT sampler configuration."""
 
@@ -525,6 +548,7 @@ class SamplerConfig(BaseModel):
 # =============================================================================
 # Full Configuration Models
 # =============================================================================
+
 
 class AutoencoderFullConfig(BaseModel):
     """Complete configuration for Stage 1 autoencoder training."""
@@ -707,9 +731,7 @@ class MAISIVAELossConfig(BaseModel):
         le=1.0,
         description="Fraction of slices used when is_fake_3d=True",
     )
-    discriminator_iter_start: int = Field(
-        default=0, ge=0, description="Discriminator warmup steps"
-    )
+    discriminator_iter_start: int = Field(default=0, ge=0, description="Discriminator warmup steps")
 
 
 class DiffusionModelConfig(BaseModel):
@@ -774,9 +796,15 @@ class MAISIAutoencoderModelConfig(BaseModel):
 
     # REQUIRED: Core network architecture
     latent_channels: int = Field(default=4, ge=1, description="Number of latent channels")
-    num_channels: Tuple[int, ...] = Field(default=(32, 64, 64, 64), description="Channel sizes per layer")
-    attention_levels: Tuple[bool, ...] = Field(default=(False, False, True, True), description="Attention layers")
-    num_res_blocks: Tuple[int, ...] = Field(default=(1, 1, 1, 1), description="Residual blocks per layer")
+    num_channels: Tuple[int, ...] = Field(
+        default=(32, 64, 64, 64), description="Channel sizes per layer"
+    )
+    attention_levels: Tuple[bool, ...] = Field(
+        default=(False, False, True, True), description="Attention layers"
+    )
+    num_res_blocks: Tuple[int, ...] = Field(
+        default=(1, 1, 1, 1), description="Residual blocks per layer"
+    )
 
     # Normalization parameter
     norm_num_groups: int = Field(default=32, ge=1)
@@ -785,7 +813,9 @@ class MAISIAutoencoderModelConfig(BaseModel):
     num_splits: int = Field(default=2, ge=1, description="Number of splits for latent space")
 
     # Memory optimization
-    save_mem: bool = Field(default=False, description="Enable memory-saving checkpointing in encoder/decoder")
+    save_mem: bool = Field(
+        default=False, description="Enable memory-saving checkpointing in encoder/decoder"
+    )
 
 
 class MAISIModelConfig(BaseModel):
