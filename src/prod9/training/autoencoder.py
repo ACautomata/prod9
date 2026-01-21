@@ -6,7 +6,7 @@ The actual implementation resides in prod9.training.lightning.autoencoder_lightn
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
@@ -63,36 +63,12 @@ class AutoencoderLightning(_AutoencoderLightning):
         metric_max_val: float = 1.0,
         metric_data_range: float = 1.0,
     ):
-        # 1. Create VAEGANLoss with the provided arguments
-        loss_fn = VAEGANLoss(
-            loss_mode="fsq",
-            recon_weight=recon_weight,
-            perceptual_weight=perceptual_weight,
-            loss_type=loss_type,
-            ffl_config=ffl_config,
-            perceptual_network_type=perceptual_network_type,
-            is_fake_3d=is_fake_3d,
-            fake_3d_ratio=fake_3d_ratio,
-            adv_weight=adv_weight,
-            adv_criterion=adv_criterion,
-            commitment_weight=commitment_weight,
-            discriminator_iter_start=discriminator_iter_start,
-            max_adaptive_weight=max_adaptive_weight,
-            gradient_norm_eps=gradient_norm_eps,
-        )
+        from typing import cast
+        from prod9.training.algorithms.autoencoder_trainer import AutoencoderTrainer
 
-        # 2. Create the standalone trainer (business logic)
-        trainer = AutoencoderTrainer(
-            autoencoder=autoencoder,
-            discriminator=discriminator,
-            loss_fn=loss_fn,
-            metric_max_val=metric_max_val,
-            metric_data_range=metric_data_range,
-        )
-
-        # 3. Initialize the adapter (Lightning glue)
+        # Initialize adapter (trainer created in setup)
         super().__init__(
-            trainer=trainer,
+            trainer=cast(AutoencoderTrainer, None),
             lr_g=lr_g,
             lr_d=lr_d,
             b1=b1,
@@ -103,10 +79,66 @@ class AutoencoderLightning(_AutoencoderLightning):
             warmup_eta_min=warmup_eta_min,
         )
 
-        # 4. Maintain old attributes for backward compatibility if needed by CLI
+        self._autoencoder_provided = autoencoder
+        self._discriminator_provided = discriminator
+        self.recon_weight = recon_weight
+        self.perceptual_weight = perceptual_weight
+        self.loss_type = loss_type
+        self.ffl_config = ffl_config
+        self.perceptual_network_type = perceptual_network_type
+        self.is_fake_3d = is_fake_3d
+        self.fake_3d_ratio = fake_3d_ratio
+        self.adv_weight = adv_weight
+        self.adv_criterion = adv_criterion
+        self.commitment_weight = commitment_weight
+        self.discriminator_iter_start = discriminator_iter_start
+        self.max_adaptive_weight = max_adaptive_weight
+        self.gradient_norm_eps = gradient_norm_eps
+        self.metric_max_val = metric_max_val
+        self.metric_data_range = metric_data_range
+        self.sample_every_n_steps = sample_every_n_steps
         self.use_sliding_window = use_sliding_window
         self.sw_roi_size = sw_roi_size
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
         self.sw_mode = sw_mode
-        self.sample_every_n_steps = sample_every_n_steps
+
+    def setup(self, stage: str) -> None:
+        if self.algorithm is not None:
+            return
+
+        from prod9.training.model.infrastructure import InfrastructureFactory
+
+        # Assemble trainer using infrastructure factory
+        trainer = InfrastructureFactory.assemble_autoencoder_trainer(
+            config=self._build_config_dict(),
+            autoencoder=self._autoencoder_provided,
+            discriminator=self._discriminator_provided,
+            device=self.device,
+        )
+
+        self.algorithm = trainer
+
+    def _build_config_dict(self) -> Dict[str, Any]:
+        """Reconstruct config dict for InfrastructureFactory."""
+        return {
+            "loss": {
+                "recon_weight": self.recon_weight,
+                "perceptual_weight": self.perceptual_weight,
+                "loss_type": self.loss_type,
+                "ffl_config": self.ffl_config,
+                "perceptual_network_type": self.perceptual_network_type,
+                "is_fake_3d": self.is_fake_3d,
+                "fake_3d_ratio": self.fake_3d_ratio,
+                "adv_weight": self.adv_weight,
+                "adv_criterion": self.adv_criterion,
+                "commitment_weight": self.commitment_weight,
+                "discriminator_iter_start": self.discriminator_iter_start,
+                "max_adaptive_weight": self.max_adaptive_weight,
+                "gradient_norm_eps": self.gradient_norm_eps,
+            },
+            "metrics": {
+                "metric_max_val": self.metric_max_val,
+                "metric_data_range": self.metric_data_range,
+            },
+        }

@@ -87,117 +87,37 @@ class ControlNetLightning(_ControlNetLightning):
         if self.vae is not None:
             return
 
-        # 1. Load VAE
-        vae_checkpoint = torch.load(self.vae_path, weights_only=False)
-        if "config" not in vae_checkpoint:
-            raise ValueError(f"VAE checkpoint '{self.vae_path}' missing 'config'.")
-        vae_config = vae_checkpoint["config"]
-        vae_state_dict = vae_checkpoint.get("state_dict", vae_checkpoint)
-        vae = AutoencoderMAISI(**vae_config)
-        vae.load_state_dict(vae_state_dict)
-        vae.eval()
-        for param in vae.parameters():
-            param.requires_grad = False
+        from prod9.training.model.infrastructure import InfrastructureFactory
 
-        # 2. Wrap VAE with inference wrapper
-        sw_config = SlidingWindowConfig(
-            roi_size=self.sw_roi_size,
-            overlap=self.sw_overlap,
-            sw_batch_size=self.sw_batch_size,
-        )
-        self.vae = AutoencoderInferenceWrapper(vae, sw_config)
-
-        # 3. Load diffusion model
-        diffusion_checkpoint = torch.load(self.diffusion_path, weights_only=False)
-        if isinstance(diffusion_checkpoint, dict) and "state_dict" in diffusion_checkpoint:
-            diffusion_state_dict = diffusion_checkpoint["state_dict"]
-        else:
-            diffusion_state_dict = diffusion_checkpoint
-
-        # Get latent channels from VAE config
-        latent_channels = vae_config.get("latent_channels", 4)
-
-        # 4. Create diffusion model
-        self.diffusion_model = DiffusionModelRF(in_channels=latent_channels)
-        # Load state dict (might need to handle "model." prefix)
-        if "model" in diffusion_state_dict:
-            self.diffusion_model.load_state_dict(diffusion_state_dict["model"])
-        else:
-            self.diffusion_model.load_state_dict(diffusion_state_dict)
-        self.diffusion_model.eval()
-        for param in self.diffusion_model.parameters():
-            param.requires_grad = False
-
-        # 5. Create ControlNet if not provided
-        if self._controlnet is None:
-            self._controlnet = ControlNetRF(
-                in_channels=latent_channels,
-            )
-            # Initialize from pretrained diffusion model
-            self._controlnet.load_from_diffusion(self.diffusion_model)
-
-        # 6. Create condition encoder if not provided
-        if self._condition_encoder is None:
-            self._condition_encoder = ConditionEncoder(
-                condition_type=cast(Literal["mask", "image", "label", "both"], self.condition_type),
-                in_channels=1,
-                latent_channels=latent_channels,
-                num_labels=4,
-            )
-
-        # 7. Create scheduler
-        self.scheduler = RectifiedFlowSchedulerRF(
-            num_train_timesteps=self.num_train_timesteps,
-            num_inference_steps=self.num_inference_steps,
-        )
-
-        # 8. Define sample_with_controlnet function for the trainer
-        def _sample_with_controlnet(
-            sampler: RectifiedFlowSampler,
-            diffusion_model: nn.Module,
-            controlnet: nn.Module,
-            shape: tuple[int, ...],
-            condition: torch.Tensor,
-            device: torch.device,
-        ) -> torch.Tensor:
-            """Sample with ControlNet conditioning."""
-            sample = torch.randn(shape, device=device)
-            timesteps = sampler.scheduler.get_timesteps(sampler.num_steps).to(device)
-
-            for i, t in enumerate(timesteps):
-                t_batch = t.expand(sample.shape[0])
-
-                # Get ControlNet output
-                controlnet_output = controlnet(sample, t_batch, condition)
-
-                # Get diffusion output (frozen)
-                with torch.no_grad():
-                    diffusion_output = diffusion_model(sample, t_batch, condition)
-
-                # Combine
-                model_output = diffusion_output + controlnet_output
-                sample, _ = sampler.scheduler.step(model_output, int(t.item()), sample)
-
-            return sample
-
-        # 9. Create the standalone trainer (business logic)
-        trainer = ControlNetTrainer(
-            vae=self.vae,
-            diffusion_model=self.diffusion_model,
+        # Assemble trainer using infrastructure factory
+        trainer = InfrastructureFactory.assemble_controlnet_trainer(
+            config=self._build_config_dict(),
+            vae_path=self.vae_path,
+            diffusion_path=self.diffusion_path,
             controlnet=self._controlnet,
             condition_encoder=self._condition_encoder,
-            scheduler=self.scheduler,
-            num_train_timesteps=self.num_train_timesteps,
-            num_inference_steps=self.num_inference_steps,
-            condition_type=self.condition_type,
-            psnr_metric=self.psnr_metric,
-            ssim_metric=self.ssim_metric,
-            lpips_metric=self.lpips_metric,
-            sample_with_controlnet=_sample_with_controlnet,
+            device=self.device,
         )
 
-        # 10. Assign trainer to the adapter
+        self.vae = trainer.vae
+        self.diffusion_model = trainer.diffusion_model
+        self.scheduler = trainer.scheduler
         self.algorithm = trainer
+
+    def _build_config_dict(self) -> Dict[str, Any]:
+        """Reconstruct config dict for InfrastructureFactory."""
+        return {
+            "controlnet": {
+                "condition_type": self.condition_type,
+            },
+            "num_train_timesteps": self.num_train_timesteps,
+            "num_inference_steps": self.num_inference_steps,
+            "sliding_window": {
+                "roi_size": self.sw_roi_size,
+                "overlap": self.sw_overlap,
+                "sw_batch_size": self.sw_batch_size,
+            },
+        }
 
     def on_fit_start(self) -> None:
         """Move models to device before sanity check."""

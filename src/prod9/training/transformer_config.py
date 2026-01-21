@@ -74,6 +74,9 @@ class TransformerLightningConfig:
             use_pure_in_context=transformer_config.get("use_pure_in_context", True),
             guidance_scale=transformer_config.get("guidance_scale", 0.1),
             modality_dropout_prob=transformer_config.get("modality_dropout_prob", 0.0),
+            modality_partial_dropout_prob=unconditional_config.get(
+                "modality_partial_dropout_prob", 0.0
+            ),
             lr=optimizer_config.get("learning_rate", 1e-4),
             beta1=optimizer_config.get("beta1", 0.9),
             beta2=optimizer_config.get("beta2", 0.999),

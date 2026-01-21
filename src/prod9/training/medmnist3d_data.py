@@ -269,35 +269,23 @@ class MedMNIST3DDataModuleStage2(pl.LightningDataModule):
         if self.autoencoder is None:
             raise RuntimeError("Autoencoder not set.")
 
-        os.makedirs(self.cache_dir, exist_ok=True)
-
-        train_cache_file = os.path.join(self.cache_dir, "train_encoded.pt")
-        val_cache_file = os.path.join(self.cache_dir, "val_encoded.pt")
-
-        if os.path.exists(train_cache_file) and os.path.exists(val_cache_file):
-            train_encoded = cast(list[dict[str, object]], torch.load(train_cache_file))
-            val_encoded = cast(list[dict[str, object]], torch.load(val_cache_file))
-        else:
-            train_encoded = self._pre_encode_data("train", train_cache_file)
-            val_encoded = self._pre_encode_data("val", val_cache_file)
-
-        self.train_dataset = MedMNIST3DStage2Dataset(train_encoded)
-        self.val_dataset = MedMNIST3DStage2Dataset(val_encoded)
-
-    def _pre_encode_data(self, split: str, cache_file: str) -> list[dict[str, object]]:
-        if self.autoencoder is None:
-            raise ValueError("autoencoder must be set")
-
+        # 1. Build config and raw datasets
         config = self._build_config_dict()
         config["data"]["stage"] = "stage2"
 
-        raw_dataset = self.dataset_builder.build_medmnist3d(config, split)
-        encoded_data = self.pre_encoder.encode_all(
-            cast(IndexableDataset, raw_dataset), self.autoencoder
+        train_raw = self.dataset_builder.build_medmnist3d(config, "train")
+        val_raw = self.dataset_builder.build_medmnist3d(config, "val")
+
+        # 2. Encode with cache via PreEncoder
+        train_encoded = self.pre_encoder.encode_with_cache(
+            cast(IndexableDataset, train_raw), self.autoencoder, self.cache_dir, "train"
+        )
+        val_encoded = self.pre_encoder.encode_with_cache(
+            cast(IndexableDataset, val_raw), self.autoencoder, self.cache_dir, "val"
         )
 
-        torch.save(encoded_data, cache_file)
-        return encoded_data
+        self.train_dataset = MedMNIST3DStage2Dataset(train_encoded)
+        self.val_dataset = MedMNIST3DStage2Dataset(val_encoded)
 
     def _build_config_dict(self) -> Dict[str, Any]:
         return {

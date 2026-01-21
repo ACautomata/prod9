@@ -164,25 +164,7 @@ class PreEncodedDataset(Dataset):
         return len(self.encoded_data)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        data = self.encoded_data[idx]
-
-        target_modality: str = random.choice(BRATS_MODALITY_KEYS)
-        target_idx_int: int = BRATS_MODALITY_KEYS.index(target_modality)
-
-        target_latent = cast(torch.Tensor, data[f"{target_modality}_latent"])
-        target_indices = cast(torch.Tensor, data[f"{target_modality}_indices"])
-
-        cond_modality: str = random.choice(BRATS_MODALITY_KEYS)
-        cond_idx_int: int = BRATS_MODALITY_KEYS.index(cond_modality)
-        cond_latent = cast(torch.Tensor, data[f"{cond_modality}_latent"])
-
-        return {
-            "cond_latent": cond_latent,
-            "target_latent": target_latent,
-            "target_indices": target_indices,
-            "target_modality_idx": target_idx_int,
-            "cond_idx": cond_idx_int,
-        }
+        return self.encoded_data[idx]
 
 
 class ControlNetDataset(Dataset):

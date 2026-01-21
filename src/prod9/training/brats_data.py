@@ -486,48 +486,21 @@ class BraTSDataModuleStage2(pl.LightningDataModule):
             if self._autoencoder is None:
                 raise RuntimeError("Autoencoder not set. Call set_autoencoder() before setup().")
 
-            # Pre-encode data
-            train_encoded = self._pre_encode_data(split="train")
-            val_encoded = self._pre_encode_data(split="val")
+            # 1. Build config and raw datasets
+            config = self._build_config_dict()
+            train_raw = self.dataset_builder.build_brats_stage2(config, "train")
+            val_raw = self.dataset_builder.build_brats_stage2(config, "val")
+
+            # 2. Encode with cache via PreEncoder
+            train_encoded = self.pre_encoder.encode_with_cache(
+                cast(IndexableDataset, train_raw), self._autoencoder, self.cache_dir, "train"
+            )
+            val_encoded = self.pre_encoder.encode_with_cache(
+                cast(IndexableDataset, val_raw), self._autoencoder, self.cache_dir, "val"
+            )
 
             self.train_dataset = PreEncodedDataset(train_encoded)
             self.val_dataset = PreEncodedDataset(val_encoded)
-
-    def _pre_encode_data(self, split: str) -> List[Dict]:
-        """
-        Pre-encode all modalities using the autoencoder.
-
-        For each patient:
-        1. Load all 4 modalities
-        2. Apply transforms (same crop for all modalities)
-        3. Encode each modality to latent and indices via autoencoder
-        4. Store pre-encoded data
-        """
-        if self._autoencoder is None:
-            raise RuntimeError("Autoencoder not set. Call set_autoencoder() first.")
-        # Type guard: autoencoder is guaranteed non-None after the check
-        autoencoder = cast(AutoencoderInferenceWrapper, self._autoencoder)
-
-        # Check cache
-        cache_file = os.path.join(self.cache_dir, f"{split}_encoded.pt")
-        if os.path.exists(cache_file):
-            return cast(List[Dict], torch.load(cache_file))
-
-        # Build config dict for dataset builder
-        config = self._build_config_dict()
-
-        # Use DatasetBuilder to create raw dataset for pre-encoding
-        raw_dataset = self.dataset_builder.build_brats_stage2(config, split)
-
-        # Use PreEncoder to encode all samples
-        indexable_dataset = cast(IndexableDataset, raw_dataset)
-        encoded_data = self.pre_encoder.encode_all(indexable_dataset, autoencoder)
-
-        # Cache encoded data
-        os.makedirs(self.cache_dir, exist_ok=True)
-        torch.save(encoded_data, cache_file)
-
-        return encoded_data
 
     def _build_config_dict(self) -> Dict[str, Any]:
         """Build config dictionary from instance attributes."""

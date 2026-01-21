@@ -207,8 +207,48 @@ class MAISIDiffusionLightning(pl.LightningModule):
         batch_idx: int,  # noqa: ARG002
     ) -> STEP_OUTPUT:
         loss = self.algorithm.compute_training_loss(batch)
-        self.log_dict({"train/loss": loss}, on_step=True, on_epoch=False, logger=True, prog_bar=True)
+        self.log_dict(
+            {"train/loss": loss}, on_step=True, on_epoch=False, logger=True, prog_bar=True
+        )
         return {"loss": loss}
+
+    def validation_step(
+        self,
+        batch: Dict[str, torch.Tensor],
+        batch_idx: int,  # noqa: ARG002
+    ) -> Optional[STEP_OUTPUT]:
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized.")
+
+        # Note: metrics compute sampling internally
+        metrics = self.algorithm.compute_validation_metrics(
+            batch,
+            psnr_metric=getattr(self, "psnr", None),
+            ssim_metric=getattr(self, "ssim", None),
+            lpips_metric=getattr(self, "lpips", None),
+        )
+        if metrics:
+            payload = {f"val/{key}": value for key, value in metrics.items()}
+            self.log_dict(payload, on_step=False, on_epoch=True, logger=True, sync_dist=True)
+        return metrics
+
+    def generate_samples(
+        self,
+        num_samples: int = 1,
+        shape: Optional[tuple[int, ...]] = None,
+        condition: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Generate samples using trained diffusion model."""
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized.")
+
+        self.eval()
+        with torch.no_grad():
+            samples = self.algorithm.generate_samples(
+                num_samples=num_samples, shape=shape, condition=condition, device=self.device
+            )
+        self.train()
+        return samples
 
     def configure_optimizers(self):
         return torch.optim.AdamW(
@@ -239,7 +279,9 @@ class ControlNetLightning(pl.LightningModule):
         batch_idx: int,  # noqa: ARG002
     ) -> STEP_OUTPUT:
         loss = self.algorithm.compute_training_loss(batch)
-        self.log_dict({"train/loss": loss}, on_step=True, on_epoch=False, logger=True, prog_bar=True)
+        self.log_dict(
+            {"train/loss": loss}, on_step=True, on_epoch=False, logger=True, prog_bar=True
+        )
         return {"loss": loss}
 
     def validation_step(
@@ -252,6 +294,28 @@ class ControlNetLightning(pl.LightningModule):
             payload = {f"val/{key}": value for key, value in metrics.items()}
             self.log_dict(payload, on_step=True, on_epoch=False, logger=True)
         return metrics
+
+    def generate_conditional(
+        self,
+        condition_input: Any,
+        num_samples: int = 1,
+        shape: Optional[tuple[int, ...]] = None,
+    ) -> torch.Tensor:
+        """Generate samples conditionally using trained ControlNet."""
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized.")
+
+        self.eval()
+        with torch.no_grad():
+            # Delegate to trainer which handles encoding and sampling
+            generated_images = self.algorithm.generate_conditional(
+                batch={},  # Not used if source_image/condition provided
+                source_image=condition_input if isinstance(condition_input, torch.Tensor) else None,
+                latent_shape=shape,
+                num_samples=num_samples,
+            )
+        self.train()
+        return generated_images
 
     def configure_optimizers(self):
         return torch.optim.AdamW(

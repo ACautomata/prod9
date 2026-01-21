@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, Mapping
-
 import torch
+from typing import Any, Dict, Mapping, Optional
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
 
 from prod9.autoencoder.autoencoder_maisi import AutoencoderMAISI
@@ -78,18 +77,44 @@ class VAEGANTrainer:
         fake_outputs, _ = self.discriminator(fake_images.detach())
         return self.loss_fn.discriminator_loss(real_outputs, fake_outputs)
 
+    def compute_validation_metrics(
+        self,
+        batch: Dict[str, torch.Tensor],
+        global_step: int,
+        psnr_metric: Optional[Any] = None,
+        ssim_metric: Optional[Any] = None,
+        lpips_metric: Optional[Any] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Compute metrics for validation (usually mu-only reconstruction)."""
+        _ = global_step
+        images = self._require_tensor(batch, "image")
+
+        with torch.no_grad():
+            z_mu, _ = self.vae.encode(images)
+            reconstructed = self.vae.decode(z_mu)
+
+            metrics: Dict[str, torch.Tensor] = {}
+            if psnr_metric is not None:
+                metrics["psnr"] = psnr_metric(reconstructed, images)
+            if ssim_metric is not None:
+                metrics["ssim"] = ssim_metric(reconstructed, images)
+            if lpips_metric is not None:
+                metrics["lpips"] = lpips_metric(reconstructed, images)
+
+        return metrics
+
     def build_log_payload(self, losses: Mapping[str, torch.Tensor]) -> Dict[str, float]:
-        adv_d = losses.get("adv_d", losses.get("disc_loss", 0.0))
-        adv_weight = losses.get(
-            "adv_weight", losses.get("adaptive_adv_weight", 0.0)
-        )
+        adv_d = losses.get("adv_d", losses.get("disc_loss", torch.tensor(0.0)))
+        adv_weight = losses.get("adv_weight", losses.get("adaptive_adv_weight", torch.tensor(0.0)))
         return {
             "train/adv_d": self._to_float(adv_d),
-            "train/gen_total": self._to_float(losses.get("total", 0.0)),
-            "train/recon": self._to_float(losses.get("recon", 0.0)),
-            "train/perceptual": self._to_float(losses.get("perceptual", 0.0)),
-            "train/kl": self._to_float(losses.get("kl", 0.0)),
-            "train/adv_g": self._to_float(losses.get("adv_g", losses.get("generator_adv", 0.0))),
+            "train/gen_total": self._to_float(losses.get("total", torch.tensor(0.0))),
+            "train/recon": self._to_float(losses.get("recon", torch.tensor(0.0))),
+            "train/perceptual": self._to_float(losses.get("perceptual", torch.tensor(0.0))),
+            "train/kl": self._to_float(losses.get("kl", torch.tensor(0.0))),
+            "train/adv_g": self._to_float(
+                losses.get("adv_g", losses.get("generator_adv", torch.tensor(0.0)))
+            ),
             "train/adaptive_adv_weight": self._to_float(adv_weight),
         }
 

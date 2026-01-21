@@ -31,10 +31,19 @@ class ControlNetTrainer:
         psnr_metric: Optional[PSNRMetric] = None,
         ssim_metric: Optional[SSIMMetric] = None,
         lpips_metric: Optional[LPIPSMetric] = None,
-        sampler_factory: Callable[[int, RectifiedFlowSchedulerRF], RectifiedFlowSampler] = RectifiedFlowSampler,
+        sampler_factory: Callable[
+            [int, RectifiedFlowSchedulerRF], RectifiedFlowSampler
+        ] = RectifiedFlowSampler,
         sample_with_controlnet: Optional[
             Callable[
-                [RectifiedFlowSampler, nn.Module, nn.Module, tuple[int, ...], torch.Tensor, torch.device],
+                [
+                    RectifiedFlowSampler,
+                    nn.Module,
+                    nn.Module,
+                    tuple[int, ...],
+                    torch.Tensor,
+                    torch.device,
+                ],
                 torch.Tensor,
             ]
         ] = None,
@@ -87,34 +96,8 @@ class ControlNetTrainer:
         target_image = self._require_tensor(batch, "target_image")
 
         with torch.no_grad():
-            condition_input = self._prepare_condition_input(batch, source_image)
-            condition = self.condition_encoder(condition_input)
-
             latent_shape = self.vae.encode_stage_2_inputs(target_image).shape
-
-            sampler = self.sampler_factory(self.num_inference_steps, self.scheduler)
-            if self.sample_with_controlnet is not None:
-                generated_latent = self.sample_with_controlnet(
-                    sampler,
-                    self.diffusion_model,
-                    self.controlnet,
-                    latent_shape,
-                    condition,
-                    target_image.device,
-                )
-            else:
-                sample_fn = getattr(sampler, "sample_with_controlnet", None)
-                if sample_fn is None:
-                    raise RuntimeError("ControlNet sampler is missing sample_with_controlnet")
-                generated_latent = sample_fn(
-                    diffusion_model=self.diffusion_model,
-                    controlnet=self.controlnet,
-                    shape=latent_shape,
-                    condition=condition,
-                    device=target_image.device,
-                )
-
-            generated_images = self.vae.decode(generated_latent)
+            generated_images = self.generate_conditional(batch, source_image, latent_shape)
 
             metrics: Dict[str, torch.Tensor] = {}
             if self.psnr is not None:
@@ -126,9 +109,49 @@ class ControlNetTrainer:
 
         return metrics
 
-    def _prepare_condition_input(
-        self, batch: Mapping[str, Any], source_image: torch.Tensor
-    ) -> Any:
+    def generate_conditional(
+        self,
+        batch: Mapping[str, Any],
+        source_image: Optional[torch.Tensor] = None,
+        latent_shape: Optional[tuple[int, ...]] = None,
+        num_samples: int = 1,
+    ) -> torch.Tensor:
+        """Generate samples conditionally."""
+        if source_image is None:
+            source_image = self._require_tensor(batch, "source_image")
+
+        condition_input = self._prepare_condition_input(batch, source_image)
+        condition = self.condition_encoder(condition_input)
+
+        if latent_shape is None:
+            latent_shape = (num_samples, self.vae.autoencoder.latent_channels, 32, 32, 32)
+
+        sampler = self.sampler_factory(self.num_inference_steps, self.scheduler)
+
+        if self.sample_with_controlnet is not None:
+            generated_latent = self.sample_with_controlnet(
+                sampler,
+                self.diffusion_model,
+                self.controlnet,
+                latent_shape,
+                condition,
+                source_image.device,
+            )
+        else:
+            sample_fn = getattr(sampler, "sample_with_controlnet", None)
+            if sample_fn is None:
+                raise RuntimeError("ControlNet sampler is missing sample_with_controlnet")
+            generated_latent = sample_fn(
+                diffusion_model=self.diffusion_model,
+                controlnet=self.controlnet,
+                shape=latent_shape,
+                condition=condition,
+                device=source_image.device,
+            )
+
+        return self.vae.decode(generated_latent)
+
+    def _prepare_condition_input(self, batch: Mapping[str, Any], source_image: torch.Tensor) -> Any:
         if self.condition_type == "mask":
             return self._get_optional_tensor(batch, "mask", source_image)
         if self.condition_type == "image":

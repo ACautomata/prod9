@@ -55,37 +55,12 @@ class MAISIVAELightning(_MAISIVAELightning):
         metric_max_val: float = 1.0,
         metric_data_range: float = 1.0,
     ):
-        # 1. Get last layer reference for adaptive weight calculation
-        last_layer: torch.Tensor = vae.get_last_layer()
+        from typing import cast
+        from prod9.training.algorithms.vae_gan_trainer import VAEGANTrainer
 
-        # 2. Create VAEGANLoss with the provided arguments
-        loss_fn = VAEGANLoss(
-            loss_mode="vae",
-            recon_weight=recon_weight,
-            perceptual_weight=perceptual_weight,
-            kl_weight=kl_weight,
-            adv_weight=adv_weight,
-            spatial_dims=3,
-            perceptual_network_type=perceptual_network_type,
-            is_fake_3d=is_fake_3d,
-            fake_3d_ratio=fake_3d_ratio,
-            adv_criterion=adv_criterion,
-            discriminator_iter_start=discriminator_iter_start,
-            max_adaptive_weight=max_adaptive_weight,
-            gradient_norm_eps=gradient_norm_eps,
-        )
-
-        # 3. Create the standalone trainer (business logic)
-        trainer = VAEGANTrainer(
-            vae=vae,
-            discriminator=discriminator,
-            loss_fn=loss_fn,
-            last_layer=last_layer,
-        )
-
-        # 4. Initialize the adapter (Lightning glue)
+        # 1. Initialize adapter (trainer will be created in setup)
         super().__init__(
-            trainer=trainer,
+            trainer=cast(VAEGANTrainer, None),
             lr_g=lr_g,
             lr_d=lr_d,
             b1=b1,
@@ -96,7 +71,21 @@ class MAISIVAELightning(_MAISIVAELightning):
             warmup_eta_min=warmup_eta_min,
         )
 
-        # 5. Maintain old attributes for backward compatibility
+        self.vae_provided = vae
+        self.discriminator_provided = discriminator
+        self.recon_weight = recon_weight
+        self.perceptual_weight = perceptual_weight
+        self.kl_weight = kl_weight
+        self.adv_weight = adv_weight
+        self.perceptual_network_type = perceptual_network_type
+        self.is_fake_3d = is_fake_3d
+        self.fake_3d_ratio = fake_3d_ratio
+        self.adv_criterion = adv_criterion
+        self.discriminator_iter_start = discriminator_iter_start
+        self.max_adaptive_weight = max_adaptive_weight
+        self.gradient_norm_eps = gradient_norm_eps
+        self.metric_max_val = metric_max_val
+        self.metric_data_range = metric_data_range
         self.sample_every_n_steps = sample_every_n_steps
 
         # Store metrics for validation
@@ -107,6 +96,44 @@ class MAISIVAELightning(_MAISIVAELightning):
             is_fake_3d=is_fake_3d,
             fake_3d_ratio=fake_3d_ratio,
         )
+
+    def setup(self, stage: str) -> None:
+        if self.algorithm is not None:
+            return
+
+        from prod9.training.model.infrastructure import InfrastructureFactory
+
+        # Assemble trainer using infrastructure factory
+        trainer = InfrastructureFactory.assemble_vae_gan_trainer(
+            config=self._build_config_dict(),
+            vae=self.vae_provided,  # The shim receives instances
+            discriminator=self.discriminator_provided,
+            device=self.device,
+        )
+
+        self.algorithm = trainer
+
+    def _build_config_dict(self) -> Dict[str, Any]:
+        """Reconstruct config dict for InfrastructureFactory."""
+        return {
+            "loss": {
+                "recon_weight": self.recon_weight,
+                "perceptual_weight": self.perceptual_weight,
+                "kl_weight": self.kl_weight,
+                "adv_weight": self.adv_weight,
+                "perceptual_network_type": self.perceptual_network_type,
+                "is_fake_3d": self.is_fake_3d,
+                "fake_3d_ratio": self.fake_3d_ratio,
+                "adv_criterion": self.adv_criterion,
+                "discriminator_iter_start": self.discriminator_iter_start,
+                "max_adaptive_weight": self.max_adaptive_weight,
+                "gradient_norm_eps": self.gradient_norm_eps,
+            },
+            "metrics": {
+                "metric_max_val": self.metric_max_val,
+                "metric_data_range": self.metric_data_range,
+            },
+        }
 
     @property
     def vae(self) -> AutoencoderMAISI:
@@ -126,23 +153,27 @@ class MAISIVAELightning(_MAISIVAELightning):
         batch_idx: int,
     ) -> Optional[Dict[str, torch.Tensor]]:
         """Validation step with metrics."""
-        images = batch["image"]
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized. Call setup() first.")
 
-        # Encode and decode (use mu for validation, no sampling)
-        z_mu, _ = self.algorithm.vae.encode(images)
-        reconstructed = self.algorithm.vae.decode(z_mu)
-
-        # Compute metrics
-        psnr_value = self.psnr(reconstructed, images)
-        ssim_value = self.ssim(reconstructed, images)
-        lpips_value = self.lpips(reconstructed, images)
+        metrics = self.algorithm.compute_validation_metrics(
+            batch,
+            global_step=self.global_step,
+            psnr_metric=self.psnr,
+            ssim_metric=self.ssim,
+            lpips_metric=self.lpips,
+        )
 
         # Log
-        self.log("val/psnr", psnr_value)
-        self.log("val/ssim", ssim_value)
-        self.log("val/lpips", lpips_value, prog_bar=True)
+        self.log_dict(
+            {f"val/{k}": v for k, v in metrics.items()},
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            sync_dist=True,
+        )
 
-        return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
+        return metrics
 
     def _log_samples(self, images: torch.Tensor) -> None:
         """Log sample reconstructions to tensorboard."""

@@ -238,6 +238,12 @@ class UnconditionalConfig(BaseModel):
     modality_dropout_prob: Optional[float] = Field(
         default=0.0, ge=0.0, le=1.0, description="Modality dropout probability (default: 0.0)"
     )
+    modality_partial_dropout_prob: Optional[float] = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Modality partial dropout probability (default: 0.0)",
+    )
 
 
 class TrainingConfig(BaseModel):

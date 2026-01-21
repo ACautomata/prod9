@@ -430,6 +430,27 @@ class PreEncoder:
 
         return encoded_data
 
+    def encode_with_cache(
+        self,
+        dataset: IndexableDataset,
+        autoencoder: Any,
+        cache_dir: str,
+        split: str,
+    ) -> list[dict]:
+        """Encode all samples with disk caching."""
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_file = os.path.join(cache_dir, f"{split}_encoded.pt")
+
+        if os.path.exists(cache_file):
+            print(f"Loading pre-encoded data from {cache_file}")
+            return cast(list[dict], torch.load(cache_file, weights_only=False))
+
+        print(f"Pre-encoding {split} data...")
+        encoded_data = self.encode_all(dataset, autoencoder)
+        torch.save(encoded_data, cache_file)
+        print(f"Saved pre-encoded data to {cache_file}")
+        return encoded_data
+
 
 def _is_brats_sample(sample: Any) -> bool:
     if not isinstance(sample, dict):

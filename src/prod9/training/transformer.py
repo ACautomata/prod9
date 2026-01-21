@@ -6,7 +6,7 @@ The actual implementation resides in prod9.training.lightning.transformer_lightn
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -58,6 +58,7 @@ class TransformerLightning(_TransformerLightning):
         use_pure_in_context: bool = True,
         guidance_scale: float = 0.1,
         modality_dropout_prob: float = 0.0,
+        modality_partial_dropout_prob: float = 0.0,
         lr: float = 1e-4,
         beta1: float = 0.9,
         beta2: float = 0.999,
@@ -103,6 +104,7 @@ class TransformerLightning(_TransformerLightning):
         self.use_pure_in_context = use_pure_in_context
         self.guidance_scale = guidance_scale
         self.modality_dropout_prob = modality_dropout_prob
+        self.modality_partial_dropout_prob = modality_partial_dropout_prob
         self.scheduler_type = scheduler_type
         self.num_steps = num_steps
         self.mask_value = mask_value
@@ -143,56 +145,44 @@ class TransformerLightning(_TransformerLightning):
         if self.autoencoder is not None:
             return
 
-        autoencoder_model, config = load_autoencoder(self.autoencoder_path)
+        from prod9.training.model.infrastructure import InfrastructureFactory
 
-        import numpy as np
-
-        loaded_levels = config["levels"]
-        loaded_latent_channels = len(loaded_levels)
-        expected_latent_channels = self._transformer_config["latent_channels"]
-
-        if loaded_latent_channels != expected_latent_channels:
-            raise ValueError(
-                f"Autoencoder architecture mismatch! "
-                f"Loaded autoencoder has levels={loaded_levels} (latent_channels={loaded_latent_channels}), "
-                f"but transformer config expects latent_channels={expected_latent_channels}. "
-                f"Please check that the autoencoder_path in your transformer config matches "
-                f"the autoencoder_export_path from your Stage 1 training config."
-            )
-
-        codebook_size = int(np.prod(loaded_levels))
-
-        if self._transformer_provided is None:
-            transformer = ModelFactory.build_transformer(self._transformer_config, codebook_size)
-        else:
-            transformer = self._transformer_provided
-
-        for param in autoencoder_model.parameters():
-            param.requires_grad = False
-
-        sw_config = SlidingWindowConfig(
-            roi_size=self.sw_roi_size,
-            overlap=self.sw_overlap,
-            sw_batch_size=self.sw_batch_size,
-        )
-        self.autoencoder = AutoencoderInferenceWrapper(autoencoder_model, sw_config)
-
-        trainer = TransformerTrainer(
-            transformer=transformer,
-            modality_processor=self.modality_processor,
-            scheduler=self.scheduler,
-            schedule_fn=self._schedule_fn,
-            autoencoder=self.autoencoder,
-            num_steps=self.num_steps,
-            mask_value=self.mask_value,
-            unconditional_prob=self.unconditional_prob,
-            guidance_scale=self.guidance_scale,
-            modality_dropout_prob=self.modality_dropout_prob,
-            fid_metric=self.fid,
-            is_metric=self.is_metric,
+        # Assemble trainer using infrastructure factory
+        trainer = InfrastructureFactory.assemble_transformer_trainer(
+            config=self._build_config_dict(),
+            autoencoder_path=self.autoencoder_path,
+            transformer=self._transformer_provided,
+            device=self.device,
         )
 
+        self.autoencoder = trainer.autoencoder
         self.algorithm = trainer
+
+    def _build_config_dict(self) -> Dict[str, Any]:
+        """Reconstruct config dict for InfrastructureFactory."""
+        return {
+            "model": {
+                "transformer": self._transformer_config,
+                "num_classes": self.num_classes,
+                "contrast_embed_dim": self.contrast_embed_dim,
+            },
+            "sampler": {
+                "steps": self.num_steps,
+                "mask_value": self.mask_value,
+                "scheduler_type": self.scheduler_type,
+            },
+            "unconditional": {
+                "unconditional_prob": self.unconditional_prob,
+                "modality_partial_dropout_prob": self.modality_partial_dropout_prob,
+            },
+            "sliding_window": {
+                "roi_size": self.sw_roi_size,
+                "overlap": self.sw_overlap,
+                "sw_batch_size": self.sw_batch_size,
+            },
+            "guidance_scale": self.guidance_scale,
+            "modality_dropout_prob": self.modality_dropout_prob,
+        }
 
     def on_fit_start(self) -> None:
         if self.autoencoder is not None:
@@ -228,84 +218,17 @@ class TransformerLightning(_TransformerLightning):
         target_modality_idx: int,
         is_unconditional: bool = False,
     ) -> torch.Tensor:
-        """Generate samples with optional multi-source conditioning.
+        """Generate samples with optional multi-source conditioning."""
+        if self.algorithm is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
 
-        Args:
-            source_images: Single tensor or list of tensors for source modalities
-            source_modality_indices: Single int or list of ints for source modality indices
-            target_modality_idx: Target modality index to generate
-            is_unconditional: If True, ignore source inputs and generate unconditionally
-
-        Returns:
-            Generated image tensor
-        """
-        self.eval()
-        autoencoder = self._get_autoencoder()
-
-        with torch.no_grad():
-            # Normalize inputs to lists
-            if isinstance(source_images, torch.Tensor):
-                source_images = [source_images]
-            if isinstance(source_modality_indices, int):
-                source_modality_indices = [source_modality_indices]
-
-            # Encode all source images
-            source_latents = []
-            for img in source_images:
-                latent, _ = autoencoder.encode(img)
-                source_latents.append(latent)
-
-            # Build multi-source context
-            bs = source_latents[0].shape[0]
-            batch_labels = []
-            batch_latents = []
-
-            for i in range(bs):
-                batch_labels.append(source_modality_indices)
-                batch_latents.append([lat[i] for lat in source_latents])
-
-            target_label = torch.tensor(
-                [target_modality_idx], device=source_latents[0].device, dtype=torch.long
-            )
-
-            # Fix: Use is_unconditional parameter correctly
-            if is_unconditional:
-                context_seq, key_padding_mask = self.modality_processor(
-                    batch_labels=[],
-                    batch_latents=[],
-                    target_label=target_label,
-                    is_unconditional=True,
-                )
-            else:
-                context_seq, key_padding_mask = self.modality_processor(
-                    batch_labels=batch_labels,
-                    batch_latents=batch_latents,
-                    target_label=target_label,
-                    is_unconditional=False,
-                )
-
-            # Use first source latent to determine spatial dimensions
-            c, h, w, d = source_latents[0].shape[1:]
-            device = source_latents[0].device
-
-            z = torch.full(
-                (bs, c, h, w, d), float(self.mask_value), device=device, dtype=source_latents[0].dtype
-            )
-            seq_len = h * w * d
-            last_indices = torch.arange(end=seq_len, device=device)[None, :].repeat(bs, 1)
-
-            if self.algorithm is None:
-                raise RuntimeError("Transformer not initialized. Call setup() first.")
-
-            for step in range(self.num_steps):
-                z, last_indices = self.algorithm._sample_single_step(
-                    z, step, context_seq, key_padding_mask, last_indices
-                )
-
-            generated_image = autoencoder.decode_stage_2_outputs(z)
-
-        self.train()
-        return generated_image
+        return self.algorithm.sample(
+            source_images=source_images,
+            source_modality_indices=source_modality_indices,
+            target_modality_idx=target_modality_idx,
+            is_unconditional=is_unconditional,
+            is_latent_input=False,
+        )
 
     def _log_samples(
         self,

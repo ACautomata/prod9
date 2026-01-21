@@ -25,6 +25,7 @@ class TransformerLightning(pl.LightningModule):
         warmup_steps: Optional[int] = None,
         warmup_ratio: float = 0.02,
         warmup_eta_min: float = 0.0,
+        modality_partial_dropout_prob: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -39,6 +40,7 @@ class TransformerLightning(pl.LightningModule):
         self.warmup_steps = warmup_steps
         self.warmup_ratio = warmup_ratio
         self.warmup_eta_min = warmup_eta_min
+        self.modality_partial_dropout_prob = modality_partial_dropout_prob
 
     def training_step(
         self,
@@ -63,8 +65,41 @@ class TransformerLightning(pl.LightningModule):
         metrics = self.algorithm.compute_validation_metrics(batch, global_step=self.global_step)
         if metrics:
             payload = {f"val/{key}": value for key, value in metrics.items()}
-            self.log_dict(payload, on_step=True, on_epoch=False, logger=True)
+            self.log_dict(payload, on_step=False, on_epoch=True, logger=True, sync_dist=True)
         return metrics
+
+    def sample(
+        self,
+        source_images: list[torch.Tensor] | torch.Tensor,
+        source_modality_indices: list[int] | int,
+        target_modality_idx: int,
+        is_unconditional: bool = False,
+    ) -> torch.Tensor:
+        """Generate samples with optional multi-source conditioning.
+
+        Args:
+            source_images: Single tensor or list of tensors for source modalities
+            source_modality_indices: Single int or list of ints for source modality indices
+            target_modality_idx: Target modality index to generate
+            is_unconditional: If True, ignore source inputs and generate unconditionally
+
+        Returns:
+            Generated image tensor
+        """
+        if self.algorithm is None:
+            raise RuntimeError("Transformer not initialized. Call setup() first.")
+
+        self.eval()
+        with torch.no_grad():
+            generated_image = self.algorithm.sample(
+                source_images=source_images,
+                source_modality_indices=source_modality_indices,
+                target_modality_idx=target_modality_idx,
+                is_unconditional=is_unconditional,
+                is_latent_input=False,
+            )
+        self.train()
+        return generated_image
 
     def configure_optimizers(self):
         if self.algorithm is None:

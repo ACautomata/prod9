@@ -6,7 +6,7 @@ The actual implementation resides in prod9.training.lightning.maisi_lightning.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 import torch
 import torch.nn as nn
@@ -77,61 +77,31 @@ class MAISIDiffusionLightning(_MAISIDiffusionLightning):
         if self.vae is not None:
             return
 
-        # 1. Load VAE checkpoint
-        checkpoint = torch.load(self.vae_path, weights_only=False)
-        if "config" not in checkpoint:
-            raise ValueError(
-                f"Checkpoint '{self.vae_path}' missing 'config'. "
-                "Please re-export the VAE from Stage 1."
-            )
+        from prod9.training.model.infrastructure import InfrastructureFactory
 
-        config = checkpoint["config"]
-        state_dict = checkpoint.get("state_dict", checkpoint)
-
-        # 2. Create VAE
-        vae = AutoencoderMAISI(**config)
-        vae.load_state_dict(state_dict)
-        vae.eval()
-
-        # Freeze VAE parameters
-        for param in vae.parameters():
-            param.requires_grad = False
-
-        # 3. Wrap with inference wrapper
-        sw_config = SlidingWindowConfig(
-            roi_size=self.sw_roi_size,
-            overlap=self.sw_overlap,
-            sw_batch_size=self.sw_batch_size,
-        )
-        self.vae = AutoencoderInferenceWrapper(vae, sw_config)
-
-        # 4. Create scheduler
-        self.scheduler = RectifiedFlowSchedulerRF(
-            num_train_timesteps=self.num_train_timesteps,
-            num_inference_steps=self.num_inference_steps,
-        )
-
-        # 5. Create diffusion model if not provided
-        if self._diffusion_model is None:
-            latent_channels = config.get("latent_channels", 4)
-            self._diffusion_model = DiffusionModelRF(in_channels=latent_channels)
-
-        # 6. Create the standalone trainer (business logic)
-        trainer = DiffusionTrainer(
-            vae=self.vae,
+        # Assemble trainer using infrastructure factory
+        trainer = InfrastructureFactory.assemble_diffusion_trainer(
+            config=self._build_config_dict(),
+            vae_path=self.vae_path,
             diffusion_model=self._diffusion_model,
-            scheduler=self.scheduler,
-            num_train_timesteps=self.num_train_timesteps,
+            device=self.device,
         )
 
-        # 7. Assign trainer to the adapter
+        self.vae = trainer.vae
+        self.scheduler = trainer.scheduler
         self.algorithm = trainer
 
-    def on_fit_start(self) -> None:
-        """Move VAE to device before sanity check."""
-        if self.vae is not None:
-            self.vae.autoencoder = self.vae.autoencoder.to(self.device)
-            self.vae.sw_config.device = self.device
+    def _build_config_dict(self) -> Dict[str, Any]:
+        """Reconstruct config dict for InfrastructureFactory."""
+        return {
+            "num_train_timesteps": self.num_train_timesteps,
+            "num_inference_steps": self.num_inference_steps,
+            "sliding_window": {
+                "roi_size": self.sw_roi_size,
+                "overlap": self.sw_overlap,
+                "sw_batch_size": self.sw_batch_size,
+            },
+        }
 
     def validation_step(
         self,
@@ -139,46 +109,23 @@ class MAISIDiffusionLightning(_MAISIDiffusionLightning):
         batch_idx: int,
     ) -> Optional[STEP_OUTPUT]:
         """Validation step with full sampling."""
-        if self.vae is None:
-            raise RuntimeError("VAE not loaded. Call setup() first.")
-        if self.scheduler is None:
-            raise RuntimeError("Scheduler not initialized.")
-        if self._diffusion_model is None:
-            raise RuntimeError("Diffusion model not initialized.")
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized. Call setup() first.")
 
-        images = batch["image"]
-
-        # Generate samples
-        with torch.no_grad():
-            # Encode original to get shape
-            latent_shape = self.vae.encode_stage_2_inputs(images).shape
-
-            # Sample using Rectified Flow
-            sampler = RectifiedFlowSampler(
-                num_steps=self.num_inference_steps,
-                scheduler=self.scheduler,
-            )
-
-            generated_latent = sampler.sample(
-                diffusion_model=self._diffusion_model,
-                shape=latent_shape,
-                device=self.device,
-            )
-
-            # Decode to image space
-            generated_images = self.vae.decode(generated_latent)
-
-            # Compute metrics
-            psnr_value = self.psnr(generated_images, images)
-            ssim_value = self.ssim(generated_images, images)
-            lpips_value = self.lpips(generated_images, images)
+        metrics = self.algorithm.compute_validation_metrics(
+            batch, psnr_metric=self.psnr, ssim_metric=self.ssim, lpips_metric=self.lpips
+        )
 
         # Log
-        self.log("val/psnr", psnr_value)
-        self.log("val/ssim", ssim_value)
-        self.log("val/lpips", lpips_value, prog_bar=True)
+        self.log_dict(
+            {f"val/{k}": v for k, v in metrics.items()},
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            sync_dist=True,
+        )
 
-        return {"psnr": psnr_value, "ssim": ssim_value, "lpips": lpips_value}
+        return metrics
 
     def generate_samples(
         self,
@@ -187,35 +134,13 @@ class MAISIDiffusionLightning(_MAISIDiffusionLightning):
         condition: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Generate samples using trained diffusion model."""
-        if self.vae is None:
-            raise RuntimeError("VAE not loaded. Call setup() first.")
-        if self.scheduler is None:
-            raise RuntimeError("Scheduler not initialized.")
-        if self._diffusion_model is None:
-            raise RuntimeError("Diffusion model not initialized.")
+        if self.algorithm is None:
+            raise RuntimeError("Trainer not initialized. Call setup() first.")
 
         self.eval()
-
         with torch.no_grad():
-            if shape is None:
-                # Use default shape
-                shape = (num_samples, 4, 32, 32, 32)
-
-            # Sample latent
-            sampler = RectifiedFlowSampler(
-                num_steps=self.num_inference_steps,
-                scheduler=self.scheduler,
+            samples = self.algorithm.generate_samples(
+                num_samples=num_samples, shape=shape, condition=condition, device=self.device
             )
-
-            generated_latent = sampler.sample(
-                diffusion_model=self._diffusion_model,
-                shape=shape,
-                condition=condition,
-                device=self.device,
-            )
-
-            # Decode to image
-            generated_images = self.vae.decode(generated_latent)
-
         self.train()
-        return generated_images
+        return samples
