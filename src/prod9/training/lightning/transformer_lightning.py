@@ -37,6 +37,10 @@ class TransformerLightning(pl.LightningModule):
         if trainer is not None:
             self.transformer = trainer.transformer
             self.modality_processor = trainer.modality_processor
+            if trainer.fid_metric is not None:
+                self.fid_metric = trainer.fid_metric
+            if trainer.is_metric is not None:
+                self.is_metric = trainer.is_metric
             # Access of inner model from wrapper so it gets moved to device
             # Note: trainer.autoencoder is AutoencoderInferenceWrapper, which wraps the actual model
             # The shim sets self.autoencoder_model directly in setup()

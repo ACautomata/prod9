@@ -670,7 +670,7 @@ class TestSample(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             model.sample(source_image, 0, 1)
 
-        self.assertIn("Autoencoder not loaded", str(ctx.exception))
+        self.assertIn("Transformer not initialized", str(ctx.exception))
 
     @patch("prod9.generator.maskgit.MaskGiTSampler")
     @patch("prod9.training.metrics.FIDMetric3D")
