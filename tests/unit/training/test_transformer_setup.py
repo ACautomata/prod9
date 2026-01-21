@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from prod9.autoencoder.autoencoder_fsq import AutoencoderFSQ
-from prod9.generator.transformer import TransformerDecoder
+from prod9.generator.transformer import TransformerDecoderSingleStream
 from prod9.training.autoencoder import AutoencoderLightning
 from prod9.training.transformer import TransformerLightning
 
@@ -46,19 +46,22 @@ class TestTransformerSetup:
         """Create a temporary checkpoint file."""
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
             torch.save(fake_checkpoint, f.name)
-            yield f.name
-        # Cleanup is handled by tempfile
+            checkpoint_path = f.name
 
-    def test_setup_loads_autoencoder_from_hparams(
-        self, temp_checkpoint_path: str
-    ) -> None:
+        yield checkpoint_path
+
+        import os
+
+        if os.path.exists(checkpoint_path):
+            os.unlink(checkpoint_path)
+
+    def test_setup_loads_autoencoder_from_hparams(self, temp_checkpoint_path: str) -> None:
         """Test that setup() loads autoencoder from checkpoint hparams."""
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-                        num_blocks=2,
+            num_blocks=2,
             hidden_dim=64,
-            cond_dim=64,
             num_heads=4,
         )
 
@@ -70,34 +73,32 @@ class TestTransformerSetup:
         assert hasattr(model.autoencoder, "autoencoder")
 
         # Verify transformer was created with correct codebook_size
-        assert model.transformer is not None
-        assert isinstance(model.transformer, TransformerDecoder)
+        assert model.algorithm.transformer is not None
+        assert isinstance(model.algorithm.transformer, TransformerDecoderSingleStream)
         # codebook_size should be 4*4*4 = 64
-        assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 64
+        assert cast(nn.Conv3d, model.algorithm.transformer.out_proj).out_channels == 64
 
     def test_setup_only_loads_once(self, temp_checkpoint_path: str) -> None:
         """Test that setup() only loads autoencoder once."""
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-                    )
+        )
 
         # Call setup multiple times
         model.setup(stage="fit")
         first_autoencoder = model.autoencoder
-        first_transformer = model.transformer
+        first_transformer = model.algorithm.transformer
 
         model.setup(stage="validate")
         second_autoencoder = model.autoencoder
-        second_transformer = model.transformer
+        second_transformer = model.algorithm.transformer
 
         # Verify they are the same object (not reloaded)
         assert first_autoencoder is second_autoencoder
         assert first_transformer is second_transformer
 
-    def test_setup_works_for_all_stages(
-        self, temp_checkpoint_path: str
-    ) -> None:
+    def test_setup_works_for_all_stages(self, temp_checkpoint_path: str) -> None:
         """Test that setup() works for fit, validate, and test stages."""
         stages = ["fit", "validate", "test"]
 
@@ -105,7 +106,7 @@ class TestTransformerSetup:
             model = TransformerLightning(
                 autoencoder_path=temp_checkpoint_path,
                 latent_channels=3,
-                            )
+            )
 
             # Should not raise any error
             model.setup(stage=stage)
@@ -120,14 +121,14 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=temp_checkpoint_path,
             latent_channels=3,
-                    )
+        )
 
         model.setup(stage="fit")
 
         # levels = [4, 4, 4], so codebook_size = 64
         expected_codebook_size = 4 * 4 * 4
-        assert model.transformer is not None  # Type guard
-        actual_codebook_size = cast(nn.Conv3d, model.transformer.out_proj).out_channels
+        assert model.algorithm.transformer is not None  # Type guard
+        actual_codebook_size = cast(nn.Conv3d, model.algorithm.transformer.out_proj).out_channels
 
         assert actual_codebook_size == expected_codebook_size
 
@@ -141,7 +142,7 @@ class TestTransformerSetup:
         model = TransformerLightning(
             autoencoder_path=checkpoint_path,
             latent_channels=3,
-                    )
+        )
 
         # Should raise ValueError
         with pytest.raises(ValueError, match="missing 'config'"):
@@ -154,31 +155,40 @@ class TestTransformerSetup:
             "spatial_dims": 3,
             "in_channels": 1,
             "out_channels": 1,
-            # Missing levels
+            "num_channels": [32, 64],
+            "num_res_blocks": [1, 1],
+            "attention_levels": [False, False],
+            # levels is missing
         }
 
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
             torch.save({"config": config, "state_dict": {}}, f.name)
             checkpoint_path = f.name
 
-        model = TransformerLightning(
-            autoencoder_path=checkpoint_path,
-            latent_channels=3,
-                    )
+        try:
+            model = TransformerLightning(
+                autoencoder_path=checkpoint_path,
+                latent_channels=3,
+            )
 
-        # Should raise KeyError (or ValueError when accessing levels)
-        with pytest.raises(KeyError):
-            model.setup(stage="fit")
+            # CheckpointManager.load_autoencoder will call AutoencoderFSQ(**config)
+            # which will raise TypeError because 'levels' is missing
+            with pytest.raises((KeyError, TypeError)):
+                model.setup(stage="fit")
+        finally:
+            import os
+
+            if os.path.exists(checkpoint_path):
+                os.unlink(checkpoint_path)
 
     def test_setup_with_provided_transformer(self, temp_checkpoint_path: str) -> None:
         """Test that setup() doesn't recreate transformer if already provided."""
         # Create a transformer with specific codebook_size
-        custom_transformer = TransformerDecoder(
+        custom_transformer = TransformerDecoderSingleStream(
             latent_dim=3,
             patch_size=2,
             num_blocks=2,
             hidden_dim=64,
-            cond_dim=64,
             num_heads=4,
             codebook_size=999,  # Custom value
         )
@@ -187,14 +197,14 @@ class TestTransformerSetup:
             autoencoder_path=temp_checkpoint_path,
             transformer=custom_transformer,
             latent_channels=3,
-                    )
+        )
 
         model.setup(stage="fit")
 
         # Should use the provided transformer, not create a new one
-        assert model.transformer is not None  # Type guard
-        assert model.transformer is custom_transformer
-        assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 999
+        assert model.algorithm.transformer is not None  # Type guard
+        assert model.algorithm.transformer is custom_transformer
+        assert cast(nn.Conv3d, model.algorithm.transformer.out_proj).out_channels == 999
 
 
 class TestExportLoadIntegration:
@@ -246,5 +256,7 @@ class TestExportLoadIntegration:
             assert model.autoencoder.autoencoder._init_config["num_channels"] == [32, 64, 128]
 
             # Verify transformer has correct codebook_size
-            assert model.transformer is not None
-            assert cast(nn.Conv3d, model.transformer.out_proj).out_channels == 512  # 8*8*8
+            assert model.algorithm.transformer is not None
+            assert (
+                cast(nn.Conv3d, model.algorithm.transformer.out_proj).out_channels == 512
+            )  # 8*8*8

@@ -9,15 +9,18 @@ This module provides:
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, TypedDict
+from typing import Any, Callable, Dict, Literal, TypedDict
+from unittest.mock import MagicMock
 
 import pytest
+import pytorch_lightning as pl
 import torch
 
 
 # === TypedDict Definitions for Configuration ===
 class AutoencoderConfigDict(TypedDict, total=False):
     """Type-safe autoencoder configuration."""
+
     spatial_dims: int
     levels: tuple[int, ...] | list[int]
     in_channels: int
@@ -32,6 +35,7 @@ class AutoencoderConfigDict(TypedDict, total=False):
 
 class DiscriminatorConfigDict(TypedDict, total=False):
     """Type-safe discriminator configuration."""
+
     in_channels: int
     num_d: int
     ndf: int
@@ -46,6 +50,7 @@ class DiscriminatorConfigDict(TypedDict, total=False):
 
 class TrainingConfigDict(TypedDict, total=False):
     """Type-safe training configuration."""
+
     lr_g: float
     lr_d: float
     b1: float
@@ -59,12 +64,14 @@ class TrainingConfigDict(TypedDict, total=False):
 
 class ModelConfigDict(TypedDict, total=False):
     """Type-safe model configuration wrapper."""
+
     autoencoder: AutoencoderConfigDict
     discriminator: DiscriminatorConfigDict
 
 
 class LossConfigDict(TypedDict, total=False):
     """Type-safe loss configuration."""
+
     reconstruction: Dict[str, float]
     perceptual: Dict[str, float]
     adversarial: Dict[str, float]
@@ -73,6 +80,7 @@ class LossConfigDict(TypedDict, total=False):
 
 class OptimizerConfigDict(TypedDict, total=False):
     """Type-safe optimizer configuration."""
+
     lr_g: float
     lr_d: float
     b1: float
@@ -81,17 +89,20 @@ class OptimizerConfigDict(TypedDict, total=False):
 
 class LoopConfigDict(TypedDict, total=False):
     """Type-safe training loop configuration."""
+
     sample_every_n_steps: int
 
 
 class NestedTrainingConfigDict(TypedDict, total=False):
     """Type-safe nested training configuration."""
+
     optimizer: OptimizerConfigDict
     loop: LoopConfigDict
 
 
 class SystemTestConfig(TypedDict, total=False):
     """Complete system test configuration (new hierarchical structure)."""
+
     model: ModelConfigDict
     loss: LossConfigDict
     training: NestedTrainingConfigDict
@@ -111,7 +122,7 @@ def skip_if_no_gpu() -> Callable[[Any], Any]:
     """Decorator to skip tests requiring GPU."""
     return pytest.mark.skipif(
         not (torch.cuda.is_available() or torch.backends.mps.is_available()),
-        reason="GPU required for this test"
+        reason="GPU required for this test",
     )
 
 
@@ -123,7 +134,7 @@ MINIMAL_AUTOENCODER_CONFIG: AutoencoderConfigDict = {
     "out_channels": 1,
     "num_channels": [32, 64, 128],
     "attention_levels": [False, False, False],
-    "num_res_blocks": [1],
+    "num_res_blocks": [1, 1, 1],
     "latent_channels": 3,
     "norm_num_groups": 16,
 }
@@ -228,6 +239,88 @@ def wrap_discriminator_in_lightning_module(model: Any) -> Any:
             return self.discriminator(x)
 
     # Return the model wrapped if it's not already a LightningModule
-    if hasattr(model, 'training_step'):
+    if hasattr(model, "training_step"):
         return model
     return DiscriminatorWrapper(model)
+
+
+# === Testable Components ===
+class TestableComponent:
+    """Factory for small, CPU-friendly dummy batches."""
+
+    @staticmethod
+    def create_dummy_batch(
+        kind: Literal["autoencoder", "transformer", "controlnet"],
+        device: torch.device,
+    ) -> Dict[str, torch.Tensor | list[str]]:
+        """Create a minimal batch for unit tests."""
+        if kind == "autoencoder":
+            return {
+                "image": torch.zeros((1, 1, 8, 8, 8), device=device),
+                "modality": ["T1"],
+            }
+
+        if kind == "transformer":
+            return {
+                "cond_latent": torch.zeros((1, 4, 8, 8, 8), device=device),
+                "target_latent": torch.zeros((1, 4, 8, 8, 8), device=device),
+                "target_indices": torch.zeros((1, 512), device=device, dtype=torch.long),
+            }
+
+        if kind == "controlnet":
+            return {
+                "source_image": torch.zeros((1, 1, 64, 64, 64), device=device),
+                "target_image": torch.zeros((1, 1, 64, 64, 64), device=device),
+                "mask": torch.zeros((1, 1, 64, 64, 64), device=device),
+            }
+
+        raise ValueError(f"Unsupported batch kind: {kind}")
+
+
+# === Lightning Test Harness ===
+class LightningTestHarness:
+    """Lightweight utilities for LightningModule unit tests."""
+
+    @staticmethod
+    def attach_trainer(model: pl.LightningModule) -> None:
+        """Attach a minimal trainer mock to the model."""
+        trainer = MagicMock()
+        trainer.estimated_stepping_batches = 1
+        trainer.gradient_clip_val = 0.0
+        trainer.gradient_clip_algorithm = "norm"
+        trainer.checkpoint_callback = None
+
+        fit_loop = MagicMock()
+        epoch_loop = MagicMock()
+        manual_optimization = MagicMock()
+        optim_step_progress = MagicMock()
+        optim_step_progress.increment_completed = MagicMock()
+
+        manual_optimization.optim_step_progress = optim_step_progress
+        epoch_loop.manual_optimization = manual_optimization
+        fit_loop.epoch_loop = epoch_loop
+        trainer.fit_loop = fit_loop
+
+        # `LightningModule.trainer` is a property that raises if not attached.
+        # Set the internal `_trainer` field directly to avoid side effects.
+        setattr(model, "_trainer", trainer)
+
+    @staticmethod
+    def run_training_step(
+        model: pl.LightningModule,
+        batch: Dict[str, torch.Tensor | list[str]],
+    ) -> Any:
+        """Run a single training step with a minimal trainer attached."""
+        if getattr(model, "_trainer", None) is None:
+            LightningTestHarness.attach_trainer(model)
+        return model.training_step(batch, 0)
+
+    @staticmethod
+    def run_validation_step(
+        model: pl.LightningModule,
+        batch: Dict[str, torch.Tensor | list[str]],
+    ) -> Any:
+        """Run a single validation step with a minimal trainer attached."""
+        if getattr(model, "_trainer", None) is None:
+            LightningTestHarness.attach_trainer(model)
+        return model.validation_step(batch, 0)

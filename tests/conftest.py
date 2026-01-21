@@ -138,6 +138,94 @@ def condition_batch(device: torch.device) -> torch.Tensor:
     return torch.randn(batch_size, cond_channels, *spatial, device=device)
 
 
+@pytest.fixture
+def dummy_autoencoder_checkpoint_path(temp_checkpoint_dir: Path) -> Path:
+    """
+    Create a dummy autoencoder checkpoint with config/state_dict.
+
+    Returns:
+        Path to the saved checkpoint file.
+    """
+    from .test_helpers import MINIMAL_AUTOENCODER_CONFIG
+
+    checkpoint_path = temp_checkpoint_dir / "dummy_autoencoder.pt"
+
+    # AutoencoderFSQ derives latent_channels from len(levels). Some test configs
+    # include a convenience `latent_channels` key that would break init.
+    config = MINIMAL_AUTOENCODER_CONFIG.copy()
+    config.pop("latent_channels", None)
+
+    checkpoint = {
+        "state_dict": {"dummy_weight": torch.zeros(1)},
+        "config": config,
+    }
+    torch.save(checkpoint, checkpoint_path)
+    return checkpoint_path
+
+
+@pytest.fixture
+def dummy_diffusion_checkpoint_path(temp_checkpoint_dir: Path) -> Path:
+    """
+    Create a dummy diffusion checkpoint with accepted shape.
+
+    Returns:
+        Path to the saved checkpoint file.
+    """
+    checkpoint_path = temp_checkpoint_dir / "dummy_diffusion.pt"
+    checkpoint = {
+        "state_dict": {
+            "model": {
+                "dummy_weight": torch.zeros(1),
+            }
+        }
+    }
+    torch.save(checkpoint, checkpoint_path)
+    return checkpoint_path
+
+
+@pytest.fixture
+def dummy_batch_autoencoder(device: torch.device) -> Dict[str, Any]:
+    """
+    Create a minimal autoencoder batch.
+
+    Returns:
+        Dictionary with keys: image, modality
+    """
+    batch_size = DEFAULT_BATCH_SIZE
+    spatial = DEFAULT_SPATIAL_DIMS
+    return {
+        "image": torch.randn(batch_size, 1, *spatial, device=device),
+        "modality": ["T1"] * batch_size,
+    }
+
+
+@pytest.fixture
+def dummy_batch_transformer(device: torch.device) -> Dict[str, torch.Tensor]:
+    """
+    Create a minimal transformer batch.
+
+    Returns:
+        Dictionary with keys: cond_latent, cond_idx, target_latent,
+        target_indices, target_modality_idx
+    """
+    batch_size = DEFAULT_BATCH_SIZE
+    latent_dims = DEFAULT_LATENT_DIMS
+    latent_channels = 3
+    return {
+        "cond_latent": torch.randn(batch_size, latent_channels, *latent_dims, device=device),
+        "cond_idx": torch.zeros(batch_size, dtype=torch.long, device=device),
+        "target_latent": torch.randn(batch_size, latent_channels, *latent_dims, device=device),
+        "target_indices": torch.randint(
+            0,
+            8,
+            (batch_size, *latent_dims),
+            dtype=torch.long,
+            device=device,
+        ),
+        "target_modality_idx": torch.zeros(batch_size, dtype=torch.long, device=device),
+    }
+
+
 # === Mock Fixtures ===
 @pytest.fixture
 def mock_perceptual_loss() -> Dict[str, Any]:

@@ -44,9 +44,7 @@ class TestAMPGradientClipping(unittest.TestCase):
 
         # Create a mock trainer with manual optimization tracking
         mock_trainer = MagicMock()
-        mock_trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.increment_completed = (
-            MagicMock()
-        )
+        mock_trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.increment_completed = MagicMock()
         module.trainer = mock_trainer
 
         # Test that _optimizer_step works
@@ -84,9 +82,7 @@ class TestAMPGradientClipping(unittest.TestCase):
 
         # Create a mock trainer
         mock_trainer = MagicMock()
-        mock_trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.increment_completed = (
-            MagicMock()
-        )
+        mock_trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.increment_completed = MagicMock()
         module.trainer = mock_trainer
 
         # Mock lr_schedulers() to return the mock scheduler
@@ -116,9 +112,9 @@ class TestAMPGradientClipping(unittest.TestCase):
             discriminator=mock_discriminator,
         )
 
-        # Verify basic attributes
-        self.assertIsNotNone(module.autoencoder)
-        self.assertIsNotNone(module.discriminator)
+        # Verify basic attributes (autoencoder and discriminator are in algorithm)
+        self.assertIsNotNone(module.algorithm.autoencoder)
+        self.assertIsNotNone(module.algorithm.discriminator)
 
     def test_manual_optimization_mode(self):
         """Test that manual optimization is enabled."""

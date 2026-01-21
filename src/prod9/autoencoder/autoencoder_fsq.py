@@ -10,21 +10,22 @@ from sympy import false
 class FiniteScalarQuantizer(nn.Module):
     _levels_tensor: torch.Tensor
     _basis: torch.Tensor
+
     def __init__(self, spatial_dims: int, levels: Sequence[int]):
         super().__init__()
         # 使用PyTorch张量替代NumPy数组
-        self.register_buffer(
-            '_levels_tensor', torch.tensor(levels, dtype=torch.int32))
+        self.register_buffer("_levels_tensor", torch.tensor(levels, dtype=torch.int32))
 
         # 计算basis张量
         cumprod = torch.cumprod(self._levels_tensor[:-1], dim=0)
         basis = torch.cat([torch.ones(1, dtype=torch.int32), cumprod])
-        self.register_buffer('_basis', basis)
+        self.register_buffer("_basis", basis)
 
         # 维度排列设置
         self.flatten_permutation = [0] + list(range(2, spatial_dims + 2)) + [1]
-        self.quantization_permutation: list[int] = [
-            0, spatial_dims + 1] + list(range(1, spatial_dims + 1))
+        self.quantization_permutation: list[int] = [0, spatial_dims + 1] + list(
+            range(1, spatial_dims + 1)
+        )
 
     def forward(self, x: torch.Tensor):
         x = x.permute(self.flatten_permutation)
@@ -57,21 +58,17 @@ class FiniteScalarQuantizer(nn.Module):
         Returns:
             Embedded latent vectors
         """
-        is_sequence_format = embedding_indices.dim() == 2
+        is_sequence_format = embedding_indices.dim() <= 3
 
-        embedding_indices = embedding_indices[..., None]
-        # 纯PyTorch实现的整数除法与取余
         codes_non_centered = torch.remainder(
-            torch.div(embedding_indices, self._basis, rounding_mode='floor'),
-            self._levels_tensor
+            torch.div(embedding_indices[..., None], self._basis, rounding_mode="floor"),
+            self._levels_tensor,
         )
         result = self._scale_and_shift_inverse(codes_non_centered)
 
         if is_sequence_format:
-            # Sequence format: [B, K, C] -> return as-is
             return result
         else:
-            # Spatial format: [B, H, W, D, C] -> [B, C, H, W, D]
             return result.permute(self.quantization_permutation)
 
     def _scale_and_shift(self, zhat_normalized):
@@ -85,16 +82,13 @@ class FiniteScalarQuantizer(nn.Module):
     def _bound(self, z: torch.Tensor):
         eps = 1e-3
         half_l = (self._levels_tensor - 1) * (1 - eps) / 2
-        offset = torch.where(
-            self._levels_tensor % 2 == 1,
-            0.0,
-            0.5
-        )
+        offset = torch.where(self._levels_tensor % 2 == 1, 0.0, 0.5)
         shift = torch.tan(offset / half_l)
         return torch.tanh(z + shift) * half_l - offset
 
     def _round_ste(self, z: torch.Tensor) -> torch.Tensor:
         return (torch.round(z) - z).detach() + z
+
 
 class AutoencoderFSQ(AutoencoderKlMaisi):
     def __init__(self, spatial_dims: int, levels: Sequence[int], save_mem=False, **kwargs):
@@ -115,6 +109,11 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
                 - num_splits (default: 16)
                 - etc.
         """
+        # Set defaults for required AutoencoderKlMaisi arguments if not provided
+        kwargs.setdefault("num_channels", [32, 64, 128, 256, 512])
+        kwargs.setdefault("num_res_blocks", [1, 1, 1, 1, 1])
+        kwargs.setdefault("attention_levels", [False, False, True, True, True])
+
         # Save all init parameters for export
         self._init_config = {
             "spatial_dims": spatial_dims,
@@ -124,17 +123,12 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         }
 
         super().__init__(spatial_dims, latent_channels=len(levels), save_mem=save_mem, **kwargs)
-        self.quantizer = FiniteScalarQuantizer(
-            spatial_dims=spatial_dims,
-            levels=levels
-        )
+        self.quantizer = FiniteScalarQuantizer(spatial_dims=spatial_dims, levels=levels)
         self.quant_conv_log_sigma = None
 
-
-    
     def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:
         return self.quantizer(z_mu)
-    
+
     def encode(self, x: torch.Tensor):
         """
         Forwards an image through the spatial encoder and applies FSQ quantization.
@@ -169,7 +163,6 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         reconstruction = self.decode(z_q)
         return reconstruction, z_q, z_mu
 
-    
     def quantize_stage_2_inputs(self, x: torch.Tensor):
         """Encode and quantize input for Stage 2 transformer training.
 
@@ -178,7 +171,7 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         z_q, _ = self.encode(x)  # Returns (z_q, z_mu) - z_q is already quantized
         # Convert quantized continuous values to discrete token indices
         return self.quantizer.quantize(z_q)
-    
+
     def embed(self, indices):
         return self.quantizer.embed(indices)
 
@@ -199,4 +192,4 @@ class AutoencoderFSQ(AutoencoderKlMaisi):
         last_block = cast(nn.Module, decoder_blocks[-1])
         last_conv = cast(nn.Module, last_block.conv)
         conv3d = cast(nn.Conv3d, last_conv.conv)
-        return conv3d.weight 
+        return conv3d.weight

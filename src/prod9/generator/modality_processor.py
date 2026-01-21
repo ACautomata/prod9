@@ -11,7 +11,7 @@ Returns padded context_seq and key_padding_mask for transformer attention.
 import torch
 import torch.nn as nn
 from einops import rearrange
-from typing import List, Tuple, Union, cast
+from typing import Any, List, Tuple, Union, cast
 
 
 class ModalityProcessor(nn.Module):
@@ -166,17 +166,25 @@ class ModalityProcessor(nn.Module):
 
             if isinstance(labels[0], list):
                 result: List[List[torch.Tensor]] = []
-                labels_as_list = cast(List[List[torch.Tensor]], labels)
+                labels_as_list = cast(List[List[Any]], labels)
                 for item_labels in labels_as_list:
-                    result.append(
-                        [lbl if lbl.device == device else lbl.to(device) for lbl in item_labels]
-                    )
+                    normalized_item = []
+                    for lbl in item_labels:
+                        if isinstance(lbl, (int, float)):
+                            normalized_item.append(
+                                torch.tensor(lbl, device=device, dtype=torch.long)
+                            )
+                        elif isinstance(lbl, torch.Tensor):
+                            normalized_item.append(lbl.to(device))
+                        else:
+                            normalized_item.append(lbl)
+                    result.append(normalized_item)
                 return result
             elif isinstance(labels[0], torch.Tensor):
                 result: List[List[torch.Tensor]] = []
-                labels_as_tensor_list: List[torch.Tensor] = labels  # type: ignore[assignment]
+                labels_as_tensor_list = cast(List[torch.Tensor], labels)
                 for lbl in labels_as_tensor_list:
-                    result.append([lbl if lbl.device == device else lbl.to(device)])
+                    result.append([lbl.to(device)])
                 return result
             else:
                 raise ValueError(f"Invalid labels list type: {type(labels[0])}")
@@ -221,7 +229,7 @@ class ModalityProcessor(nn.Module):
                 return result
             elif isinstance(latents[0], torch.Tensor):
                 result: List[List[torch.Tensor]] = []
-                latents_as_tensor_list: List[torch.Tensor] = latents  # type: ignore[assignment]
+                latents_as_tensor_list = cast(List[torch.Tensor], latents)
                 for lat in latents_as_tensor_list:
                     result.append([lat.to(device)])
                 return result
