@@ -377,14 +377,12 @@ class TransformerTrainer:
         bsz, vocab_size, h_out, w_out, d_out = logits.shape
         logits_seq = logits.view(bsz, vocab_size, h_out * w_out * d_out).transpose(1, 2)
 
-        conf = logits_seq.softmax(-1)
-        token_id = logits_seq.argmax(-1)
+        probs = logits_seq.softmax(-1)
+        token_id = probs.argmax(-1)
 
-        last_mask = torch.zeros_like(conf, dtype=torch.bool)
-        last_mask.scatter_(1, token_id.unsqueeze(-1), True)
-
-        conf_masked = conf.masked_fill(~last_mask, -1)
-        sorted_pos = conf_masked.argsort(dim=1, descending=True)
+        # Get confidence of top tokens only - saves massive memory (bs, seq) instead of (bs, seq, vocab)
+        max_conf = probs.gather(2, token_id.unsqueeze(-1)).squeeze(-1)
+        sorted_pos = max_conf.argsort(dim=1, descending=True)
 
         num_update = int(self.schedule_fn(step / self.num_steps) * seq_len) - int(
             self.schedule_fn((step + 1) / self.num_steps) * seq_len

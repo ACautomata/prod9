@@ -42,6 +42,9 @@ class TransformerLightning(pl.LightningModule):
             # The shim sets self.autoencoder_model directly in setup()
             if hasattr(trainer.autoencoder, "autoencoder"):
                 self.autoencoder = trainer.autoencoder.autoencoder
+                # Explicitly freeze autoencoder to save memory
+                self.autoencoder.eval()
+                self.autoencoder.requires_grad_(False)
 
         self.lr = lr
         self.beta1 = beta1

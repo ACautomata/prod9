@@ -97,6 +97,7 @@ class DatasetBuilder:
 
         transform_config = dict(data_config)
         transform_config["stage"] = "stage2"
+        # Always use ROI crops for Stage 2 (including validation) to avoid OOM
         transform_config["train"] = True
         transform_config["modalities"] = modalities
 

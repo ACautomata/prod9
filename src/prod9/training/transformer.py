@@ -162,6 +162,11 @@ class TransformerLightning(_TransformerLightning):
         self.modality_processor = trainer.modality_processor
         self.autoencoder_model = trainer.autoencoder.autoencoder
 
+        # Explicitly freeze autoencoder to save memory
+        if self.autoencoder_model is not None:
+            self.autoencoder_model.eval()
+            self.autoencoder_model.requires_grad_(False)
+
     def _build_config_dict(self) -> Dict[str, Any]:
         """Reconstruct config dict for InfrastructureFactory."""
         return {

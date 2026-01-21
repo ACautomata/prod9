@@ -26,7 +26,9 @@ else:
         # This will only be used if someone tries to use MAISI without the module installed
         class _AutoencoderMAISIPlaceholder:
             """Placeholder class when MAISI is not available."""
+
             pass
+
         AutoencoderMAISI = cast(Any, _AutoencoderMAISIPlaceholder)
 
 
@@ -47,9 +49,15 @@ def _compute_scale_factor(autoencoder: Union[AutoencoderFSQ, "AutoencoderMAISI"]
     Raises:
         RuntimeError: If scale_factor cannot be determined from autoencoder architecture
     """
+    if hasattr(autoencoder, "_init_config") and isinstance(autoencoder._init_config, dict):
+        config_blocks = autoencoder._init_config.get("num_res_blocks")
+        if isinstance(config_blocks, (list, tuple)) and len(config_blocks) > 0:
+            return 2 ** (len(config_blocks) - 1)
+
     # Try to get from num_res_blocks attribute (parent class)
-    if hasattr(autoencoder, 'num_res_blocks'):
+    if hasattr(autoencoder, "num_res_blocks"):
         from torch.nn import ModuleList
+
         num_res_blocks = cast(ModuleList, autoencoder.num_res_blocks)
         num_stages = len(num_res_blocks)
         if num_stages == 0:
@@ -61,8 +69,9 @@ def _compute_scale_factor(autoencoder: Union[AutoencoderFSQ, "AutoencoderMAISI"]
 
     # Fallback: compute from encoder structure
     # The encoder has a series of blocks, count them to get num_stages
-    if hasattr(autoencoder, 'encoder') and hasattr(autoencoder.encoder, 'blocks'):
+    if hasattr(autoencoder, "encoder") and hasattr(autoencoder.encoder, "blocks"):
         from torch.nn import ModuleList
+
         blocks = cast(ModuleList, autoencoder.encoder.blocks)
         num_stages = len(blocks)
         if num_stages == 0:
@@ -151,26 +160,26 @@ class AutoencoderInferenceWrapper:
 
         # Auto-detect device if not specified
         if self.sw_config.device is None:
-            if hasattr(autoencoder, 'device'):
+            if hasattr(autoencoder, "device"):
                 device = autoencoder.device
                 if isinstance(device, torch.device):
                     self.sw_config.device = device
-                elif hasattr(autoencoder, 'parameters'):
+                elif hasattr(autoencoder, "parameters"):
                     try:
                         param = next(autoencoder.parameters())
                         self.sw_config.device = param.device
                     except StopIteration:
-                        self.sw_config.device = torch.device('cpu')
+                        self.sw_config.device = torch.device("cpu")
                 else:
-                    self.sw_config.device = torch.device('cpu')
-            elif hasattr(autoencoder, 'parameters'):
+                    self.sw_config.device = torch.device("cpu")
+            elif hasattr(autoencoder, "parameters"):
                 try:
                     param = next(autoencoder.parameters())
                     self.sw_config.device = param.device
                 except StopIteration:
-                    self.sw_config.device = torch.device('cpu')
+                    self.sw_config.device = torch.device("cpu")
             else:
-                self.sw_config.device = torch.device('cpu')
+                self.sw_config.device = torch.device("cpu")
 
     def _create_inferer(self, for_decode: bool = False) -> SlidingWindowInferer:
         """Create SlidingWindowInferer with current config.
@@ -272,9 +281,7 @@ class AutoencoderInferenceWrapper:
             return cast(AutoencoderFSQ, ae).quantize_stage_2_inputs(x)
         if hasattr(ae, "encode_stage_2_inputs"):
             return cast(Any, ae).encode_stage_2_inputs(x)
-        raise AttributeError(
-            "Autoencoder does not support Stage 2 input encoding."
-        )
+        raise AttributeError("Autoencoder does not support Stage 2 input encoding.")
 
     def decode_stage_2_outputs(self, latent: torch.Tensor) -> torch.Tensor:
         """

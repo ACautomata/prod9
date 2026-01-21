@@ -66,8 +66,6 @@ def _load_autoencoder(autoencoder_path: str, device: torch.device | None = None)
     # Remove keys that were already used or shouldn't be passed to __init__
     init_kwargs = {k: v for k, v in config.items() if k not in ("spatial_dims", "levels")}
 
-    # Force save_mem=True for inference (saves GPU memory during large volume processing)
-    init_kwargs["save_mem"] = True
 
     # Create model instance
     autoencoder = AutoencoderFSQ(spatial_dims=spatial_dims, levels=levels, **init_kwargs)
@@ -533,7 +531,7 @@ def main() -> None:
         # Parameter validation and normalization
         if args.unconditional:
             # Unconditional mode: don't need source_modalities
-            if hasattr(args, 'source_modalities') and args.source_modalities:
+            if hasattr(args, "source_modalities") and args.source_modalities:
                 print("⚠️  Warning: --source-modalities ignored in unconditional mode")
             source_modality_indices = []
         else:
@@ -541,7 +539,7 @@ def main() -> None:
             if args.source_modality is not None:
                 # Backward compatibility: convert --source-modality to list
                 source_modality_indices = [args.source_modality]
-            elif hasattr(args, 'source_modalities') and args.source_modalities:
+            elif hasattr(args, "source_modalities") and args.source_modalities:
                 source_modality_indices = args.source_modalities
             else:
                 generate_parser.error(
