@@ -253,6 +253,9 @@ def generate(
     checkpoint: str,
     output: str,
     num_samples: int = 10,
+    source_modality_indices: list[int] | None = None,
+    target_modality_idx: int = 1,
+    unconditional: bool = False,
     roi_size: tuple[int, int, int] | None = None,
     overlap: float | None = None,
     sw_batch_size: int | None = None,
@@ -271,6 +274,9 @@ def generate(
         checkpoint: Path to transformer checkpoint
         output: Directory to save generated samples
         num_samples: Number of samples to generate
+        source_modality_indices: List of source modality indices for conditional generation
+        target_modality_idx: Target modality index
+        unconditional: If True, generate unconditionally
         roi_size: Sliding window ROI size (overrides config)
         overlap: Sliding window overlap (overrides config)
         sw_batch_size: Sliding window batch size (overrides config)
@@ -339,22 +345,64 @@ def generate(
     )
 
     # Generate samples
-    with torch.no_grad():
-        for i in range(num_samples):
-            # Sample using the model's sample method
-            # For unconditional generation, pass is_unconditional=True
-            generated_image = model.sample(
-                source_image=torch.randn(1, 1, 128, 128, 128).to(device),
-                source_modality_idx=0,
-                target_modality_idx=1,
-                is_unconditional=False,
-            )
+    from monai.transforms.io.array import SaveImage
 
-            # Save generated image
-            from monai.transforms.io.array import SaveImage
+    if unconditional:
+        # Unconditional generation mode
+        with torch.no_grad():
+            for i in range(num_samples):
+                generated_image = model.sample(
+                    source_images=[],
+                    source_modality_indices=[],
+                    target_modality_idx=target_modality_idx,
+                    is_unconditional=True,
+                )
 
-            save_image = SaveImage(output_dir=output, output_postfix=f"_sample_{i}")
-            save_image(generated_image.cpu())
+                save_image = SaveImage(output_dir=output, output_postfix=f"_sample_{i}")
+                save_image(generated_image.cpu())
+
+        print(f"Generated {num_samples} unconditional samples. Saved to {output}")
+    else:
+        # Conditional generation: load real data from dataset
+        from prod9.training.config import load_validated_config
+        from prod9.data.builders import DatasetBuilder
+        from prod9.data.datasets.brats import BRATS_MODALITY_KEYS
+
+        # Load configuration
+        config_path = resolve_config_path(config)
+        cfg = load_validated_config(config_path, stage="transformer")
+
+        # Load dataset
+        dataset = DatasetBuilder().build_brats_stage2(cfg, split="val")
+        dataset_len = len(dataset)  # type: ignore[arg-type]
+
+        with torch.no_grad():
+            for i in range(num_samples):
+                # Get sample from dataset
+                sample_idx = i % dataset_len
+                sample = dataset[sample_idx]
+
+                # Load multiple source modalities
+                source_images = []
+                # Type assertion: source_modality_indices is guaranteed to be list[int] here
+                source_mods = source_modality_indices if source_modality_indices else []
+                for mod_idx in source_mods:
+                    modality_name = BRATS_MODALITY_KEYS[mod_idx]
+                    src_img = sample[modality_name]
+                    source_images.append(src_img.unsqueeze(0).to(device))
+
+                # Generate
+                generated_image = model.sample(
+                    source_images=source_images,
+                    source_modality_indices=source_mods,
+                    target_modality_idx=target_modality_idx,
+                    is_unconditional=False,
+                )
+
+                save_image = SaveImage(output_dir=output, output_postfix=f"_sample_{i}")
+                save_image(generated_image.cpu())
+
+        print(f"Generated {num_samples} conditional samples. Saved to {output}")
 
     print(f"Generated {num_samples} samples. Saved to {output}")
 
@@ -431,6 +479,30 @@ def main() -> None:
         help="Number of samples to generate",
     )
     generate_parser.add_argument(
+        "--source-modalities",
+        type=int,
+        nargs="+",
+        required=False,
+        help="Source modality indices (e.g., 0 1 2 for T1+T1ce+T2)",
+    )
+    generate_parser.add_argument(
+        "--source-modality",
+        type=int,
+        default=None,
+        help="Single source modality index for backward compatibility",
+    )
+    generate_parser.add_argument(
+        "--target-modality",
+        type=int,
+        required=True,
+        help="Target modality index (0: T1, 1: T1ce, 2: T2, 3: FLAIR)",
+    )
+    generate_parser.add_argument(
+        "--unconditional",
+        action="store_true",
+        help="Enable unconditional generation (ignores source modalities)",
+    )
+    generate_parser.add_argument(
         "--roi-size",
         type=int,
         nargs=3,
@@ -458,12 +530,37 @@ def main() -> None:
     elif args.command == "test":
         test_transformer(args.config, args.checkpoint)
     elif args.command == "generate":
+        # Parameter validation and normalization
+        if args.unconditional:
+            # Unconditional mode: don't need source_modalities
+            if hasattr(args, 'source_modalities') and args.source_modalities:
+                print("⚠️  Warning: --source-modalities ignored in unconditional mode")
+            source_modality_indices = []
+        else:
+            # Conditional mode: need source_modalities
+            if args.source_modality is not None:
+                # Backward compatibility: convert --source-modality to list
+                source_modality_indices = [args.source_modality]
+            elif hasattr(args, 'source_modalities') and args.source_modalities:
+                source_modality_indices = args.source_modalities
+            else:
+                generate_parser.error(
+                    "--source-modalities or --source-modality required for conditional generation"
+                )
+
+        # target_modality is always required
+        if args.target_modality is None:
+            generate_parser.error("--target-modality is always required")
+
         roi_size = tuple(args.roi_size) if args.roi_size else None
         generate(
             args.config,
             args.checkpoint,
             args.output,
             args.num_samples,
+            source_modality_indices=source_modality_indices,
+            target_modality_idx=args.target_modality,
+            unconditional=args.unconditional,
             roi_size=roi_size,
             overlap=args.overlap if args.overlap else None,
             sw_batch_size=args.sw_batch_size if args.sw_batch_size else None,

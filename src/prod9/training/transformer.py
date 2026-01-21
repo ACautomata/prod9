@@ -223,42 +223,73 @@ class TransformerLightning(_TransformerLightning):
 
     def sample(
         self,
-        source_image: torch.Tensor,
-        source_modality_idx: int,
+        source_images: list[torch.Tensor] | torch.Tensor,
+        source_modality_indices: list[int] | int,
         target_modality_idx: int,
         is_unconditional: bool = False,
     ) -> torch.Tensor:
+        """Generate samples with optional multi-source conditioning.
+
+        Args:
+            source_images: Single tensor or list of tensors for source modalities
+            source_modality_indices: Single int or list of ints for source modality indices
+            target_modality_idx: Target modality index to generate
+            is_unconditional: If True, ignore source inputs and generate unconditionally
+
+        Returns:
+            Generated image tensor
+        """
         self.eval()
         autoencoder = self._get_autoencoder()
 
         with torch.no_grad():
-            # Encode source - wrapper.encode() returns (z_q, z_sigma)
-            source_latent, _ = autoencoder.encode(source_image)
+            # Normalize inputs to lists
+            if isinstance(source_images, torch.Tensor):
+                source_images = [source_images]
+            if isinstance(source_modality_indices, int):
+                source_modality_indices = [source_modality_indices]
 
-            bs = source_latent.shape[0]
-            batch_labels = [[source_modality_idx] for _ in range(bs)]
-            batch_latents = [[source_latent[i]] for i in range(bs)]
+            # Encode all source images
+            source_latents = []
+            for img in source_images:
+                latent, _ = autoencoder.encode(img)
+                source_latents.append(latent)
+
+            # Build multi-source context
+            bs = source_latents[0].shape[0]
+            batch_labels = []
+            batch_latents = []
+
+            for i in range(bs):
+                batch_labels.append(source_modality_indices)
+                batch_latents.append([lat[i] for lat in source_latents])
 
             target_label = torch.tensor(
-                [target_modality_idx], device=source_latent.device, dtype=torch.long
+                [target_modality_idx], device=source_latents[0].device, dtype=torch.long
             )
 
-            context_seq_cond, key_padding_mask_cond = self.modality_processor(
-                batch_labels, batch_latents, target_label, is_unconditional=False
-            )
-
+            # Fix: Use is_unconditional parameter correctly
             if is_unconditional:
-                context_seq = context_seq_cond
-                key_padding_mask = key_padding_mask_cond
+                context_seq, key_padding_mask = self.modality_processor(
+                    batch_labels=[],
+                    batch_latents=[],
+                    target_label=target_label,
+                    is_unconditional=True,
+                )
             else:
-                context_seq = context_seq_cond
-                key_padding_mask = key_padding_mask_cond
+                context_seq, key_padding_mask = self.modality_processor(
+                    batch_labels=batch_labels,
+                    batch_latents=batch_latents,
+                    target_label=target_label,
+                    is_unconditional=False,
+                )
 
-            c, h, w, d = source_latent.shape[1:]
-            device = source_latent.device
+            # Use first source latent to determine spatial dimensions
+            c, h, w, d = source_latents[0].shape[1:]
+            device = source_latents[0].device
 
             z = torch.full(
-                (bs, c, h, w, d), float(self.mask_value), device=device, dtype=source_latent.dtype
+                (bs, c, h, w, d), float(self.mask_value), device=device, dtype=source_latents[0].dtype
             )
             seq_len = h * w * d
             last_indices = torch.arange(end=seq_len, device=device)[None, :].repeat(bs, 1)
