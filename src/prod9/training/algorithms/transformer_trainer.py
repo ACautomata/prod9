@@ -254,6 +254,7 @@ class TransformerTrainer:
 
         return metrics
 
+    @torch.no_grad()
     def sample(
         self,
         source_images: list[torch.Tensor] | list[list[torch.Tensor]] | torch.Tensor,
@@ -358,6 +359,7 @@ class TransformerTrainer:
         # 6. Decode
         return autoencoder.decode_stage_2_outputs(z)
 
+    @torch.no_grad()
     def _sample_single_step(
         self,
         z: torch.Tensor,
