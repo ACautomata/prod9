@@ -161,6 +161,7 @@ class TransformerLightning(_TransformerLightning):
         self.transformer = trainer.transformer
         self.modality_processor = trainer.modality_processor
         self.autoencoder_model = trainer.autoencoder.autoencoder
+        self.autoencoder = trainer.autoencoder.autoencoder
 
     def _build_config_dict(self) -> Dict[str, Any]:
         """Reconstruct config dict for InfrastructureFactory."""
