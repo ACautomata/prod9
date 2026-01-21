@@ -56,21 +56,26 @@ class DiffusionTrainer:
     ) -> torch.Tensor:
         """Generate samples using Rectified Flow."""
         if shape is None:
-            shape = (num_samples, self.diffusion_model.in_channels, 32, 32, 32)
+            in_channels = getattr(self.diffusion_model, "in_channels", 4)
+            shape = (num_samples, in_channels, 32, 32, 32)
 
         from prod9.diffusion.sampling import RectifiedFlowSampler
 
+        num_inference_steps = getattr(self.scheduler, "num_inference_steps", 10)
         sampler = RectifiedFlowSampler(
-            num_steps=self.scheduler.num_inference_steps,
+            num_steps=num_inference_steps,
             scheduler=self.scheduler,
         )
 
         with torch.no_grad():
+            # Ensure device is torch.device if it's a string
+            target_device = torch.device(device) if isinstance(device, str) else device
+
             generated_latent = sampler.sample(
                 diffusion_model=self.diffusion_model,
                 shape=shape,
                 condition=condition,
-                device=device,
+                device=target_device,
             )
             return self.vae.decode(generated_latent)
 

@@ -7,7 +7,7 @@ The actual implementation resides in prod9.training.lightning.maisi_lightning.
 from __future__ import annotations
 
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import torch
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator

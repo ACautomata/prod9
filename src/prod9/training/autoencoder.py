@@ -118,6 +118,10 @@ class AutoencoderLightning(_AutoencoderLightning):
         )
 
         self.algorithm = trainer
+        # Register for device placement
+        self.autoencoder_model = trainer.autoencoder
+        self.discriminator_model = trainer.discriminator
+        self.loss_fn = trainer.loss_fn
 
     def _build_config_dict(self) -> Dict[str, Any]:
         """Reconstruct config dict for InfrastructureFactory."""

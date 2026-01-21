@@ -100,9 +100,15 @@ class ControlNetLightning(_ControlNetLightning):
         )
 
         self.vae = trainer.vae
-        self.diffusion_model = trainer.diffusion_model
+        self.diffusion_model = cast(DiffusionModelRF, trainer.diffusion_model)
         self.scheduler = trainer.scheduler
         self.algorithm = trainer
+
+        # Register modules for device placement
+        self.vae_model = trainer.vae.autoencoder
+        self.diffusion_model_reg = trainer.diffusion_model
+        self.controlnet_reg = trainer.controlnet
+        self.condition_encoder_reg = trainer.condition_encoder
 
     def _build_config_dict(self) -> Dict[str, Any]:
         """Reconstruct config dict for InfrastructureFactory."""
@@ -121,6 +127,7 @@ class ControlNetLightning(_ControlNetLightning):
 
     def on_fit_start(self) -> None:
         """Move models to device before sanity check."""
+        super().on_fit_start()
         if self.vae is not None:
             self.vae.autoencoder = self.vae.autoencoder.to(self.device)
             self.vae.sw_config.device = self.device
@@ -130,6 +137,16 @@ class ControlNetLightning(_ControlNetLightning):
             self._controlnet = self._controlnet.to(self.device)
         if self._condition_encoder is not None:
             self._condition_encoder = self._condition_encoder.to(self.device)
+
+    def on_validation_start(self) -> None:
+        super().on_validation_start()
+        if self.vae is not None:
+            self.vae.sw_config.device = self.device
+
+    def on_test_start(self) -> None:
+        super().on_test_start()
+        if self.vae is not None:
+            self.vae.sw_config.device = self.device
 
     def generate_conditional(
         self,

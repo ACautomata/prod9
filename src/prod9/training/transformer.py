@@ -157,6 +157,10 @@ class TransformerLightning(_TransformerLightning):
 
         self.autoencoder = trainer.autoencoder
         self.algorithm = trainer
+        # Register modules for device placement
+        self.transformer = trainer.transformer
+        self.modality_processor = trainer.modality_processor
+        self.autoencoder_model = trainer.autoencoder.autoencoder
 
     def _build_config_dict(self) -> Dict[str, Any]:
         """Reconstruct config dict for InfrastructureFactory."""
@@ -185,8 +189,19 @@ class TransformerLightning(_TransformerLightning):
         }
 
     def on_fit_start(self) -> None:
+        super().on_fit_start()
         if self.autoencoder is not None:
             self.autoencoder.autoencoder = self.autoencoder.autoencoder.to(self.device)
+            self.autoencoder.sw_config.device = self.device
+
+    def on_validation_start(self) -> None:
+        super().on_validation_start()
+        if self.autoencoder is not None:
+            self.autoencoder.sw_config.device = self.device
+
+    def on_test_start(self) -> None:
+        super().on_test_start()
+        if self.autoencoder is not None:
             self.autoencoder.sw_config.device = self.device
 
     def forward(

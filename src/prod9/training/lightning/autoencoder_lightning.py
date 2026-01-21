@@ -33,6 +33,12 @@ class AutoencoderLightning(pl.LightningModule):
         self.save_hyperparameters(ignore=["trainer"])
 
         self.algorithm = trainer
+        self.autoencoder = trainer.autoencoder
+        self.discriminator = trainer.discriminator
+        self.loss_fn = trainer.loss_fn
+        self.psnr_metric = trainer.psnr_metric
+        self.ssim_metric = trainer.ssim_metric
+        self.lpips_metric = trainer.lpips_metric
         self.last_layer = trainer.autoencoder.get_last_layer()
 
         self.warmup_enabled = warmup_enabled
@@ -139,8 +145,8 @@ class AutoencoderLightning(pl.LightningModule):
         return [p for group in opt.param_groups for p in group["params"]]
 
     @staticmethod
-    def _to_float(value: torch.Tensor | float | int) -> float:
-        if isinstance(value, torch.Tensor):
+    def _to_float(value: Any) -> float:
+        if hasattr(value, "detach"):
             return float(value.detach().item())
         return float(value)
 

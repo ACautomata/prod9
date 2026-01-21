@@ -618,15 +618,16 @@ class VAEGANLoss(nn.Module):
         The network is lazily initialized on first forward pass.
         """
         if self.perceptual_network is None:
-            self.perceptual_network = PerceptualLoss(
+            perceptual_network = PerceptualLoss(
                 spatial_dims=self.spatial_dims,
                 network_type=self.perceptual_network_type,
                 is_fake_3d=self.is_fake_3d,
                 fake_3d_ratio=self.fake_3d_ratio,
             ).to(fake_images.device)
             # Freeze pretrained network weights to prevent training instability
-            for param in self.perceptual_network.parameters():
+            for param in perceptual_network.parameters():
                 param.requires_grad = False
+            self.perceptual_network = perceptual_network
         # Type narrowing: perceptual_network is now guaranteed to be non-None
         network = self.perceptual_network
         assert network is not None

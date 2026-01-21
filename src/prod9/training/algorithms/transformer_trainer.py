@@ -295,9 +295,15 @@ class TransformerTrainer:
 
             # Encode all source images
             source_latents = []
-            for img in source_imgs_list:
-                latent, _ = autoencoder.encode(img)
-                source_latents.append(latent)
+            for img_item in source_imgs_list:
+                if isinstance(img_item, list):
+                    # Handle nested lists if they occur unexpectedly
+                    for sub_img in img_item:
+                        latent, _ = autoencoder.encode(sub_img)
+                        source_latents.append(latent)
+                else:
+                    latent, _ = autoencoder.encode(img_item)
+                    source_latents.append(latent)
 
             bs = source_latents[0].shape[0] if source_latents else 1
             latents_norm = []

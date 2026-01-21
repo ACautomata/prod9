@@ -9,3 +9,4 @@ AGENTS.md
 .pytest_cache
 .opencode
 .sisyphus
+.claude

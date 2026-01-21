@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Mapping
+from typing import Any, Dict, Mapping
 
 import torch
 from monai.networks.nets.patchgan_discriminator import MultiScalePatchDiscriminator
@@ -103,8 +103,8 @@ class AutoencoderTrainer:
         }
 
     @staticmethod
-    def _to_float(value: torch.Tensor | float | int) -> float:
-        if isinstance(value, torch.Tensor):
+    def _to_float(value: Any) -> float:
+        if hasattr(value, "detach"):
             return float(value.detach().item())
         return float(value)
 

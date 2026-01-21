@@ -32,6 +32,12 @@ class TransformerLightning(pl.LightningModule):
         self.save_hyperparameters(ignore=["trainer"])
         self.algorithm = trainer
 
+        # Register modules so Lightning handles device placement and checkpointing
+        self.transformer = trainer.transformer
+        self.modality_processor = trainer.modality_processor
+        # Access the inner model from the wrapper so it gets moved to device
+        self.autoencoder = trainer.autoencoder.autoencoder
+
         self.lr = lr
         self.beta1 = beta1
         self.beta2 = beta2
@@ -41,6 +47,26 @@ class TransformerLightning(pl.LightningModule):
         self.warmup_ratio = warmup_ratio
         self.warmup_eta_min = warmup_eta_min
         self.modality_partial_dropout_prob = modality_partial_dropout_prob
+
+    def on_fit_start(self) -> None:
+        """Ensure the autoencoder wrapper knows the correct device."""
+        if self.algorithm:
+            self.algorithm.autoencoder.sw_config.device = self.device
+
+    def on_validation_start(self) -> None:
+        """Ensure the autoencoder wrapper knows the correct device."""
+        if self.algorithm:
+            self.algorithm.autoencoder.sw_config.device = self.device
+
+    def on_test_start(self) -> None:
+        """Ensure the autoencoder wrapper knows the correct device."""
+        if self.algorithm:
+            self.algorithm.autoencoder.sw_config.device = self.device
+
+    def on_predict_start(self) -> None:
+        """Ensure the autoencoder wrapper knows the correct device."""
+        if self.algorithm:
+            self.algorithm.autoencoder.sw_config.device = self.device
 
     def training_step(
         self,

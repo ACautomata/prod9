@@ -35,6 +35,9 @@ class MAISIVAELightning(pl.LightningModule):
         self.save_hyperparameters(ignore=["trainer"])
 
         self.algorithm = trainer
+        self.vae = trainer.vae
+        self.discriminator = trainer.discriminator
+        self.loss_fn = trainer.loss_fn
 
         self.warmup_enabled = warmup_enabled
         self.warmup_steps = warmup_steps
@@ -199,7 +202,24 @@ class MAISIDiffusionLightning(pl.LightningModule):
 
         self.save_hyperparameters(ignore=["trainer"])
         self.algorithm = trainer
+        self.diffusion_model = trainer.diffusion_model
+        # Use inner model if it's a wrapper so Lightning moves it
+        self.vae = trainer.vae.autoencoder if hasattr(trainer.vae, "autoencoder") else trainer.vae
         self.lr = lr
+
+    def _sync_vae_device(self) -> None:
+        """Ensure VAE wrapper knows the current device."""
+        if self.algorithm and hasattr(self.algorithm.vae, "sw_config"):
+            self.algorithm.vae.sw_config.device = self.device
+
+    def on_fit_start(self) -> None:
+        self._sync_vae_device()
+
+    def on_validation_start(self) -> None:
+        self._sync_vae_device()
+
+    def on_test_start(self) -> None:
+        self._sync_vae_device()
 
     def training_step(
         self,
@@ -271,7 +291,25 @@ class ControlNetLightning(pl.LightningModule):
 
         self.save_hyperparameters(ignore=["trainer"])
         self.algorithm = trainer
+        self.controlnet = trainer.controlnet
+        self.condition_encoder = trainer.condition_encoder
+        self.diffusion_model = trainer.diffusion_model
+        self.vae = trainer.vae.autoencoder if hasattr(trainer.vae, "autoencoder") else trainer.vae
         self.lr = lr
+
+    def _sync_vae_device_control(self) -> None:
+        """Ensure VAE wrapper knows the current device."""
+        if self.algorithm and hasattr(self.algorithm.vae, "sw_config"):
+            self.algorithm.vae.sw_config.device = self.device
+
+    def on_fit_start(self) -> None:
+        self._sync_vae_device_control()
+
+    def on_validation_start(self) -> None:
+        self._sync_vae_device_control()
+
+    def on_test_start(self) -> None:
+        self._sync_vae_device_control()
 
     def training_step(
         self,
