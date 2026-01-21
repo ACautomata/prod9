@@ -38,5 +38,9 @@ The existing modules in `src/prod9/training/` (e.g., `autoencoder.py`, `transfor
 
 ## Verification
 - All existing unit tests pass.
-- New unit tests added for all business logic trainers.
-- Smoke tests verified for Stage 1 and Stage 2 training commands.
+- New unit tests added for all business logic trainers in `prod9.training.algorithms`.
+- Comprehensive integration tests using `LightningTestHarness` added in `tests/integration/` to verify:
+  - `AutoencoderLightning` / `TransformerLightning` (FSQ)
+  - `MAISIVAELightning` / `MAISIDiffusionLightning` / `ControlNetLightning` (MAISI)
+- All Lightning modules correctly delegate to standalone Trainers while maintaining backward compatibility.
+- Type safety enforced across the new architecture (no `# type: ignore`).

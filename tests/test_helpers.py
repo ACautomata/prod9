@@ -289,6 +289,7 @@ class LightningTestHarness:
         trainer.gradient_clip_val = 0.0
         trainer.gradient_clip_algorithm = "norm"
         trainer.checkpoint_callback = None
+        trainer.global_step = 0
 
         fit_loop = MagicMock()
         epoch_loop = MagicMock()
