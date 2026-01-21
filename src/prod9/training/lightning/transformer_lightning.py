@@ -17,7 +17,7 @@ class TransformerLightning(pl.LightningModule):
 
     def __init__(
         self,
-        trainer: TransformerTrainer,
+        trainer: Optional[TransformerTrainer],
         lr: float = 1e-4,
         beta1: float = 0.9,
         beta2: float = 0.999,
@@ -33,10 +33,12 @@ class TransformerLightning(pl.LightningModule):
         self.algorithm = trainer
 
         # Register modules so Lightning handles device placement and checkpointing
-        self.transformer = trainer.transformer
-        self.modality_processor = trainer.modality_processor
-        # Access the inner model from the wrapper so it gets moved to device
-        self.autoencoder = trainer.autoencoder.autoencoder
+        # Support delayed initialization: trainer may be None initially and set in setup()
+        if trainer is not None:
+            self.transformer = trainer.transformer
+            self.modality_processor = trainer.modality_processor
+            # Access of inner model from wrapper so it gets moved to device
+            self.autoencoder = trainer.autoencoder.autoencoder
 
         self.lr = lr
         self.beta1 = beta1
