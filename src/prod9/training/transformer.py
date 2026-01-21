@@ -155,6 +155,10 @@ class TransformerLightning(_TransformerLightning):
             device=self.device,
         )
 
+        # Overwrite with managed metrics from shim to ensure correct device placement
+        trainer.fid_metric = self.fid
+        trainer.is_metric = self.is_metric
+
         self.autoencoder = trainer.autoencoder
         self.algorithm = trainer
         # Register modules for device placement

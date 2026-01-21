@@ -245,12 +245,8 @@ class TransformerTrainer:
             metrics: Dict[str, torch.Tensor] = {}
             if self.fid_metric is not None:
                 self.fid_metric.update(generated_image, target_image)
-                metrics["fid"] = self.fid_metric.compute()
             if self.is_metric is not None:
                 self.is_metric.update(generated_image)
-                is_mean, is_std = self.is_metric.compute()
-                metrics["is_mean"] = is_mean
-                metrics["is_std"] = is_std
 
         return metrics
 
