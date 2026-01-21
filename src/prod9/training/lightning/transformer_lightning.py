@@ -38,7 +38,10 @@ class TransformerLightning(pl.LightningModule):
             self.transformer = trainer.transformer
             self.modality_processor = trainer.modality_processor
             # Access of inner model from wrapper so it gets moved to device
-            self.autoencoder = trainer.autoencoder.autoencoder
+            # Note: trainer.autoencoder is AutoencoderInferenceWrapper, which wraps the actual model
+            # The shim sets self.autoencoder_model directly in setup()
+            if hasattr(trainer.autoencoder, "autoencoder"):
+                self.autoencoder = trainer.autoencoder.autoencoder
 
         self.lr = lr
         self.beta1 = beta1
