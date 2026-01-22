@@ -101,6 +101,18 @@ class TransformerLightning(pl.LightningModule):
         if self.algorithm is None:
             raise RuntimeError("Transformer not initialized. Call setup() first.")
         metrics = self.algorithm.compute_validation_metrics(batch, global_step=self.global_step)
+
+        # Log validation samples via trainer
+        sample_every_n_steps = int(getattr(self.hparams, "sample_every_n_steps", 100))
+        experiment = getattr(self.logger, "experiment", None)
+        self.algorithm.log_validation_samples(
+            batch=batch,
+            global_step=self.global_step,
+            batch_idx=batch_idx,
+            sample_every_n_steps=sample_every_n_steps,
+            experiment=experiment,
+        )
+
         if metrics:
             payload = {f"val/{key}": value for key, value in metrics.items()}
             self.log_dict(payload, on_step=False, on_epoch=True, logger=True, sync_dist=True)

@@ -565,6 +565,26 @@ class TestValidationStep(unittest.TestCase):
         result_dict = cast(dict, result)
         self.assertIn("fid", result_dict)
 
+    def test_validation_step_delegates_logging_to_trainer(self):
+        """Test that validation_step calls self.algorithm.log_validation_samples."""
+        model = TransformerLightning(
+            autoencoder_path=self.checkpoint_path,
+        )
+        model.setup(stage="fit")
+
+        # Mock self.algorithm
+        model.algorithm.compute_validation_metrics = MagicMock(return_value={})
+        model.algorithm.log_validation_samples = MagicMock()
+
+        batch = {"test": torch.randn(1)}
+        model.validation_step(batch, 0)
+
+        # Verify delegation
+        model.algorithm.log_validation_samples.assert_called_once()
+        args, kwargs = model.algorithm.log_validation_samples.call_args
+        self.assertEqual(kwargs["batch"], batch)
+        self.assertEqual(kwargs["batch_idx"], 0)
+
 
 class TestConfigureOptimizers(unittest.TestCase):
     """Test configure_optimizers method."""
@@ -772,3 +792,151 @@ class TestLogSamples(unittest.TestCase):
 
         # Should not raise
         model._log_samples(generated, "test_modality")
+
+
+class TestTransformerTrainerLogging(unittest.TestCase):
+    """Test TransformerTrainer.log_validation_samples method."""
+
+    def setUp(self):
+        """Create minimal TransformerTrainer for testing."""
+        # Create mock transformer
+        self.mock_transformer = MagicMock()
+
+        # Create mock modality processor
+        self.mock_modality_processor = MagicMock()
+
+        # Create mock scheduler
+        self.mock_scheduler = MagicMock()
+
+        # Create mock autoencoder
+        self.mock_autoencoder = MagicMock()
+
+        # Import TransformerTrainer
+        from prod9.training.algorithms.transformer_trainer import TransformerTrainer
+
+        # Create trainer instance
+        self.trainer = TransformerTrainer(
+            transformer=self.mock_transformer,
+            modality_processor=self.mock_modality_processor,
+            scheduler=self.mock_scheduler,
+            schedule_fn=lambda x: x,
+            autoencoder=self.mock_autoencoder,
+            num_steps=12,
+            mask_value=-100,
+            unconditional_prob=0.1,
+            guidance_scale=1.0,
+            modality_dropout_prob=0.0,
+        )
+
+    def test_log_validation_samples_returns_when_experiment_none(self):
+        """Test log_validation_samples returns early when experiment is None."""
+        batch = {
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+        }
+
+        # Should not raise
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=100,
+            batch_idx=0,
+            sample_every_n_steps=100,
+            experiment=None,
+        )
+
+    def test_log_validation_samples_returns_when_sample_every_n_steps_zero(self):
+        """Test log_validation_samples returns early when sample_every_n_steps <= 0."""
+        batch = {
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+        }
+        mock_experiment = MagicMock()
+
+        # Should not raise with zero
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=100,
+            batch_idx=0,
+            sample_every_n_steps=0,
+            experiment=mock_experiment,
+        )
+
+        # Should not raise with negative
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=100,
+            batch_idx=0,
+            sample_every_n_steps=-5,
+            experiment=mock_experiment,
+        )
+
+        # Verify no add_image calls
+        mock_experiment.add_image.assert_not_called()
+
+    def test_log_validation_samples_returns_when_batch_idx_not_zero(self):
+        """Test log_validation_samples returns early when batch_idx != 0."""
+        batch = {
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+        }
+        mock_experiment = MagicMock()
+
+        # Should not log when batch_idx > 0
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=100,
+            batch_idx=1,
+            sample_every_n_steps=100,
+            experiment=mock_experiment,
+        )
+
+        # Verify no add_image calls
+        mock_experiment.add_image.assert_not_called()
+
+    def test_log_validation_samples_returns_when_cadence_mismatch(self):
+        """Test log_validation_samples returns early when global_step % sample_every_n_steps != 0."""
+        batch = {
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+        }
+        mock_experiment = MagicMock()
+
+        # global_step=99, sample_every_n_steps=100 -> 99 % 100 != 0
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=99,
+            batch_idx=0,
+            sample_every_n_steps=100,
+            experiment=mock_experiment,
+        )
+
+        # Verify no add_image calls
+        mock_experiment.add_image.assert_not_called()
+
+    def test_log_validation_samples_calls_add_image_when_conditions_met(self):
+        """Test log_validation_samples calls add_image exactly 2 times when all conditions are met."""
+        batch = {
+            "target_latent": torch.randn(1, 4, 8, 8, 8),
+            "cond_idx": torch.tensor([0]),
+        }
+        mock_experiment = MagicMock()
+
+        # Mock sample to return generated image
+        generated_image = torch.randn(1, 1, 32, 32, 32)
+        self.trainer.sample = MagicMock(return_value=generated_image)
+
+        # Mock decode_stage_2_outputs to return target image
+        target_image = torch.randn(1, 1, 32, 32, 32)
+        self.mock_autoencoder.decode_stage_2_outputs = MagicMock(return_value=target_image)
+
+        # global_step=100, sample_every_n_steps=100, batch_idx=0 -> should log
+        self.trainer.log_validation_samples(
+            batch=batch,
+            global_step=100,
+            batch_idx=0,
+            sample_every_n_steps=100,
+            experiment=mock_experiment,
+        )
+
+        # Verify add_image called exactly 2 times (generated + target)
+        self.assertEqual(mock_experiment.add_image.call_count, 2)

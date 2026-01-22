@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import Callable, Dict, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Mapping, Optional, cast
 
 import torch
 import torch.nn as nn
@@ -464,3 +464,109 @@ class TransformerTrainer:
         if not isinstance(value, torch.Tensor):
             raise TypeError(f"batch[{key}] must be a torch.Tensor")
         return value
+
+    def log_validation_samples(
+        self,
+        batch: Dict[str, torch.Tensor],
+        global_step: int,
+        batch_idx: int,
+        sample_every_n_steps: int,
+        experiment: Any,
+    ) -> None:
+        """Log validation samples to TensorBoard.
+
+        Args:
+            batch: Validation batch containing latents and indices.
+            global_step: Current global training step.
+            batch_idx: Current batch index within validation epoch.
+            sample_every_n_steps: Cadence for logging samples.
+            experiment: TensorBoard experiment (SummaryWriter).
+        """
+        # Early return conditions
+        if experiment is None:
+            return
+
+        if sample_every_n_steps <= 0:
+            return
+
+        if batch_idx != 0:
+            return
+
+        if global_step % sample_every_n_steps != 0:
+            return
+
+        from prod9.data.datasets.brats import BRATS_MODALITY_KEYS
+
+        # Identify available modalities (same pattern as compute_validation_metrics)
+        available_modalities = []
+        for mod in BRATS_MODALITY_KEYS:
+            if f"{mod}_latent" in batch:
+                available_modalities.append(mod)
+
+        is_brats = len(available_modalities) > 0
+        batch_size = next(iter(batch.values())).shape[0]
+        device = next(iter(batch.values())).device
+
+        if is_brats:
+            # Pick first available as target, rest as sources for deterministic validation
+            target_modality = available_modalities[0]
+            modality = target_modality
+            target_idx_int = BRATS_MODALITY_KEYS.index(target_modality)
+            target_latent = batch[f"{target_modality}_latent"]
+            target_label = torch.full(
+                (batch_size,), target_idx_int, device=device, dtype=torch.long
+            )
+
+            source_candidates = [m for m in available_modalities if m != target_modality]
+
+            batch_labels = [
+                [BRATS_MODALITY_KEYS.index(m) for m in source_candidates] for _ in range(batch_size)
+            ]
+            batch_latents = [
+                [batch[f"{m}_latent"][i] for m in source_candidates] for i in range(batch_size)
+            ]
+        else:
+            modality = "medmnist"
+            target_latent = self._require_tensor(batch, "target_latent")
+            target_label = self._require_tensor(batch, "cond_idx")
+            batch_labels = [[] for _ in range(batch_size)]
+            batch_latents = [[] for _ in range(batch_size)]
+
+        with torch.no_grad():
+            # Generate samples using self.sample with is_latent_input=True
+            generated_image = self.sample(
+                source_images=batch_latents,
+                source_modality_indices=batch_labels,
+                target_modality_idx=target_label,
+                is_latent_input=True,
+            )
+
+            # Decode target latent for comparison
+            target_image = self.autoencoder.decode_stage_2_outputs(target_latent)
+
+            # Log each sample in the batch
+            for i in range(batch_size):
+                # Get middle slice (same pattern as maisi_vae.py)
+                d_mid = generated_image.shape[-1] // 2
+
+                # Extract 2D slices and denormalize from [-1, 1] to [0, 1]
+                gen_2d = (generated_image[i, 0, :, :, d_mid] + 1.0) / 2.0
+                target_2d = (target_image[i, 0, :, :, d_mid] + 1.0) / 2.0
+
+                # Add channel dimension for TensorBoard (HWC format)
+                gen_2d = gen_2d.unsqueeze(-1)  # Shape: [H, W, 1]
+                target_2d = target_2d.unsqueeze(-1)  # Shape: [H, W, 1]
+
+                # Log to TensorBoard with specified tag format
+                experiment.add_image(
+                    f"val/samples/{modality}_generated_{i}",
+                    gen_2d.cpu(),
+                    global_step,
+                    dataformats="HWC",
+                )
+                experiment.add_image(
+                    f"val/samples/{modality}_target_{i}",
+                    target_2d.cpu(),
+                    global_step,
+                    dataformats="HWC",
+                )
