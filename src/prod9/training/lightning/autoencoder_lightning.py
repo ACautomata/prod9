@@ -17,7 +17,7 @@ class AutoencoderLightning(pl.LightningModule):
 
     def __init__(
         self,
-        trainer: AutoencoderTrainer,
+        trainer: Optional[AutoencoderTrainer],
         lr_g: float = 1e-4,
         lr_d: float = 4e-4,
         b1: float = 0.5,
@@ -33,13 +33,14 @@ class AutoencoderLightning(pl.LightningModule):
         self.save_hyperparameters(ignore=["trainer"])
 
         self.algorithm = trainer
-        self.autoencoder = trainer.autoencoder
-        self.discriminator = trainer.discriminator
-        self.loss_fn = trainer.loss_fn
-        self.psnr_metric = trainer.psnr_metric
-        self.ssim_metric = trainer.ssim_metric
-        self.lpips_metric = trainer.lpips_metric
-        self.last_layer = trainer.autoencoder.get_last_layer()
+        if trainer is not None:
+            self.autoencoder = trainer.autoencoder
+            self.discriminator = trainer.discriminator
+            self.loss_fn = trainer.loss_fn
+            self.psnr_metric = trainer.psnr_metric
+            self.ssim_metric = trainer.ssim_metric
+            self.lpips_metric = trainer.lpips_metric
+            self.last_layer = trainer.autoencoder.get_last_layer()
 
         self.warmup_enabled = warmup_enabled
         self.warmup_steps = warmup_steps
@@ -49,6 +50,8 @@ class AutoencoderLightning(pl.LightningModule):
         self._current_backward_branch: Optional[str] = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.algorithm is None:
+            raise RuntimeError("Autoencoder not initialized. Call setup() first.")
         reconstructed, _, _ = self.algorithm.autoencoder(x)
         return reconstructed
 
@@ -120,6 +123,7 @@ class AutoencoderLightning(pl.LightningModule):
             if isinstance(schedulers, list) and optimizer_idx < len(schedulers):
                 if (
                     optimizer_idx == 1
+                    and self.algorithm is not None
                     and self.global_step < self.algorithm.loss_fn.discriminator_iter_start
                 ):
                     pass
@@ -151,6 +155,8 @@ class AutoencoderLightning(pl.LightningModule):
         return float(value)
 
     def configure_optimizers(self):
+        if self.algorithm is None:
+            raise RuntimeError("Autoencoder not initialized. Call setup() first.")
         lr_g = float(getattr(self.hparams, "lr_g", 1e-4))
         lr_d = float(getattr(self.hparams, "lr_d", 4e-4))
         b1 = float(getattr(self.hparams, "b1", 0.5))
@@ -203,6 +209,9 @@ class AutoencoderLightning(pl.LightningModule):
 
     def export_autoencoder(self, output_path: str) -> None:
         import os
+
+        if self.algorithm is None:
+            raise RuntimeError("Autoencoder not initialized. Call setup() first.")
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         torch.save(
