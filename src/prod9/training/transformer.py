@@ -137,8 +137,9 @@ class TransformerLightning(_TransformerLightning):
         self.is_metric = InceptionScore3D(num_classes=num_classes)
 
         # Enable FLOPs calculation in ModelSummary
+        # Transformer expects 5D latent [B, C, H, W, D]
         self.example_input_array = (
-            torch.zeros((1, 128), dtype=torch.long),
+            torch.randn(1, latent_channels, 16, 16, 16),
             None,
             None,
         )

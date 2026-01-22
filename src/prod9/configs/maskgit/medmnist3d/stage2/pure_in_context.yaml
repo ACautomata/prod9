@@ -123,9 +123,9 @@ callbacks:
     every_n_epochs: null
 
   early_stop:
-    enabled: true
+    enabled: false
     monitor: "val/fid"
-    patience: 10
+    patience: 50
     mode: "min"
     min_delta: 0.001
 
