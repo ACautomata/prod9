@@ -136,6 +136,13 @@ class TransformerLightning(_TransformerLightning):
         self.fid = FIDMetric3D()
         self.is_metric = InceptionScore3D(num_classes=num_classes)
 
+        # Enable FLOPs calculation in ModelSummary
+        self.example_input_array = (
+            torch.zeros((1, 128), dtype=torch.long),
+            None,
+            None,
+        )
+
     def _get_autoencoder(self) -> AutoencoderInferenceWrapper:
         if self.autoencoder is None:
             raise RuntimeError("Autoencoder not loaded. Call setup() first.")

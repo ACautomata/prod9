@@ -72,6 +72,13 @@ class MAISIDiffusionLightning(_MAISIDiffusionLightning):
         self.vae: Optional[AutoencoderInferenceWrapper] = None
         self.scheduler: Optional[RectifiedFlowSchedulerRF] = None
 
+        # Example input for ModelSummary
+        self.example_input_array = (
+            torch.randn(1, 4, 16, 16, 16),
+            torch.randint(0, 1000, (1,)),
+            None,
+        )
+
     def setup(self, stage: str) -> None:
         """Load VAE from checkpoint and create diffusion trainer."""
         if self.vae is not None:

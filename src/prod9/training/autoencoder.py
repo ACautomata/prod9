@@ -102,6 +102,7 @@ class AutoencoderLightning(_AutoencoderLightning):
         self.sw_overlap = sw_overlap
         self.sw_batch_size = sw_batch_size
         self.sw_mode = sw_mode
+        self.example_input_array = torch.randn(1, 1, *sw_roi_size)
 
     def setup(self, stage: str) -> None:
         if self.algorithm is not None:

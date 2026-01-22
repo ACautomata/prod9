@@ -97,6 +97,8 @@ class MAISIVAELightning(_MAISIVAELightning):
             fake_3d_ratio=fake_3d_ratio,
         )
 
+        self.example_input_array = torch.randn(1, 1, 64, 64, 64)
+
     def setup(self, stage: str) -> None:
         if self.algorithm is not None:
             return
