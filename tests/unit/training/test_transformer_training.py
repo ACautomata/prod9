@@ -893,15 +893,23 @@ class TestTransformerTrainerLogging(unittest.TestCase):
         # Verify no add_image calls
         mock_experiment.add_image.assert_not_called()
 
-    def test_log_validation_samples_returns_when_cadence_mismatch(self):
-        """Test log_validation_samples returns early when global_step % sample_every_n_steps != 0."""
+    def test_log_validation_samples_logs_regardless_of_cadence(self):
+        """Test log_validation_samples logs samples regardless of global_step (cadence check removed)."""
         batch = {
             "target_latent": torch.randn(1, 4, 8, 8, 8),
             "cond_idx": torch.tensor([0]),
         }
         mock_experiment = MagicMock()
 
-        # global_step=99, sample_every_n_steps=100 -> 99 % 100 != 0
+        # Mock sample to return generated image
+        generated_image = torch.randn(1, 1, 32, 32, 32)
+        self.trainer.sample = MagicMock(return_value=generated_image)
+
+        # Mock decode_stage_2_outputs to return target image
+        target_image = torch.randn(1, 1, 32, 32, 32)
+        self.mock_autoencoder.decode_stage_2_outputs = MagicMock(return_value=target_image)
+
+        # global_step=99, sample_every_n_steps=100 -> should still log (cadence check removed)
         self.trainer.log_validation_samples(
             batch=batch,
             global_step=99,
@@ -910,8 +918,8 @@ class TestTransformerTrainerLogging(unittest.TestCase):
             experiment=mock_experiment,
         )
 
-        # Verify no add_image calls
-        mock_experiment.add_image.assert_not_called()
+        # Verify add_image called exactly 2 times (generated + target)
+        self.assertEqual(mock_experiment.add_image.call_count, 2)
 
     def test_log_validation_samples_calls_add_image_when_conditions_met(self):
         """Test log_validation_samples calls add_image exactly 2 times when all conditions are met."""

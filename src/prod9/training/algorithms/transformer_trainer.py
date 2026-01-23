@@ -493,7 +493,7 @@ class TransformerTrainer:
             batch: Validation batch containing latents and indices.
             global_step: Current global training step.
             batch_idx: Current batch index within validation epoch.
-            sample_every_n_steps: Cadence for logging samples.
+            sample_every_n_steps: Cadence for logging samples (used as on/off switch if <= 0 for validation).
             experiment: TensorBoard experiment (SummaryWriter).
         """
         # Early return conditions
@@ -504,9 +504,6 @@ class TransformerTrainer:
             return
 
         if batch_idx != 0:
-            return
-
-        if global_step % sample_every_n_steps != 0:
             return
 
         from prod9.data.datasets.brats import BRATS_MODALITY_KEYS
