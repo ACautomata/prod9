@@ -5,8 +5,8 @@ from __future__ import annotations
 import random
 from typing import Any, Callable, Dict, Mapping, Optional, cast
 
-import torch
-import torch.nn as nn
+import torch  # pyright: ignore[reportMissingImports]
+import torch.nn as nn  # pyright: ignore[reportMissingImports]
 
 from prod9.autoencoder.inference import AutoencoderInferenceWrapper
 from prod9.generator.maskgit import MaskGiTScheduler
@@ -233,11 +233,18 @@ class TransformerTrainer:
             batch_latents = [[] for _ in range(batch_size)]
 
         with torch.no_grad():
+            target_spatial_shape = target_latent.shape[2:]
+            spatial_shape = (
+                int(target_spatial_shape[0]),
+                int(target_spatial_shape[1]),
+                int(target_spatial_shape[2]),
+            )
             generated_image = self.sample(
                 source_images=batch_latents,
                 source_modality_indices=batch_labels,
                 target_modality_idx=target_label,
                 is_latent_input=True,
+                spatial_shape=spatial_shape,
             )
 
             target_image = self.autoencoder.decode_stage_2_outputs(target_latent)
@@ -258,6 +265,7 @@ class TransformerTrainer:
         target_modality_idx: int | torch.Tensor,
         is_unconditional: bool = False,
         is_latent_input: bool = False,
+        spatial_shape: Optional[tuple[int, int, int]] = None,
     ) -> torch.Tensor:
         """Generate samples with optional multi-source conditioning.
 
@@ -267,6 +275,7 @@ class TransformerTrainer:
             target_modality_idx: Target modality index
             is_unconditional: Unconditional generation flag
             is_latent_input: If True, source_images are already latents
+            spatial_shape: Optional spatial shape (H, W, D) for generation when no latents are provided
 
         Returns:
             Generated image tensor
@@ -336,6 +345,11 @@ class TransformerTrainer:
             c, h, w, d = latents_norm[0][0].shape
             device = latents_norm[0][0].device
             dtype = latents_norm[0][0].dtype
+        elif spatial_shape is not None:
+            c = self.modality_processor.latent_dim
+            h, w, d = spatial_shape
+            device = target_label.device
+            dtype = torch.float32
         else:
             # Fallback to defaults (aligned with CLI)
             c, h, w, d = self.modality_processor.latent_dim, 32, 32, 32
@@ -534,11 +548,18 @@ class TransformerTrainer:
 
         with torch.no_grad():
             # Generate samples using self.sample with is_latent_input=True
+            target_spatial_shape = target_latent.shape[2:]
+            spatial_shape = (
+                int(target_spatial_shape[0]),
+                int(target_spatial_shape[1]),
+                int(target_spatial_shape[2]),
+            )
             generated_image = self.sample(
                 source_images=batch_latents,
                 source_modality_indices=batch_labels,
                 target_modality_idx=target_label,
                 is_latent_input=True,
+                spatial_shape=spatial_shape,
             )
 
             # Decode target latent for comparison
